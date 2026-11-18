@@ -12,3 +12,4 @@ data/
 *.tsbuildinfo
 next-env.d.ts
 /lib/generated/prisma
+helper/dist/
