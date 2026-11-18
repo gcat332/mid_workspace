@@ -173,6 +173,12 @@ describe("listMids / getMid", () => {
     const [m] = await listMids()
     expect(m.status).toEqual({ state: "unknown", pid: null, memoryBytes: null, since: null })
     expect(m.instanceUrl).toBe("https://inst.service-now.com")
+    expect(m.configUrl).toBe("https://cfg.service-now.com")
+  })
+  it("configUrl is null when config.xml is missing", async () => {
+    mkMid("aa")
+    db.mids.push({ id: "2", name: "aa", state: "installed", heapMb: 512, version: null, instanceId: null })
+    expect((await getMid("aa")).configUrl).toBeNull()
   })
   it("getMid: 404 for unknown or removed", async () => {
     db.mids.push({ id: "3", name: "gone", state: "removed", heapMb: 1024, version: null, instanceId: null })

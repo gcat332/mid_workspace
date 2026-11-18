@@ -14,6 +14,8 @@ import { readHeapMb } from "./wrapper-conf"
 export type MidSummary = {
   name: string
   instanceUrl: string | null
+  /** config.xml url alone (instanceUrl prefers the linked Instance). */
+  configUrl: string | null
   midName: string | null
   heapMb: number
   version: string | null
@@ -112,6 +114,7 @@ async function summarize(row: Row, knownJob?: JobSummary | null): Promise<MidSum
   return {
     name: row.name,
     instanceUrl: inst?.url ?? normalizeUrl(params.url),
+    configUrl: normalizeUrl(params.url),
     midName: params.name ?? null,
     heapMb: row.heapMb,
     version: row.version,
