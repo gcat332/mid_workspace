@@ -103,7 +103,9 @@ MID แต่ละตัว = systemd unit  midhub-mid-<name>.service  รั�
 
 ## 5. หน้าจอและการใช้งาน
 
-ภาษาของ UI: ภาษาไทยเป็นหลัก ศัพท์ ServiceNow ใช้ทับศัพท์ [ผู้ออกแบบ] · หน้าตาให้ใกล้กับ AgentHub [ผู้ออกแบบ]
+ภาษาของ UI: ภาษาไทยเป็นหลัก ศัพท์ ServiceNow ใช้ทับศัพท์ [ผู้ออกแบบ]
+
+**หน้าตาเหมือน AgentHub เปลี่ยนแค่ชื่อเป็น "BSM MIDHub"** [ผู้ใช้ 2026-11-18]: ใช้ design system ของ AgentHub (`DESIGN.md` และ token ใน `app/globals.css` ของ AgentHub: สี brand navy/sky, palette blue/gray ที่ override, ฟอนต์ Inter + Noto Sans Thai, radius, ปุ่ม `btn-primary`, header แบบ `AppChrome`, dark mode) ยกเว้นธีมเทศกาลและ mascot — ภาษาของข้อความระบบยังเป็นไทยตามข้อข้างบน [ผู้ออกแบบ: ตีความ "ดีไซน์" เป็นหน้าตา ไม่ใช่ภาษา แก้ได้]
 
 ### 5.1 หน้าหลัก: รายการ + แผงรายละเอียด [ผู้ใช้เลือกแบบ B]
 
@@ -230,6 +232,7 @@ MID แต่ละตัว = systemd unit  midhub-mid-<name>.service  รั�
 - เพิ่ม block `handle /midhub/*` ใน Caddyfile ของ AgentHub โดยใช้ `header_up X-Forwarded-For {remote_host}` เหมือนเดิม
 - `deploy/install.sh` สร้าง user/group (`bsmmidhub`, `midsvc`, `midhub`) และโฟลเดอร์ใน `/opt/midhub` แล้วติดตั้ง unit ทั้งสอง
 - `.env.local`: `DATABASE_URL`, `JWT_SECRET` (ของ MidHub เอง), `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `MIDHUB_VAULT_KEY`, `MIDHUB_ROOT=/opt/midhub`, `MIDHUB_MAX_RUNNING=4`
+- **pipeline แบบเดียวกับ AgentHub** [ผู้ใช้ 2026-11-18]: `scripts/build.sh` (next build + helper build), `scripts/deploy.sh` (git pull --ff-only → npm ci → build → prisma migrate deploy → install helper copy → restart services, idempotent) และ `deploy/golive-gates.sh` (ตรวจอัตโนมัติ PASS/FAIL/MANUAL: services active, helper socket 0660, protected_hardlinks, SQLite WAL, native modules, /midhub ตอบ login, /midhub/api/agent ปิดจากภายนอก, AgentHub ยังตอบ)
 
 ## 10. ลำดับการทำ
 
