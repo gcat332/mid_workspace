@@ -5,8 +5,22 @@ Base URL on the host: `http://127.0.0.1:3100/midhub/api/agent/` (AgentHub's `MID
 Spec: `docs/superpowers/specs/2026-11-18-midhub-agenthub-integration-design.md` (section 5). The AgentHub
 side is described in `docs/superpowers/plans/2026-11-18-agenthub-midhub-patch.md`.
 
-Error bodies are always JSON `{ "code": "...", "message": "<Thai cause + fix>", "detail"?: "..." }`.
-Pass the `message` to the user unchanged; it is written for them.
+MidHub's own errors are JSON `{ "code": "...", "message": "<Thai cause + fix>", "detail"?: "...", "checks"?: [...] }`
+(`checks` only on `agent_check_failed`). Pass the `message` to the user unchanged; it is written for them.
+
+Calls made through AgentHub's route can also fail inside AgentHub itself, before MidHub is reached. Those errors are
+`{ "error": "..." }` (no `code`). Java must tell the two apart by the presence of `code`: `code` = MidHub answered;
+only `error` = AgentHub's proxy answered.
+
+| HTTP | Body from AgentHub's proxy route | Meaning |
+|---|---|---|
+| 401 | `{ "error": ... }` | bearer token missing, invalid, expired, or issued for a different taskId |
+| 403 | `{ "error": ... }` | the actor no longer has access to the task |
+| 404 | `{ "error": ... }` | path not on the allowlist (`mids`, `mids/<name>/files|logs|restart`), or the feature is off in AgentHub |
+| 502 | `{ "error": "MidHub is not running" }` | connection to MidHub refused |
+| 504 | `{ "error": "MidHub did not respond" }` | no answer within 120 s |
+
+Note a 404 can come from either side: `{ "error" }` = AgentHub, `{ "code": "not_found" }` = MidHub.
 
 ## 1. Authentication headers
 
@@ -16,7 +30,7 @@ Every request must carry all of these (missing or invalid = rejected before anyt
 |---|---|
 | `X-MidHub-Agent-Secret` | `MIDHUB_AGENT_SECRET` (same value in both systems, >= 32 chars) |
 | `X-MidHub-Actor-Email` | email of the AgentHub user who started the run (lowercase). Must be a MidHub user and not locked |
-| `X-MidHub-Session-Id` | AgentHub `taskId` (parent taskId for a sub-task). Required, non-empty, printable ASCII, <= 128 chars; recorded in the audit log |
+| `X-MidHub-Session-Id` | AgentHub `taskId` (parent taskId for a sub-task). Required, non-empty after trimming, <= 128 chars, printable ASCII without spaces (characters 0x21-0x7e only); recorded in the audit log |
 | `X-MidHub-Session-Instances` | optional, comma-separated `https://<x>.service-now.com/` URLs the session works with (server-side computed by AgentHub, never from the agent). Invalid entries are dropped. Empty = `session_instance` check fails |
 
 Rules:
@@ -89,10 +103,16 @@ curl -s -H "Authorization: Bearer $AGENT_MIDHUB_TOKEN" http://127.0.0.1:3000/api
 { "mids": [ {
   "name": "poc-a", "snName": "poc-a-mid", "instanceUrl": "https://dev12345.service-now.com/",
   "status": "ทำงานอยู่", "usable": false,
-  "checks": [ { "id": "user_registered", "ok": true }, { "id": "agent_access", "ok": false, "message": "MID นี้ยังไม่เปิดให้ AgentHub แก้ ..." } ]
+  "checks": [
+    { "id": "user_registered", "ok": true },
+    { "id": "session_instance", "ok": true },
+    { "id": "instance_match", "ok": true },
+    { "id": "agent_access", "ok": false, "message": "MID นี้ยังไม่เปิดให้ AgentHub แก้ ให้เปิดในหน้า MidHub แท็บภาพรวม" },
+    { "id": "mid_ready", "ok": true }
+  ]
 } ] }
 ```
-(`status` is the Thai status label shown in the MidHub UI; `instanceUrl` may be `null`.)
+`checks` always has all five entries in this fixed order. (`status` is the Thai status label shown in the MidHub UI; `instanceUrl` may be `null`.)
 
 ### GET mids/&lt;name&gt;/files?path=
 
@@ -104,8 +124,10 @@ curl -s -H "Authorization: Bearer $AGENT_MIDHUB_TOKEN" \
 ```
 ```json
 { "entries": [ { "name": "foo.jar", "type": "file", "size": 1234, "mtime": "2026-11-18T10:00:00.000Z",
-  "readOnly": false, "symlink": false, "locked": false } ], "readOnly": false }
+  "readOnly": false, "symlink": false, "locked": false, "secret": false, "config": false } ], "readOnly": false }
 ```
+`readOnly`, `symlink`, `locked`, `secret` and `config` are booleans: `locked` = rename/delete always refused; `secret` = contents never
+served (config.xml); `config` = managed config file, edited in the MidHub config tab.
 `readOnly` (top level) says the directory itself cannot be modified.
 
 ### GET mids/&lt;name&gt;/files?path=&content=1
@@ -203,6 +225,7 @@ curl -s -X POST -H "Authorization: Bearer $AGENT_MIDHUB_TOKEN" \
 | `agent_user` | 403 | actor email has no (or a locked) MidHub account |
 | `agent_check_failed` | 403 | checklist failed; body has `checks` |
 | `invalid_name` | 400 | MID name syntax |
+| (405, no body code) | 405 | method not supported on the route (e.g. PUT on `mids`, GET on `restart`) |
 | `invalid_request` | 400 | malformed JSON/params, unknown `op`, bad `file`, or upload body length != Content-Length |
 | `invalid_filename` | 400 | bad file/folder name |
 | `path_outside` | 400 | path escapes the MID folder |
@@ -219,6 +242,7 @@ curl -s -X POST -H "Authorization: Bearer $AGENT_MIDHUB_TOKEN" \
 | `quota_full` | 409 | restart would exceed the running-MID limit (`MIDHUB_MAX_RUNNING`) |
 | `low_memory` | 409 | not enough free RAM to start the MID |
 | `busy` | 429 (upload) / 503 (helper) | 2 agent uploads already running (429) / helper busy (503); retry later |
+| `not_a_mid`, `invalid_xml` | 400 | not raised by agent routes in practice (MID folder/config validation used by other MidHub flows) |
 | `helper_down` | 503 | root helper not responding |
 | `systemctl_failed`, `internal` | 500 | helper/system failure; `detail` has more |
 
