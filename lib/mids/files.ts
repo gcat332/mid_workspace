@@ -92,6 +92,7 @@ function translate(e: unknown): never {
   const code = (e as NodeJS.ErrnoException)?.code
   switch (code) {
     case "ENOENT": throw new MidError("not_found")
+    case "ENXIO": throw new MidError("invalid_request") // FIFO/device opened non-blocking
     case "ELOOP": case "ENOTDIR": throw new MidError("path_outside")
     case "EACCES": case "EPERM": throw new MidError("no_permission")
     case "EEXIST": case "EISDIR": case "ENOTEMPTY": throw new MidError("conflict")
@@ -156,6 +157,8 @@ export function listDir(name: string, rel: string): Promise<FileEntry[]> {
           const symlink = l.isSymbolicLink()
           let readOnly = isRo(c, abs) || c.configFiles.includes(abs)
           if (symlink) {
+            // Metadata only: the target is resolved then stat'ed by path, so a racing swap can leak size/mtime/type
+            // of an in-sandbox-checked name at worst; contents are never read here.
             // Shown only when the link stays inside this MID; never editable through the link.
             const target = await resolveMidPath(name, path.posix.join(rel.replace(/\\/g, "/"), n))
             st = await fs.promises.stat(target)

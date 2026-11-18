@@ -2,6 +2,8 @@
 // /proc/self/fd, so the check applies to the object that is actually used (not to a name that a
 // concurrent writer, e.g. the MID process, could re-point between check and use).
 //
+// Assumption: reads (not writes) of a hardlinked file are not nlink-checked; this relies on the kernel's
+// fs.protected_hardlinks=1 (default) so midsvc cannot hardlink files it does not own into the tree.
 // Residual races that are inherent in Node/POSIX and NOT closed here:
 //  - rename() has no RENAME_NOREPLACE: a target created between our exists-check and the rename is overwritten.
 //  - Writes are in place and not atomic: readers (the running MID) may see a truncated/partial file.
@@ -21,16 +23,19 @@ export const fdPath = (h: FileHandle, name?: string): string => `/proc/self/fd/$
 async function verify(h: FileHandle, expected: string | undefined, check: Check): Promise<void> {
   let real: string
   try {
-    real = await fs.promises.realpath(fdPath(h))
+    real = await fs.promises.readlink(fdPath(h)) // kernel d_path: canonical, no symlinks
   } catch {
     throw new MidError("path_outside")
   }
+  if (real.endsWith(" (deleted)")) throw new MidError("path_outside")
   if (expected !== undefined && real !== expected) throw new MidError("path_outside")
   check(real)
 }
 
 async function openVerified(p: string, flags: number, mode: number | undefined, expected: string | undefined, check: Check): Promise<FileHandle> {
-  const h = await fs.promises.open(p, flags | C.O_NOFOLLOW, mode)
+  // O_NONBLOCK|O_NOCTTY: opening a FIFO/device must never block a libuv thread; the fstat type check rejects it afterwards.
+  // (No effect on later reads/writes of regular files.)
+  const h = await fs.promises.open(p, flags | C.O_NOFOLLOW | C.O_NONBLOCK | C.O_NOCTTY, mode)
   try {
     await verify(h, expected, check)
     return h

@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -298,4 +299,16 @@ describe("other hardening", () => {
     await upload("m1", "work", "big", Buffer.alloc(50 * 1024 * 1024))
     expect(fs.statSync(path.join(m, "work/big")).size).toBe(52428800)
   })
+})
+
+describe("FIFO at the target is refused promptly (no hang)", () => {
+  const fifo = () => { const f = path.join(m, "work/pipe"); execFileSync("mkfifo", [f]); return "work/pipe" }
+  it("readText", async () => { await rejects(readText("m1", fifo()), "invalid_request") }, 2000)
+  it("openDownload", async () => { await rejects(openDownload("m1", fifo()), "invalid_request") }, 2000)
+  it("upload overwrite", async () => { await rejects(upload("m1", "work", path.basename(fifo()), Buffer.from("x")), "invalid_request") }, 2000)
+  it("writeText", async () => { await rejects(writeText("m1", fifo(), "x", "h"), "invalid_request") }, 2000)
+  it("listing still works with a FIFO present", async () => {
+    fifo()
+    expect((await listDir("m1", "work")).map((e) => e.name)).not.toContain("pipe")
+  }, 2000)
 })
