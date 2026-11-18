@@ -32,6 +32,10 @@ const ERRORS = {
   instance_auth: [400, "login ไม่ผ่าน: ตรวจ MID user/password"],
   instance_role: [400, "login ได้แต่ user ไม่มีสิทธิ์: ตรวจว่า user มี role mid_server"],
   instance_unreachable: [502, "ติดต่อ instance ไม่ได้: ตรวจ URL หรือว่า instance ตื่นอยู่ (demo instance อาจ hibernate)"],
+  job_active: [409, "MID นี้มีงานที่กำลังทำอยู่ รอให้เสร็จหรือยกเลิกก่อน"],
+  job_running: [409, "งานกำลังทำงานอยู่ ยกเลิกไม่ได้ในตอนนี้"],
+  job_not_found: [404, "ไม่พบงานที่ระบุ รีเฟรชหน้าแล้วลองใหม่"],
+  forbidden: [403, "ไม่มีสิทธิ์ทำรายการนี้ ติดต่อ Admin"],
   conflict: [409, "การดำเนินการนี้ขัดแย้งกับสถานะปัจจุบัน รีเฟรชหน้าแล้วลองใหม่"],
 } as const satisfies Record<string, readonly [number, string]>
 
