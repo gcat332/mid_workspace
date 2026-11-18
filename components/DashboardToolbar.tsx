@@ -1,6 +1,7 @@
 "use client"
 
 import { formatBytes, quotaView, type HostView, type MidView } from "@/lib/ui/status-view"
+import { MIN_FREE_BYTES } from "@/lib/mids/layout"
 import { ghostBtnCls } from "@/lib/ui/classes"
 
 const GIB = 1024 ** 3
@@ -25,6 +26,19 @@ export function DashboardToolbar({ host, mids, onImport }: Props) {
             {q.text}
           </span>
           <span className="min-w-0 text-sm text-gray-700">RAM: MID ใช้ {formatBytes(midRam)} / ทั้งเครื่อง {formatBytes(host.totalBytes)} (ว่าง {formatBytes(host.availableBytes)})</span>
+          {host.disk && (
+            <span
+              title={host.disk.usage ? `MID ${formatBytes(host.disk.usage.mids)} · แพ็กเกจ ${formatBytes(host.disk.usage.packages)} · archive ${formatBytes(host.disk.usage.archive)}` : "ไม่สามารถอ่านการใช้พื้นที่แยกตามโฟลเดอร์ได้"}
+              className={`rounded-full px-3 py-1 text-sm font-medium ${host.disk.freeBytes < MIN_FREE_BYTES ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}`}
+            >
+              ดิสก์ว่าง {(host.disk.freeBytes / GIB).toFixed(1)} GB
+            </span>
+          )}
+          {host.disk?.usage && (
+            <span className="min-w-0 text-xs text-gray-600">
+              MID {formatBytes(host.disk.usage.mids)} · แพ็กเกจ {formatBytes(host.disk.usage.packages)} · archive {formatBytes(host.disk.usage.archive)}
+            </span>
+          )}
           {lowRam && <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700">RAM ว่างเหลือน้อย</span>}
         </>
       )}

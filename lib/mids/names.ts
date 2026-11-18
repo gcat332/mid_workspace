@@ -37,6 +37,9 @@ const ERRORS = {
   job_not_found: [404, "ไม่พบงานที่ระบุ รีเฟรชหน้าแล้วลองใหม่"],
   forbidden: [403, "ต้องเป็น Admin จึงจะทำรายการนี้ได้"], // same text as FORBIDDEN_MESSAGE in lib/auth/helpers.ts
   stage_timeout: [504, "ขั้นตอนนี้ใช้เวลานานเกินกำหนด งานถูกหยุด กด ลองใหม่ หรือแจ้ง Admin"],
+  package_not_found: [502, "ไม่พบไฟล์ MID สำหรับ build นี้บน install.service-now.com ตรวจ buildstamp"],
+  package_download: [502, "ดาวน์โหลดไฟล์ MID ไม่สำเร็จ ลองใหม่"],
+  disk_low: [507, "พื้นที่ดิสก์เหลือน้อยกว่า 2 GB ลบ MID ที่ไม่ใช้ก่อน"],
   conflict: [409, "การดำเนินการนี้ขัดแย้งกับสถานะปัจจุบัน รีเฟรชหน้าแล้วลองใหม่"],
 } as const satisfies Record<string, readonly [number, string]>
 

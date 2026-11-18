@@ -11,6 +11,8 @@ vi.mock("@/lib/auth/helpers", async (orig) => ({
 const readHostMemory = vi.fn(async () => ({ totalBytes: 8000, availableBytes: 3000 }))
 const readSlotUsage = vi.fn(async () => ({ running: 2, quotaUsed: 3 }))
 vi.mock("@/lib/mids/status", () => ({ readHostMemory, readSlotUsage }))
+const disk = { freeBytes: 5e9, totalBytes: 9e9, usage: { mids: 1, packages: 2, archive: 3 } }
+vi.mock("@/lib/mids/packages", () => ({ diskStatus: vi.fn(async () => disk) }))
 vi.mock("@/lib/env", () => ({ env: { maxRunning: 4 } }))
 
 beforeEach(() => {
@@ -30,5 +32,5 @@ it("returns memory, running, quotaUsed and maxRunning", async () => {
   const { GET } = await import("./route")
   const res = await GET()
   expect(res.status).toBe(200)
-  expect(await res.json()).toEqual({ totalBytes: 8000, availableBytes: 3000, running: 2, quotaUsed: 3, maxRunning: 4 })
+  expect(await res.json()).toEqual({ totalBytes: 8000, availableBytes: 3000, running: 2, quotaUsed: 3, maxRunning: 4, disk })
 })
