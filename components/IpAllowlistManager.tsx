@@ -33,22 +33,39 @@ export function IpAllowlistManager() {
   async function add() {
     setErr("")
     if (!keepsMeIn([...entries.map((e) => e.cidr), cidr.trim()])) return
-    const res = await fetch(API, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cidr, note }),
-    })
-    if (!res.ok) {
-      const j = (await res.json().catch(() => ({}))) as { error?: string }
-      setErr(j.error ?? "เพิ่มรายการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
-      return
+    try {
+      const res = await fetch(API, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cidr, note }),
+      })
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        setErr(j.error ?? (res.status === 401 || res.status === 403
+          ? "ไม่มีสิทธิ์เพิ่มรายการ กรุณาเข้าสู่ระบบด้วยบัญชี Admin อีกครั้ง"
+          : "เพิ่มรายการไม่สำเร็จ เซิร์ฟเวอร์ขัดข้อง กรุณาลองใหม่อีกครั้ง"))
+        return
+      }
+      setCidr(""); setNote(""); load()
+    } catch {
+      setErr("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่")
     }
-    setCidr(""); setNote(""); load()
   }
 
   async function remove(e: Entry) {
+    setErr("")
     if (!window.confirm(`ลบ ${e.cidr} ออกจากรายการ?`)) return
     if (!keepsMeIn(entries.filter((x) => x.id !== e.id).map((x) => x.cidr))) return
-    await fetch(`${API}?id=${encodeURIComponent(e.id)}`, { method: "DELETE" })
-    load()
+    try {
+      const res = await fetch(`${API}?id=${encodeURIComponent(e.id)}`, { method: "DELETE" })
+      if (!res.ok) {
+        setErr(res.status === 401 || res.status === 403
+          ? "ไม่มีสิทธิ์ลบรายการ กรุณาเข้าสู่ระบบด้วยบัญชี Admin อีกครั้ง"
+          : "ลบรายการไม่สำเร็จ เซิร์ฟเวอร์ขัดข้อง กรุณาลองใหม่อีกครั้ง")
+        return
+      }
+      load()
+    } catch {
+      setErr("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่")
+    }
   }
 
   return (

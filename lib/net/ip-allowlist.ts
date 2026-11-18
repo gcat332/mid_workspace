@@ -3,17 +3,12 @@ import { isLoopback, wouldAllow } from "@/lib/net/cidr"
 
 export { isValidCidr, inCidr, isLoopback, clientIpFrom, wouldAllow } from "@/lib/net/cidr"
 
-// Read straight from SQLite via prisma: Next 16's proxy runs on the Node runtime (same as AgentHub).
-let cache: { cidrs: string[]; at: number } | null = null
-const TTL_MS = 30_000
-
-export function bustAllowlistCache(): void { cache = null }
-
+// Read straight from SQLite via prisma on every request (Next 16's proxy runs on the Node runtime,
+// same as AgentHub). Deliberately NOT cached: the proxy and the admin route can be separate module
+// instances, so a per-process cache would leave a change (or a lockout fix) stale for its TTL.
 async function loadCidrs(): Promise<string[]> {
-  if (cache && Date.now() - cache.at < TTL_MS) return cache.cidrs
   const rows = await prisma.ipAllowlist.findMany({ select: { cidr: true } })
-  cache = { cidrs: rows.map((r) => r.cidr), at: Date.now() }
-  return cache.cidrs
+  return rows.map((r) => r.cidr)
 }
 
 // Loopback always allowed; an empty list is allow-all until configured.

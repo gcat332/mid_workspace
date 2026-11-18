@@ -7,7 +7,6 @@ vi.mock("@/lib/db/client", () => ({
   prisma: { ipAllowlist: { findMany: vi.fn(async () => cidrs.map((cidr) => ({ cidr }))) } },
 }))
 
-import { bustAllowlistCache } from "@/lib/net/ip-allowlist"
 import { proxy } from "@/proxy"
 
 // Real Next strips basePath from request.nextUrl.pathname in the proxy; NextRequest only does the
@@ -25,7 +24,6 @@ const withCookie = async (name: string, headers: Record<string, string> = {}) =>
 
 beforeEach(() => {
   cidrs = []
-  bustAllowlistCache()
 })
 
 describe("IP allowlist", () => {
@@ -102,6 +100,20 @@ describe("auth gate", () => {
     expect(set).toContain("midhub_session=")
     expect(set).toContain("Path=/midhub")
     expect(set).toContain("Max-Age=14400")
+  })
+
+  it("does not re-issue the session cookie on logout (it would fight the route's clearing cookie)", async () => {
+    const res = await proxy(req("/api/auth/logout", { method: "POST", headers: await withCookie("midhub_session") }))
+    expect(res.status).toBe(200)
+    expect(res.headers.get("set-cookie")).toBeNull()
+  })
+
+  it("picks up allowlist changes immediately (no stale cache)", async () => {
+    const h = { "x-forwarded-for": "8.8.8.8" }
+    cidrs = ["10.0.0.0/8"]
+    expect((await proxy(req("/api/x", { headers: h }))).status).toBe(403)
+    cidrs = []
+    expect((await proxy(req("/api/x", { headers: h }))).status).toBe(401)
   })
 
   it.each(["/login", "/api/auth/login", "/api/auth/idp", "/api/auth/oidc/start", "/api/auth/oidc/callback"])(

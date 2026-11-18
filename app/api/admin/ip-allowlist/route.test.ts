@@ -70,3 +70,9 @@ it("DELETE removes by id", async () => {
   expect(deleteMany).toHaveBeenCalledWith({ where: { id: "r1" } })
   expect((await DELETE(new Request("http://x/", { method: "DELETE" }))).status).toBe(400)
 })
+
+it("POST 409s when the unique constraint is hit concurrently (P2002)", async () => {
+  const { POST } = await import("./route")
+  create.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002" }))
+  expect((await POST(post({ cidr: "10.0.0.0/8" }))).status).toBe(409)
+})

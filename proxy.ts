@@ -61,6 +61,8 @@ export async function proxy(req: NextRequest) {
     return res
   }
   const res = NextResponse.next()
+  // Logout clears the cookie itself; a fresh token here could win the Set-Cookie race and undo it.
+  if (pathname === "/api/auth/logout") return res
   await slideSession(res, payload)
   return res
 }

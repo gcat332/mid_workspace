@@ -7,7 +7,7 @@ function parseV4(s: string): bigint | null {
   if (parts.length !== 4) return null
   let n = 0n
   for (const p of parts) {
-    if (!/^\d{1,3}$/.test(p) || Number(p) > 255) return null
+    if (!/^(0|[1-9]\d{0,2})$/.test(p) || Number(p) > 255) return null
     n = (n << 8n) | BigInt(p)
   }
   return n

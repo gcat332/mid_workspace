@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireAdmin, responseOrRethrow } from "@/lib/auth/helpers"
 import { prisma } from "@/lib/db/client"
-import { bustAllowlistCache, isValidCidr, clientIpFrom } from "@/lib/net/ip-allowlist"
+import { isValidCidr, clientIpFrom } from "@/lib/net/ip-allowlist"
 
 // Admin-only. GET also returns the caller's IP as the gate sees it, so the UI can warn
 // before a change that would lock the admin out.
@@ -22,9 +22,14 @@ export async function POST(req: Request) {
   if (await prisma.ipAllowlist.findUnique({ where: { cidr } })) {
     return NextResponse.json({ error: "มีรายการนี้อยู่แล้ว" }, { status: 409 })
   }
-  const row = await prisma.ipAllowlist.create({ data: { cidr, note } })
-  bustAllowlistCache()
-  return NextResponse.json(row, { status: 201 })
+  try {
+    const row = await prisma.ipAllowlist.create({ data: { cidr, note } })
+    return NextResponse.json(row, { status: 201 })
+  } catch (e) {
+    // Lost a race with a concurrent insert of the same CIDR (unique constraint).
+    if ((e as { code?: string }).code === "P2002") return NextResponse.json({ error: "มีรายการนี้อยู่แล้ว" }, { status: 409 })
+    throw e
+  }
 }
 
 // DELETE /api/admin/ip-allowlist?id=<id>
@@ -33,6 +38,5 @@ export async function DELETE(req: Request) {
   const id = new URL(req.url).searchParams.get("id")
   if (!id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 })
   await prisma.ipAllowlist.deleteMany({ where: { id } })
-  bustAllowlistCache()
   return NextResponse.json({ ok: true })
 }
