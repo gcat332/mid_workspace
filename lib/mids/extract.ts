@@ -11,7 +11,8 @@ import { createFileIn, fdPath, insideCheck, lstatIn, mkdirIn, openDir, readFileV
 import { MidError, midRoot, validateMidName } from "./names"
 
 const run = promisify(execFile)
-const ENV = { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" } // explicit: no UNZIP/ZIPINFO leakage as NodeJS.ProcessEnv
+// explicit env: no UNZIP/ZIPINFO leakage
+const ENV = { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" } as NodeJS.ProcessEnv
 export const MAX_ENTRIES = 20000
 export const MAX_UNCOMPRESSED = 2 * 1024 ** 3
 const MARKER = ".midhub-installed-by"
