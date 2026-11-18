@@ -6,6 +6,7 @@ import { CreateMidWizard } from "./CreateMidWizard"
 import { ImportMidDialog } from "./ImportMidDialog"
 import { MidList } from "./MidList"
 import { MidPanel } from "./MidPanel"
+import { UninstallDialog } from "./UninstallDialog"
 import { AppChrome } from "./AppChrome"
 import { DashboardToolbar } from "./DashboardToolbar"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
@@ -35,6 +36,7 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
   const [midsErr, setMidsErr] = useState<ApiError | null>(null)
   const [hostErr, setHostErr] = useState<ApiError | null>(null)
   const [importing, setImporting] = useState(false)
+  const [uninstalling, setUninstalling] = useState<MidView | null>(null)
 
   const latest = useRef(createLatest())
 
@@ -135,7 +137,7 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
             </nav>
             <div ref={panelRef} className="min-w-0 scroll-mt-4 rounded-xl border border-gray-200 bg-white dark:bg-neutral-800 p-4 sm:p-5">
               {current
-                ? <MidPanel key={current.name} mid={current} host={host} onChanged={() => void refresh()} />
+                ? <MidPanel key={current.name} mid={current} host={host} isAdmin={isAdmin} onChanged={() => void refresh()} onUninstall={setUninstalling} />
                 : <p className="text-sm text-gray-500">เลือก MID จากรายการเพื่อดูรายละเอียด</p>}
             </div>
           </div>
@@ -144,6 +146,10 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
       {creating && (
         <CreateMidWizard isAdmin={isAdmin} host={host} mids={mids ?? []} jobId={jobParam}
           onJobChange={setWizardJob} onOpenMid={openCreated} onClose={closeWizard} />
+      )}
+      {uninstalling && (
+        <UninstallDialog mid={uninstalling} onStarted={() => void refresh()}
+          onClose={() => { setUninstalling(null); void refresh() }} />
       )}
       {importing && (
         <ImportMidDialog onCancel={() => setImporting(false)}

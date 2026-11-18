@@ -1,4 +1,4 @@
-import { statusView, type MidView } from "@/lib/ui/status-view"
+import { failedJobShown, jobIsActive, statusView, type MidView } from "@/lib/ui/status-view"
 
 type Props = { mids: MidView[]; selected: string | null; onSelect: (name: string) => void }
 
@@ -8,6 +8,7 @@ export function MidList({ mids, selected, onSelect }: Props) {
       {mids.map((m) => {
         const sv = statusView(m)
         const active = m.name === selected
+        const jobNote = jobIsActive(m) || failedJobShown(m)
         return (
           <li key={m.name}>
             <button type="button" onClick={() => onSelect(m.name)} aria-current={active ? "true" : undefined}
@@ -15,7 +16,7 @@ export function MidList({ mids, selected, onSelect }: Props) {
               <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
                 <span aria-hidden>{sv.icon}</span>
                 <span className="truncate">{m.name}</span>
-                <span className="sr-only">{sv.label}</span>
+                <span className={jobNote ? "shrink-0 text-xs font-normal text-gray-600" : "sr-only"}>{sv.label}</span>
               </span>
               <span className="mt-0.5 block truncate pl-6 text-xs text-gray-500">{m.instanceUrl ?? "ไม่ระบุ instance"}</span>
             </button>

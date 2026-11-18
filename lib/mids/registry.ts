@@ -19,7 +19,7 @@ export type MidSummary = {
   version: string | null
   state: string
   status: ServiceStatus
-  job: { id: string; kind: string; stage: string; status: string } | null
+  job: { id: string; kind: string; stage: string; status: string; createdAt: Date } | null
 }
 
 const UNKNOWN: ServiceStatus = { state: "unknown", pid: null, memoryBytes: null, since: null }
@@ -97,7 +97,7 @@ async function summarize(row: Row, knownJob?: JobSummary | null): Promise<MidSum
       : prisma.job.findFirst({
           where: { midName: row.name },
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          select: { id: true, kind: true, stage: true, status: true },
+          select: { id: true, kind: true, stage: true, status: true, createdAt: true },
         }),
   ])
   let params: Record<string, string> = {}
@@ -126,7 +126,7 @@ export async function listMids(): Promise<MidSummary[]> {
   const jobs = await prisma.job.findMany({
     where: { midName: { in: rows.map((r) => r.name) } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { id: true, kind: true, stage: true, status: true, midName: true },
+    select: { id: true, kind: true, stage: true, status: true, createdAt: true, midName: true },
   })
   const latest = new Map<string, JobSummary>()
   for (const { midName, ...j } of jobs) if (!latest.has(midName)) latest.set(midName, j)

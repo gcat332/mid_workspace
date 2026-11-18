@@ -30,9 +30,9 @@ function size(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
-type Props = { midName: string; /** Switch the MID panel to the config tab (config.xml / wrapper-override.conf rows). */ onOpenConfig: () => void }
+type Props = { midName: string; /** Non-null while a lifecycle job runs: writes are disabled and this is the visible reason. */ busyReason?: string | null; /** Switch the MID panel to the config tab (config.xml / wrapper-override.conf rows). */ onOpenConfig: () => void }
 
-export function FilesTab({ midName, onOpenConfig }: Props) {
+export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   const dark = useIsDark()
   const base = `/mids/${encodeURIComponent(midName)}/files`
   const [dir, setDir] = useState("")
@@ -67,6 +67,7 @@ export function FilesTab({ midName, onOpenConfig }: Props) {
 
   /** `onErr` decides where a failure is shown (the open modal, or the page) so it never appears twice. */
   async function run(fn: () => Promise<Response>, onErr: (e: ApiError) => void = setErr): Promise<boolean> {
+    if (busyReason) { onErr({ message: busyReason }); return false }
     setBusy(true); setErr(null); setModalErr(null)
     try {
       const res = await fn()
@@ -90,6 +91,7 @@ export function FilesTab({ midName, onOpenConfig }: Props) {
 
   async function save() {
     if (!open) return
+    if (busyReason) { setErr({ message: busyReason }); return }
     setBusy(true); setErr(null); setSaved(false)
     try {
       const res = await apiFetch(base, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: open.path, content: open.draft, baseHash: open.hash }) })
@@ -136,9 +138,10 @@ export function FilesTab({ midName, onOpenConfig }: Props) {
           {saved && !dirty && <span role="status" className="text-sm text-emerald-700">บันทึกแล้ว</span>}
           {open.readOnly
             ? <span className="ml-auto text-xs text-gray-500">🔒 อ่านอย่างเดียว</span>
-            : <button type="button" disabled={busy || !dirty} onClick={() => void save()}
+            : <button type="button" disabled={busy || !dirty || !!busyReason} onClick={() => void save()}
                 className={`btn-primary ml-auto px-3 py-1.5 text-sm`}>{busy ? "กำลังบันทึก..." : "บันทึก"}</button>}
         </div>
+        {busyReason && <p role="status" className="text-sm text-amber-700">{busyReason} — แก้ไขไฟล์ไม่ได้จนกว่างานจะเสร็จ</p>}
         {err && (
           <div className="space-y-2">
             <ErrorNotice error={err} />
@@ -172,11 +175,12 @@ export function FilesTab({ midName, onOpenConfig }: Props) {
         </nav>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <input ref={fileInput} type="file" hidden aria-label="เลือกไฟล์อัปโหลด" onChange={(e) => onPick(e.target.files?.[0])} />
-          <button type="button" disabled={busy || dirRo} aria-describedby={dirRo ? "ro-hint" : undefined} onClick={() => fileInput.current?.click()} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`}>อัปโหลดไฟล์</button>
+          <button type="button" disabled={busy || dirRo || !!busyReason} aria-describedby={dirRo ? "ro-hint" : undefined} onClick={() => fileInput.current?.click()} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`}>อัปโหลดไฟล์</button>
           <span className="text-xs text-gray-500">สูงสุด 50 MB ต่อไฟล์</span>
-          <button type="button" disabled={busy || dirRo} aria-describedby={dirRo ? "ro-hint" : undefined} onClick={() => { setNameDraft(""); setModalErr(null); setNewFolder(true) }} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`}>โฟลเดอร์ใหม่</button>
+          <button type="button" disabled={busy || dirRo || !!busyReason} aria-describedby={dirRo ? "ro-hint" : undefined} onClick={() => { setNameDraft(""); setModalErr(null); setNewFolder(true) }} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`}>โฟลเดอร์ใหม่</button>
         </div>
       </div>
+      {busyReason && <p role="status" className="text-sm text-amber-700">{busyReason} — แก้ไขไฟล์ไม่ได้จนกว่างานจะเสร็จ</p>}
       {dirRo && (
         <p id="ro-hint" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
           🔒 โฟลเดอร์โปรแกรมของ MID แก้ไขไม่ได้ — อัปโหลด library ที่{" "}
@@ -215,8 +219,8 @@ export function FilesTab({ midName, onOpenConfig }: Props) {
                 <td className="space-x-2 pl-2 text-right whitespace-nowrap">
                   {e.type === "file" && !e.secret && <button type="button" className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => void openFile(e)}>เปิด</button>}
                   {e.type === "file" && !e.secret && <a className="text-blue-600 dark:text-blue-400 hover:underline" href={`${API_BASE}${base}/download?path=${encodeURIComponent(join(dir, e.name))}`}>ดาวน์โหลด</a>}
-                  {!e.locked && <button type="button" disabled={busy} className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => { setNameDraft(e.name); setModalErr(null); setRenaming(e) }}>เปลี่ยนชื่อ</button>}
-                  {!e.locked && <button type="button" disabled={busy} className="text-red-600 hover:underline" onClick={() => setDeleting(e)}>ลบ</button>}
+                  {!e.locked && <button type="button" disabled={busy || !!busyReason} className="text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50" onClick={() => { setNameDraft(e.name); setModalErr(null); setRenaming(e) }}>เปลี่ยนชื่อ</button>}
+                  {!e.locked && <button type="button" disabled={busy || !!busyReason} className="text-red-600 hover:underline disabled:opacity-50" onClick={() => setDeleting(e)}>ลบ</button>}
                 </td>
               </tr>
             ))}

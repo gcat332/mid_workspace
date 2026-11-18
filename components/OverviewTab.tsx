@@ -1,5 +1,9 @@
+import Link from "next/link"
+import { usePathname } from "next/navigation"
 import { safeHttpUrl } from "@/lib/ui/api"
-import { formatBytes, formatUptime, statusView, type MidView } from "@/lib/ui/status-view"
+import { instanceRecordUrl } from "@/lib/ui/record-link"
+import { jobKindLabel, jobStatusLabel } from "@/lib/ui/stages"
+import { formatBytes, formatJobTime, formatUptime, statusView, type MidView } from "@/lib/ui/status-view"
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -12,8 +16,9 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export function OverviewTab({ mid }: { mid: MidView }) {
   const sv = statusView(mid)
+  const pathname = usePathname()
   const url = safeHttpUrl(mid.instanceUrl)
-  const recordUrl = url && mid.midName ? `${url}/ecc_agent_list.do?sysparm_query=name=${encodeURIComponent(mid.midName)}` : null
+  const recordUrl = instanceRecordUrl(mid.instanceUrl, mid.midName)
   const running = mid.status.state === "running"
   return (
     <dl className="divide-y divide-gray-100">
@@ -31,6 +36,13 @@ export function OverviewTab({ mid }: { mid: MidView }) {
           ? <a href={recordUrl} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">เปิดดู MID Server ใน ServiceNow</a>
           : "-"}
       </Row>
+      {mid.job && (
+        <Row label="job ล่าสุด">
+          {jobKindLabel(mid.job.kind)} · {jobStatusLabel(mid.job.status)} · {formatJobTime(mid.job.createdAt)}{" "}
+          <Link replace scroll={false} href={`${pathname}?mid=${encodeURIComponent(mid.name)}&job=${encodeURIComponent(mid.job.id)}`}
+            className="whitespace-nowrap text-blue-600 hover:underline dark:text-blue-400">ดูความคืบหน้า</Link>
+        </Row>
+      )}
     </dl>
   )
 }

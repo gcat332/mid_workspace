@@ -34,13 +34,15 @@ const KEEP_PW = "•••••••• (ตั้งไว้แล้ว —
 
 type Props = {
   midName: string
+  /** Non-null while a lifecycle job is running: every write is disabled and this text is shown as the reason. */
+  busyReason?: string | null
   /** Offer "Restart เลยไหม?" after a save (only meaningful while the MID is up). */
   canRestart: boolean
   /** Restart request owned by MidPanel (handles the low-memory confirmation). */
   onRestart: () => void
 }
 
-export function ConfigTab({ midName, canRestart, onRestart }: Props) {
+export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }: Props) {
   const dark = useIsDark()
   const base = `/mids/${encodeURIComponent(midName)}/config`
   const [data, setData] = useState<Data | null>(null)
@@ -87,6 +89,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
   useEffect(() => { void load() }, [load])
 
   async function send(path: string, init: RequestInit, after: () => void) {
+    if (busyReason) { setErr({ message: busyReason }); return }
     setBusy(true); setErr(null); setSaved(false)
     try {
       const res = await apiFetch(path, init)
@@ -126,6 +129,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
         ))}
       </div>
 
+      {busyReason && <p role="status" className="text-sm text-amber-700">{busyReason} — แก้ไขและบันทึกไม่ได้จนกว่างานจะเสร็จ</p>}
       {saved && !err && <p role="status" className="text-sm text-emerald-700">บันทึกแล้ว</p>}
       {data.warning && <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{data.warning}</p>}
       {err && (
@@ -171,7 +175,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
           <p id="heap-note" className={`text-xs ${heapChanged ? "text-amber-700" : "text-gray-500"}`}>
             เปลี่ยน RAM แล้ว ระบบจะเขียน systemd unit ของ MID นี้ใหม่จากแม่แบบของ MidHub (unit ที่แก้เองบนเครื่องจะถูกทับ)
           </p>
-          <div><button type="submit" disabled={busy || !heapOk} className={`btn-primary px-4 py-2 text-sm`}>
+          <div><button type="submit" disabled={busy || !heapOk || !!busyReason} className={`btn-primary px-4 py-2 text-sm`}>
             {busy ? "กำลังบันทึก..." : "บันทึก"}</button></div>
         </form>
       ) : (
@@ -182,7 +186,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
               <option value="config.xml">config.xml</option>
               <option value="wrapper-override.conf">wrapper-override.conf</option>
             </select>
-            <button type="button" disabled={busy}
+            <button type="button" disabled={busy || !!busyReason}
               onClick={() => void put({ file: rawFile, content: drafts[rawFile], baseHash: data.files[rawFile].hash })}
               className={`btn-primary px-4 py-2 text-sm`}>{busy ? "กำลังบันทึก..." : "บันทึก"}</button>
           </div>
@@ -223,7 +227,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
                 keepCurrentOriginalModel keepCurrentModifiedModel
                 options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false } }} />
             </div>
-            <button type="button" disabled={busy} onClick={() => setConfirmRollback(true)}
+            <button type="button" disabled={busy || !!busyReason} onClick={() => setConfirmRollback(true)}
               className={`${btn} border-red-300 text-red-700 hover:bg-red-50`}>Rollback เป็นเวอร์ชันนี้</button>
           </div>
         )}

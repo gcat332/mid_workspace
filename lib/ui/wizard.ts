@@ -100,23 +100,7 @@ export function reviewChecks(host: HostView | null): Check[] {
   return out
 }
 
-const STAGE_LABELS: Record<string, string> = {
-  precheck: "ตรวจความพร้อม",
-  fetchPackage: "ดาวน์โหลดแพ็กเกจ MID",
-  extract: "แตกไฟล์",
-  copyFiles: "คัดลอกไฟล์จาก MID ต้นทาง",
-  configure: "ตั้งค่า MID",
-  fixOwnership: "ตั้งสิทธิ์ไฟล์",
-  installUnit: "ติดตั้งบริการ (systemd)",
-  start: "เริ่มทำงาน",
-  waitConnected: "รอเชื่อมต่อกับ ServiceNow",
-  stop: "หยุด MID",
-  removeUnit: "ถอนบริการ (systemd)",
-  archive: "สำรองไฟล์",
-  deleteDir: "ลบโฟลเดอร์",
-  markRemoved: "ปิดรายการ",
-}
-export const jobStageLabel = (stage: string): string => STAGE_LABELS[stage] ?? stage
+export { jobStageLabel } from "./stages"
 
 /** Last "ดาวน์โหลด package NN%" journal message, or null. */
 export function parseProgress(msgs: string[]): number | null {

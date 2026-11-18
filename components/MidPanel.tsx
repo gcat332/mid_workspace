@@ -6,9 +6,10 @@ import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { ConfigTab } from "./ConfigTab"
 import { FilesTab } from "./FilesTab"
 import { LogTab } from "./LogTab"
+import { JobProgress } from "./JobProgress"
 import { OverviewTab } from "./OverviewTab"
 import { apiFetch } from "@/lib/ui/api"
-import { statusView, type HostView, type MidView } from "@/lib/ui/status-view"
+import { failedJobShown, jobIsActive, statusView, type HostView, type MidView } from "@/lib/ui/status-view"
 import { tabKeyTarget } from "@/lib/ui/tabs"
 import { quotaFullMessage } from "@/lib/mids/messages"
 
@@ -25,13 +26,23 @@ type Pending = { action: Action; lowMemory?: string }
 
 const ACTION_TH: Record<Action, string> = { start: "Start", stop: "Stop", restart: "Restart" }
 const HOST_UNKNOWN = "อ่านสถานะเครื่องไม่ได้ จึงยังกด Start ไม่ได้ รอสักครู่หรือรีเฟรชหน้า"
-const NOT_YET = "Upgrade และ ลบ MID ยังไม่เปิดให้ใช้ในเวอร์ชันนี้"
+const NOT_YET = "Upgrade ยังไม่เปิดให้ใช้ในเวอร์ชันนี้"
+const JOB_BUSY = "มีงานกำลังทำอยู่"
+const NEED_ADMIN = "ต้องเป็น Admin"
+const UNINSTALL_STATE = "ลบได้เฉพาะ MID ที่ติดตั้งเสร็จหรือมีปัญหา"
 const RESTART_WHEN_UP = "Restart ใช้ได้เมื่อ MID กำลังรัน (ตอนนี้ใช้ Start แทน)"
 const hdrBtn = "rounded-lg border px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
 
-type Props = { mid: MidView; host: HostView | null; onChanged: () => void }
+type Props = {
+  mid: MidView
+  host: HostView | null
+  isAdmin: boolean
+  onChanged: () => void
+  /** Opens the uninstall dialog (owned by the dashboard so it outlives this panel once the MID leaves the list). */
+  onUninstall: (mid: MidView) => void
+}
 
-export function MidPanel({ mid, host, onChanged }: Props) {
+export function MidPanel({ mid, host, isAdmin, onChanged, onUninstall }: Props) {
   const [tab, setTab] = useState<TabId>("overview")
   const [pending, setPending] = useState<Pending | null>(null)
   const [busy, setBusy] = useState(false)
@@ -48,6 +59,16 @@ export function MidPanel({ mid, host, onChanged }: Props) {
   const startReason = !hostKnown ? HOST_UNKNOWN : quotaFullMessage(host.maxRunning)
   const inFlight = useRef(false)
   const transitional = mid.state === "installing" || mid.state === "upgrading" || mid.state === "uninstalling"
+  const jobActive = jobIsActive(mid)
+  // One reason for everything that writes: Start/Stop/Restart/fix, config save, file writes.
+  const busyReason = jobActive || transitional ? JOB_BUSY : null
+  const uninstallReason = !isAdmin ? NEED_ADMIN
+    : mid.state !== "installed" && mid.state !== "error" ? UNINSTALL_STATE
+    : busyReason
+  // A job started here stays on screen after it ends (so its result and links are not yanked away by the next poll).
+  const [watched, setWatched] = useState<string | null>(null)
+  if (mid.job && jobActive && watched !== mid.job.id) setWatched(mid.job.id)
+  const showJob = !!mid.job && (jobActive || failedJobShown(mid) || watched === mid.job.id)
   const holdsStale = host !== null && host.quotaUsed > host.running
 
   // An open Stop/Restart confirm is moot once polling shows the MID is no longer up.
@@ -110,8 +131,10 @@ export function MidPanel({ mid, host, onChanged }: Props) {
 
   // Visible reasons for disabled header buttons (a title tooltip alone is invisible on touch and to many users).
   const reasons = [
-    !isUp && !transitional ? RESTART_WHEN_UP : null,
+    busyReason,
+    !busyReason && !isUp ? RESTART_WHEN_UP : null,
     NOT_YET,
+    uninstallReason && uninstallReason !== busyReason ? `ลบ: ${uninstallReason}` : null,
   ].filter(Boolean) as string[]
 
   return (
@@ -120,22 +143,23 @@ export function MidPanel({ mid, host, onChanged }: Props) {
         <h2 className="mr-2 min-w-0 break-all text-xl font-semibold text-gray-900">{mid.name}</h2>
         <span className="text-sm text-gray-600">{sv.icon} {sv.label}</span>
         <div className="flex flex-wrap gap-2 sm:ml-auto">
-          <button type="button" onClick={() => request("restart")} disabled={busy || transitional || !isUp}
+          <button type="button" onClick={() => request("restart")} disabled={busy || !!busyReason || !isUp}
             aria-describedby="mid-btn-reasons"
             className={`${hdrBtn} border-gray-300 text-gray-800 hover:bg-gray-50`}>Restart</button>
           {isUp ? (
-            <button type="button" onClick={() => request("stop")} disabled={busy || transitional}
+            <button type="button" onClick={() => request("stop")} disabled={busy || !!busyReason}
               className={`${hdrBtn} border-red-300 text-red-700 hover:bg-red-50`}>Stop</button>
           ) : (
-            <button type="button" onClick={() => request("start")} disabled={busy || transitional || startBlocked}
+            <button type="button" onClick={() => request("start")} disabled={busy || !!busyReason || startBlocked}
               aria-describedby={startBlocked ? "mid-start-reason" : undefined}
               className={`${hdrBtn} border-success-solid bg-success-solid text-white hover:bg-success-solid-press`}>Start</button>
           )}
-          <button type="button" onClick={() => void fixOwnership()} disabled={fixing || transitional}
+          <button type="button" onClick={() => void fixOwnership()} disabled={fixing || !!busyReason}
             title="ให้ไฟล์ทั้งหมดของ MID เป็นของ midsvc:midhub และกลุ่มแก้ไขได้ (ใช้เมื่อแก้ไฟล์ไม่ได้เพราะสิทธิ์)"
             className={`${hdrBtn} border-gray-300 text-gray-800 hover:bg-gray-50`}>{fixing ? "กำลังซ่อม..." : "ซ่อมสิทธิ์ไฟล์"}</button>
           <button type="button" disabled aria-describedby="mid-btn-reasons" className={`${hdrBtn} border-gray-300 text-gray-800`}>Upgrade</button>
-          <button type="button" disabled aria-describedby="mid-btn-reasons" className={`${hdrBtn} border-gray-300 text-gray-800`}>ลบ</button>
+          <button type="button" onClick={() => onUninstall(mid)} disabled={uninstallReason !== null} aria-describedby="mid-btn-reasons"
+            className={`${hdrBtn} border-red-300 text-red-700 hover:bg-red-50`}>ลบ</button>
         </div>
       </div>
       <p id="mid-btn-reasons" className="mt-1 text-xs text-gray-500">{reasons.join(" · ")}</p>
@@ -147,6 +171,12 @@ export function MidPanel({ mid, host, onChanged }: Props) {
       )}
       {fixed && <p role="status" className="mt-2 text-sm text-emerald-700">ซ่อมสิทธิ์ไฟล์แล้ว ลองทำรายการเดิมอีกครั้ง</p>}
       {err && <div className="mt-3"><ErrorNotice error={err} /></div>}
+      {showJob && mid.job && (
+        <div className="mt-4 rounded-xl border border-gray-200 p-4">
+          <JobProgress key={mid.job.id} jobId={mid.job.id} onJobChange={() => onChanged()}
+            onOpenMid={() => setWatched(null)} onClose={() => setWatched(null)} />
+        </div>
+      )}
 
       <div role="tablist" aria-label="รายละเอียด MID" onKeyDown={onTabKey} className="mt-4 flex gap-1 overflow-x-auto border-b border-gray-200">
         {TABS.map((t) => (
@@ -159,8 +189,8 @@ export function MidPanel({ mid, host, onChanged }: Props) {
       </div>
       <div role="tabpanel" id="tabpanel" aria-labelledby={`tab-${tab}`} className="pt-4">
         {tab === "overview" && <OverviewTab mid={mid} />}
-        {tab === "config" && <ConfigTab midName={mid.name} canRestart={isUp && !transitional} onRestart={() => void send("restart", false)} />}
-        {tab === "files" && <FilesTab midName={mid.name} onOpenConfig={() => selectTab("config")} />}
+        {tab === "config" && <ConfigTab midName={mid.name} busyReason={busyReason} canRestart={isUp && !transitional} onRestart={() => void send("restart", false)} />}
+        {tab === "files" && <FilesTab midName={mid.name} busyReason={busyReason} onOpenConfig={() => selectTab("config")} />}
         {tab === "logs" && <LogTab midName={mid.name} />}
       </div>
 

@@ -6,7 +6,8 @@ import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { API_BASE, apiFetch, safeHttpUrl } from "@/lib/ui/api"
 import { ghostBtnCls } from "@/lib/ui/classes"
 import { createLatest } from "@/lib/ui/latest"
-import { jobStageLabel, parseProgress, type JournalEntry } from "@/lib/ui/wizard"
+import { isActiveJobStatus, isRemovalKind, jobStageLabel } from "@/lib/ui/stages"
+import { parseProgress, type JournalEntry } from "@/lib/ui/wizard"
 
 type JobView = {
   id: string; kind: string; midName: string; stage: string; status: string; error: string | null
@@ -18,11 +19,12 @@ type Props = {
   onJobChange: (id: string) => void
   onOpenMid: (name: string) => void
   onClose: () => void
+  /** Called whenever the loaded job's kind/status changes (lets a host show a follow-up such as the instance record link). */
+  onStatus?: (job: { kind: string; status: string }) => void
 }
 
 const NET: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" }
 const MAX_LINES = 500
-const ACTIVE = new Set(["queued", "pending", "running"])
 
 function lineText(e: JournalEntry): string | null {
   switch (e.type) {
@@ -36,7 +38,7 @@ function lineText(e: JournalEntry): string | null {
   }
 }
 
-export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
+export function JobProgress({ jobId, onJobChange, onOpenMid, onClose, onStatus }: Props) {
   const [job, setJob] = useState<JobView | null>(null)
   const [lines, setLines] = useState<JournalEntry[]>([])
   const [streamErr, setStreamErr] = useState<ApiError | null>(null)
@@ -87,8 +89,8 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
           if (!res.ok) { setLoadErr(await readApiError(res)); continue }
           const j = (await res.json()) as JobView
           if (!latest.current.isCurrent(token)) continue
-          if (terminal.current && ACTIVE.has(j.status)) continue
-          if (!ACTIVE.has(j.status)) terminal.current = true
+          if (terminal.current && isActiveJobStatus(j.status)) continue
+          if (!isActiveJobStatus(j.status)) terminal.current = true
           setJob(j); setLoadErr(null)
           if (j.status === "succeeded" && (j.kind === "install" || j.kind === "clone") && !targetAsked.current) {
             targetAsked.current = true
@@ -104,6 +106,10 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
   }, [jobId, loadTarget])
 
   useEffect(() => { void Promise.resolve().then(loadJob) }, [loadJob, conn])
+
+  const statusRef = useRef(onStatus)
+  useEffect(() => { statusRef.current = onStatus })
+  useEffect(() => { if (job) statusRef.current?.({ kind: job.kind, status: job.status }) }, [job])
 
   useEffect(() => {
     const es = new EventSource(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/events`)
@@ -137,7 +143,8 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
 
   const failed = job?.status === "failed"
   const succeeded = job?.status === "succeeded"
-  const active = job ? ACTIVE.has(job.status) : true
+  const active = job ? isActiveJobStatus(job.status) : true
+  const removal = job ? isRemovalKind(job.kind) : false
   const isInstall = job?.kind === "install" || job?.kind === "clone"
   const progress = parseProgress(lines.map((l) => (l.type === "log" && l.msg ? l.msg : "")))
 
@@ -190,9 +197,9 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
   }
   const heading = !job ? "กำลังโหลด..."
     : succeeded ? (isInstall ? "ติดตั้งเสร็จแล้ว" : "เสร็จเรียบร้อย")
-    : failed ? "ติดตั้งไม่สำเร็จ"
+    : failed ? (removal ? "ลบไม่สำเร็จ" : "ติดตั้งไม่สำเร็จ")
     : job.status === "cancelled" ? "ยกเลิกแล้ว"
-    : job.kind === "uninstall" || job.kind === "cancel_install" ? "กำลังลบ..."
+    : removal ? "กำลังลบ..."
     : "กำลังติดตั้ง..."
 
   return (
@@ -251,9 +258,9 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
           }} />
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={busy} onClick={() => void retry()} className="btn-primary px-4 py-2 text-sm font-medium">ลองใหม่</button>
-            <button type="button" disabled={busy} onClick={() => setConfirmCancel(true)} className={ghostBtnCls}>ยกเลิกและลบ</button>
+            {!removal && <button type="button" disabled={busy} onClick={() => setConfirmCancel(true)} className={ghostBtnCls}>ยกเลิกและลบ</button>}
           </div>
-          <p className="text-xs text-gray-500">“ลองใหม่” ทำต่อจากขั้นที่ล้มเหลว · “ยกเลิกและลบ” ลบ MID ที่ติดตั้งค้างไว้ทั้งหมด</p>
+          <p className="text-xs text-gray-500">“ลองใหม่” ทำต่อจากขั้นที่ล้มเหลว{!removal && " · “ยกเลิกและลบ” ลบ MID ที่ติดตั้งค้างไว้ทั้งหมด"}</p>
         </div>
       )}
       {actionErr && <ErrorNotice error={actionErr} />}

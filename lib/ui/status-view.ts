@@ -1,4 +1,8 @@
 /** JSON shape of GET /api/mids as the browser sees it (Date -> ISO string). */
+import { isActiveJobStatus, isRemovalKind, runningJobLabel } from "./stages"
+
+export type MidJobView = { id: string; kind: string; stage: string; status: string; createdAt?: string }
+
 export type MidView = {
   name: string
   instanceUrl: string | null
@@ -6,6 +10,8 @@ export type MidView = {
   heapMb: number
   version: string | null
   state: string
+  /** Latest job of this MID (GET /api/mids). */
+  job?: MidJobView | null
   status: {
     state: "running" | "stopped" | "failed" | "starting" | "unknown"
     pid: number | null
@@ -27,7 +33,20 @@ export type StatusView = { icon: "🟢" | "⚪" | "🟡" | "🔴"; label: string
 
 const BUSY: StatusView = { icon: "🟡", label: "กำลังทำงาน" }
 
-export function statusView(m: Pick<MidView, "state" | "status">): StatusView {
+type JobPick = Pick<MidView, "state" | "status" | "job">
+
+export function jobIsActive(m: Pick<MidView, "job">): boolean {
+  return !!m.job && isActiveJobStatus(m.job.status)
+}
+
+/** A failed job still matters while the MID is not in a healthy installed state (a stale failure must not hide it). */
+export function failedJobShown(m: Pick<MidView, "state" | "job">): boolean {
+  return m.job?.status === "failed" && (m.state === "installing" || m.state === "error" || m.state === "uninstalling")
+}
+
+export function statusView(m: JobPick): StatusView {
+  if (m.job && jobIsActive(m)) return { icon: "🟡", label: runningJobLabel(m.job) }
+  if (m.job && failedJobShown(m)) return { icon: "🔴", label: isRemovalKind(m.job.kind) ? "ลบไม่สำเร็จ" : "ติดตั้งไม่สำเร็จ" }
   if (m.state === "installing" || m.state === "upgrading" || m.state === "uninstalling") return BUSY
   if (m.state === "error") return { icon: "🔴", label: "ล่ม" }
   switch (m.status.state) {
@@ -62,4 +81,12 @@ export function formatUptime(since: string | null, now: number = Date.now()): st
   if (days > 0) return `${days} วัน ${hours} ชม.`
   if (hours > 0) return `${hours} ชม. ${mins % 60} นาที`
   return `${mins} นาที`
+}
+
+/** "18 พ.ย. 2569 12:00" style timestamp in Bangkok time (the host and users run on Asia/Bangkok). */
+export function formatJobTime(iso: string | undefined): string {
+  if (!iso) return "-"
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return "-"
+  return new Date(t).toLocaleString("th-TH", { timeZone: "Asia/Bangkok", dateStyle: "medium", timeStyle: "short" })
 }
