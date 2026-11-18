@@ -22,6 +22,8 @@ type Props = {
   onJobChange: (id: string) => void
   onOpenMid: (name: string) => void
   onClose: () => void
+  /** The create POST was accepted (host shows the MID as busy until its next poll confirms the job). */
+  onStarted?: (name: string) => void
 }
 
 const STEPS = ["Instance", "ตั้งค่า", "ตรวจสอบ", "ติดตั้ง"] as const
@@ -30,7 +32,8 @@ const INITIAL: WizardState = {
   heapMb: String(DEFAULT_HEAP_MB), logFiles: String(DEFAULT_LOG_FILES), proxyOn: false, proxyHost: "", proxyPort: "",
 }
 
-export function CreateMidWizard({ isAdmin, host, mids, jobId, onJobChange, onOpenMid, onClose }: Props) {
+export function CreateMidWizard({ isAdmin, host, mids, jobId, onJobChange, onOpenMid, onClose, onStarted }: Props) {
+  const [jobKind, setJobKind] = useState<string | null>(null)
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [state, setState] = useState<WizardState>(INITIAL)
   const [extra, setExtra] = useState<ExtraDraft>({ cloneFrom: "", proxyUser: "", proxyPass: "", snTouched: false })
@@ -73,6 +76,7 @@ export function CreateMidWizard({ isAdmin, host, mids, jobId, onJobChange, onOpe
       if (!res.ok) { setErr(await readApiError(res)); return }
       const { jobId: id } = (await res.json()) as { jobId: string }
       onJobChange(id)
+      onStarted?.(state.name)
     } catch {
       setErr({ message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" })
     } finally {
@@ -96,7 +100,7 @@ export function CreateMidWizard({ isAdmin, host, mids, jobId, onJobChange, onOpe
   return (
     <Modal labelledBy="wizard-title" onClose={requestClose} busy={busy} wide>
       <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 sm:px-5 dark:border-neutral-700">
-        <h2 id="wizard-title" className="text-lg font-semibold text-gray-900 dark:text-neutral-100">สร้าง MID ใหม่</h2>
+        <h2 id="wizard-title" className="text-lg font-semibold text-gray-900 dark:text-neutral-100">{running ? (jobKind === "clone" ? "Clone MID" : "ติดตั้ง MID") : "สร้าง MID ใหม่"}</h2>
         <button type="button" onClick={requestClose} disabled={busy} aria-label="ปิด" className="rounded-lg px-2 py-1 text-xl leading-none text-gray-600 hover:bg-gray-100 disabled:opacity-50">×</button>
       </div>
 
@@ -122,7 +126,12 @@ export function CreateMidWizard({ isAdmin, host, mids, jobId, onJobChange, onOpe
 
       <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
         {running ? (
-          <JobProgress key={jobId} jobId={jobId} onJobChange={onJobChange} onOpenMid={onOpenMid} onClose={onClose} />
+          <JobProgress key={jobId} jobId={jobId} onJobChange={onJobChange} onOpenMid={onOpenMid} onClose={onClose}
+            onStatus={(j) => {
+              // This view is for installs only: a removal job (e.g. from a stale ?job= link) is shown by the panel/dialog instead.
+              if (j.kind !== "install" && j.kind !== "clone") onClose()
+              else setJobKind(j.kind)
+            }} />
         ) : step === 1 ? (
           <InstanceStep isAdmin={isAdmin} state={state} onChange={onInstanceChange} onLabel={setInstanceLabel} />
         ) : step === 2 ? (

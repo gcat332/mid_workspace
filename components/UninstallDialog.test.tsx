@@ -104,4 +104,20 @@ describe("UninstallDialog", () => {
     expect(await screen.findByRole("alert")).toBeTruthy()
     expect(screen.queryByRole("list", { name: "ขั้นตอน" })).toBeNull()
   })
+
+  it("resume mode skips typing, shows the job, and the record link after success", async () => {
+    jobStatus = "succeeded"
+    render(<UninstallDialog mid={mid} jobId="u1" onClose={() => {}} />)
+    expect(screen.queryByLabelText(/พิมพ์ชื่อ MID/)).toBeNull()
+    expect(await screen.findByText("ลบ record นี้ใน instance เองถ้าไม่ใช้แล้ว")).toBeTruthy()
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(0)
+  })
+
+  it("reports the shown job id when closed (so the host can remember the dismissal)", async () => {
+    const onClose = vi.fn()
+    render(<UninstallDialog mid={mid} jobId="u1" onClose={onClose} />)
+    await screen.findByRole("list", { name: "ขั้นตอน" })
+    fireEvent.keyDown(document, { key: "Escape" })
+    expect(onClose).toHaveBeenCalledWith("u1")
+  })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { failedJobShown, formatBytes, formatJobTime, formatUptime, jobIsActive, quotaView, statusView, type MidView } from "./status-view"
+import { resumableUninstall, failedJobShown, formatBytes, formatJobTime, formatUptime, jobIsActive, quotaView, statusView, type MidView } from "./status-view"
 
 const mid = (state: string, st: MidView["status"]["state"]): MidView => ({
   name: "m1", instanceUrl: null, midName: null, heapMb: 1024, version: null, state,
@@ -45,6 +45,10 @@ describe("statusView with a job", () => {
     expect(statusView(withJob("error", J("install", "extract", "failed")))).toEqual({ icon: "🔴", label: "ติดตั้งไม่สำเร็จ" })
     expect(statusView(withJob("installing", J("clone", "extract", "failed")))).toEqual({ icon: "🔴", label: "ติดตั้งไม่สำเร็จ" })
   })
+  it("cancel_install: running -> กำลังลบ, failed -> ลบไม่สำเร็จ", () => {
+    expect(statusView(withJob("installing", J("cancel_install", "stop", "running")))).toEqual({ icon: "🟡", label: "กำลังลบ" })
+    expect(statusView(withJob("error", J("cancel_install", "stop", "failed")))).toEqual({ icon: "🔴", label: "ลบไม่สำเร็จ" })
+  })
   it("failed removal -> red 'ลบไม่สำเร็จ'", () => {
     expect(statusView(withJob("error", J("uninstall", "archive", "failed")))).toEqual({ icon: "🔴", label: "ลบไม่สำเร็จ" })
   })
@@ -68,6 +72,16 @@ describe("jobIsActive / failedJobShown", () => {
     expect(failedJobShown(withJob("error", J("install", "extract", "failed")))).toBe(true)
     expect(failedJobShown(withJob("installed", J("install", "extract", "failed")))).toBe(false)
     expect(failedJobShown(withJob("error", J("install", "extract", "succeeded")))).toBe(false)
+  })
+})
+
+describe("resumableUninstall", () => {
+  it("true for queued/running/failed uninstall jobs only", () => {
+    for (const s of ["queued", "running", "failed"]) expect(resumableUninstall(withJob("uninstalling", J("uninstall", "stop", s)))).toBe(true)
+    expect(resumableUninstall(withJob("uninstalling", J("uninstall", "stop", "succeeded")))).toBe(false)
+    expect(resumableUninstall(withJob("uninstalling", J("uninstall", "stop", "cancelled")))).toBe(false)
+    expect(resumableUninstall(withJob("installing", J("install", "extract", "running")))).toBe(false)
+    expect(resumableUninstall(mid("installed", "running"))).toBe(false)
   })
 })
 

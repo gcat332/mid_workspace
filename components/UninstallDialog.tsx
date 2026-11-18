@@ -11,20 +11,24 @@ import { instanceRecordUrl } from "@/lib/ui/record-link"
 type Props = {
   /** Snapshot taken when the dialog opened: the MID disappears from the list while its uninstall job is still shown. */
   mid: { name: string; instanceUrl: string | null; midName: string | null }
-  onClose: () => void
+  /** Resume mode: show this (already running or failed) uninstall job and skip the typing step. */
+  jobId?: string | null
+  /** `jobId` is the job shown when the dialog closed (null if none was started). */
+  onClose: (jobId: string | null) => void
   /** The uninstall job was accepted (host refreshes the list). */
   onStarted?: () => void
 }
 
 const NET: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" }
 
-export function UninstallDialog({ mid, onClose, onStarted }: Props) {
+export function UninstallDialog({ mid, jobId: initialJobId = null, onClose: close, onStarted }: Props) {
   const [typed, setTyped] = useState("")
-  const [jobId, setJobId] = useState<string | null>(null)
+  const [jobId, setJobId] = useState<string | null>(initialJobId)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<ApiError | null>(null)
   const [done, setDone] = useState(false)
   const inFlight = useRef(false)
+  const onClose = () => close(jobId)
 
   const matches = typed === mid.name // exact: case-sensitive, not trimmed
   const record = instanceRecordUrl(mid.instanceUrl, mid.midName ?? mid.name)
@@ -82,7 +86,7 @@ export function UninstallDialog({ mid, onClose, onStarted }: Props) {
         </form>
       ) : (
         <div className="mt-3 space-y-4">
-          <JobProgress key={jobId} jobId={jobId} onJobChange={setJobId} onOpenMid={() => onClose()} onClose={onClose}
+          <JobProgress key={jobId} jobId={jobId} onJobChange={(id) => { setDone(false); setJobId(id) }} onOpenMid={() => onClose()} onClose={onClose}
             onStatus={(j) => setDone(j.kind === "uninstall" && j.status === "succeeded")} />
           {done && (
             <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">

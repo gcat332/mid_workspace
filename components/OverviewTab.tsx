@@ -14,7 +14,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   )
 }
 
-export function OverviewTab({ mid }: { mid: MidView }) {
+export function OverviewTab({ mid, jobShown = false }: { mid: MidView; /** the panel already shows this job's progress */ jobShown?: boolean }) {
   const sv = statusView(mid)
   const pathname = usePathname()
   const url = safeHttpUrl(mid.instanceUrl)
@@ -39,8 +39,9 @@ export function OverviewTab({ mid }: { mid: MidView }) {
       {mid.job && (
         <Row label="job ล่าสุด">
           {jobKindLabel(mid.job.kind)} · {jobStatusLabel(mid.job.status)} · {formatJobTime(mid.job.createdAt)}{" "}
+          {(mid.job.kind === "install" || mid.job.kind === "clone") && !jobShown && (
           <Link replace scroll={false} href={`${pathname}?mid=${encodeURIComponent(mid.name)}&job=${encodeURIComponent(mid.job.id)}`}
-            className="whitespace-nowrap text-blue-600 hover:underline dark:text-blue-400">ดูความคืบหน้า</Link>
+            className="whitespace-nowrap text-blue-600 hover:underline dark:text-blue-400">ดูความคืบหน้า</Link>)}
         </Row>
       )}
     </dl>

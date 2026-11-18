@@ -12,9 +12,24 @@ import { DashboardToolbar } from "./DashboardToolbar"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { apiFetch } from "@/lib/ui/api"
 import { createLatest } from "@/lib/ui/latest"
-import type { HostView, MidView } from "@/lib/ui/status-view"
+import { jobIsActive, resumableUninstall, type HostView, type MidView } from "@/lib/ui/status-view"
 
 const POLL_MS = 5000
+const DISMISS_KEY = "midhub.uninstall.dismissed"
+const OPTIMISTIC_MS = 15000
+
+const memDismissed = new Set<string>() // fallback when sessionStorage is unavailable
+function dismissedJobs(): string[] {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(DISMISS_KEY) ?? "[]") as unknown
+    return [...(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []), ...memDismissed]
+  } catch { return [...memDismissed] }
+}
+function dismissJob(id: string) {
+  memDismissed.add(id)
+  try { sessionStorage.setItem(DISMISS_KEY, JSON.stringify([...dismissedJobs(), id].slice(-50))) } catch { /* private mode: reopens on reload only */ }
+}
+
 const noopSubscribe = () => () => undefined
 
 // Polls are not user activity: the proxy does not slide the session for them, so the 4 h idle timeout still fires.
@@ -36,7 +51,9 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
   const [midsErr, setMidsErr] = useState<ApiError | null>(null)
   const [hostErr, setHostErr] = useState<ApiError | null>(null)
   const [importing, setImporting] = useState(false)
-  const [uninstalling, setUninstalling] = useState<MidView | null>(null)
+  const [uninstalling, setUninstalling] = useState<{ mid: MidView; jobId: string | null } | null>(null)
+  // A job was accepted but the next poll has not reported it yet: the MID counts as busy meanwhile.
+  const [optimistic, setOptimistic] = useState<string | null>(null)
 
   const latest = useRef(createLatest())
 
@@ -58,7 +75,11 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
     }
     const [m, h] = await Promise.all([load<MidView[]>("/mids", "MID"), load<HostView>("/host", "สถานะเครื่อง")])
     if (!latest.current.isCurrent(token)) return // a newer refresh started; this response is stale
-    if (m.data) setMids(m.data)
+    if (m.data) {
+      setMids(m.data)
+      // Confirmed: the poll now reports an active job for that MID.
+      setOptimistic((o) => (o && m.data!.some((x) => x.name === o && jobIsActive(x)) ? null : o))
+    }
     setMidsErr(m.err ?? null)
     // Host unknown must not leave stale quota behind: Start is disabled while host is null.
     setHost(h.data ?? null)
@@ -101,6 +122,20 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
     router.replace(`${pathname}?mid=${encodeURIComponent(name)}`, { scroll: false })
   }, [router, pathname, refresh])
 
+  useEffect(() => {
+    if (!optimistic) return
+    const id = setTimeout(() => setOptimistic(null), OPTIMISTIC_MS)
+    return () => clearTimeout(id)
+  }, [optimistic])
+
+  // The dashboard owns any uninstall job: one that is in flight (or failed) when the page loads or the poll first sees it
+  // reopens the dialog in resume mode, unless the user already dismissed it for that job in this tab.
+  if (uninstalling === null && mids) {
+    const dismissed = dismissedJobs()
+    const m = mids.find((x) => resumableUninstall(x) && !dismissed.includes(x.job!.id))
+    if (m) setUninstalling({ mid: m, jobId: m.job!.id })
+  }
+
   const current = mids?.find((m) => m.name === selected) ?? null
 
   return (
@@ -137,7 +172,8 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
             </nav>
             <div ref={panelRef} className="min-w-0 scroll-mt-4 rounded-xl border border-gray-200 bg-white dark:bg-neutral-800 p-4 sm:p-5">
               {current
-                ? <MidPanel key={current.name} mid={current} host={host} isAdmin={isAdmin} onChanged={() => void refresh()} onUninstall={setUninstalling} />
+                ? <MidPanel key={current.name} mid={current} host={host} isAdmin={isAdmin} onChanged={() => void refresh()} onUninstall={(m) => setUninstalling({ mid: m, jobId: null })}
+                    jobOwnedElsewhere={uninstalling?.mid.name === current.name} optimisticBusy={optimistic === current.name} />
                 : <p className="text-sm text-gray-500">เลือก MID จากรายการเพื่อดูรายละเอียด</p>}
             </div>
           </div>
@@ -145,11 +181,13 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
       </main>
       {creating && (
         <CreateMidWizard isAdmin={isAdmin} host={host} mids={mids ?? []} jobId={jobParam}
-          onJobChange={setWizardJob} onOpenMid={openCreated} onClose={closeWizard} />
+          onJobChange={setWizardJob} onOpenMid={openCreated} onClose={closeWizard}
+          onStarted={(name) => { setOptimistic(name); void refresh() }} />
       )}
       {uninstalling && (
-        <UninstallDialog mid={uninstalling} onStarted={() => void refresh()}
-          onClose={() => { setUninstalling(null); void refresh() }} />
+        <UninstallDialog mid={uninstalling.mid} jobId={uninstalling.jobId}
+          onStarted={() => { setOptimistic(uninstalling.mid.name); void refresh() }}
+          onClose={(id) => { if (id) dismissJob(id); setUninstalling(null); void refresh() }} />
       )}
       {importing && (
         <ImportMidDialog onCancel={() => setImporting(false)}

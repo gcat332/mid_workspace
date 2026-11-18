@@ -4,7 +4,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { HostView, MidView } from "@/lib/ui/status-view"
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }))
-vi.mock("./JobProgress", () => ({ JobProgress: (p: { jobId: string }) => <div data-testid="job-progress">{p.jobId}</div> }))
+vi.mock("./JobProgress", () => ({
+  JobProgress: (p: { jobId: string; onClose: () => void }) => <div data-testid="job-progress">{p.jobId}<button onClick={p.onClose}>close-progress</button></div>,
+}))
 vi.mock("./ConfigTab", () => ({ ConfigTab: (p: { busyReason?: string | null }) => <div data-testid="config-tab">{String(p.busyReason)}</div> }))
 vi.mock("./FilesTab", () => ({ FilesTab: (p: { busyReason?: string | null }) => <div data-testid="files-tab">{String(p.busyReason)}</div> }))
 
@@ -19,8 +21,9 @@ const mk = (over: Partial<MidView> = {}): MidView => ({
 })
 const J = (kind: string, stage: string, status: string) => ({ id: "j1", kind, stage, status, createdAt: "2026-11-18T05:00:00.000Z" })
 const btn = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement
-const panel = (mid: MidView, isAdmin = true, onUninstall = vi.fn()) =>
-  render(<MidPanel mid={mid} host={host} isAdmin={isAdmin} onChanged={() => {}} onUninstall={onUninstall} />)
+type Extra = { jobOwnedElsewhere?: boolean; optimisticBusy?: boolean }
+const panel = (mid: MidView, isAdmin = true, onUninstall = vi.fn(), extra: Extra = {}) =>
+  render(<MidPanel mid={mid} host={host} isAdmin={isAdmin} onChanged={() => {}} onUninstall={onUninstall} {...extra} />)
 
 describe("MidPanel lifecycle", () => {
   it("idle admin: Start and ลบ enabled, no job panel", () => {
@@ -35,7 +38,7 @@ describe("MidPanel lifecycle", () => {
 
   it("active job: progress shown, Start/Restart/fix/ลบ disabled with the visible reason, tabs get busyReason", () => {
     panel(mk({ state: "installing", job: J("install", "extract", "running") }))
-    expect(screen.getByTestId("job-progress").textContent).toBe("j1")
+    expect(screen.getByTestId("job-progress").textContent).toContain("j1")
     for (const n of ["Start", "Restart", "ซ่อมสิทธิ์ไฟล์", "ลบ"]) expect((screen.getByRole("button", { name: n }) as HTMLButtonElement).disabled).toBe(true)
     expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("มีงานกำลังทำอยู่")
     fireEvent.click(screen.getByRole("tab", { name: "ตั้งค่า" }))
@@ -79,5 +82,59 @@ describe("MidPanel lifecycle", () => {
     expect(screen.getByText(/ติดตั้ง · สำเร็จ/)).toBeTruthy()
     const a = screen.getByRole("link", { name: "ดูความคืบหน้า" }) as HTMLAnchorElement
     expect(a.getAttribute("href")).toContain("?mid=m1&job=j1")
+  })
+
+  it.each(["uninstall", "cancel_install"])("%s job active: progress shown, writes blocked, no overview link", (kind) => {
+    panel(mk({ state: "uninstalling", job: J(kind, "archive", "running") }))
+    expect(screen.getByTestId("job-progress")).toBeTruthy()
+    expect(btn("Start").disabled).toBe(true)
+    expect(btn("ลบ").disabled).toBe(true)
+    expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("มีงานกำลังทำอยู่")
+    expect(screen.queryByRole("link", { name: "ดูความคืบหน้า" })).toBeNull()
+  })
+
+  it.each(["uninstall", "cancel_install"])("%s job failed: progress shown, tabs blocked with the retry/cancel wording, no link", (kind) => {
+    panel(mk({ state: "uninstalling", job: J(kind, "archive", "failed") }))
+    expect(screen.getByTestId("job-progress")).toBeTruthy()
+    expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("งานล้มเหลว — ลองใหม่หรือยกเลิกด้านล่าง")
+    fireEvent.click(screen.getByRole("tab", { name: "ไฟล์" }))
+    expect(screen.getByTestId("files-tab").textContent).toBe("งานล้มเหลว — ลองใหม่หรือยกเลิกด้านล่าง")
+    expect(screen.queryByRole("link", { name: "ดูความคืบหน้า" })).toBeNull()
+  })
+
+  it("a failed install in a transitional state uses the failed wording, an active one the busy wording", () => {
+    panel(mk({ state: "installing", job: J("install", "extract", "failed") }))
+    expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("งานล้มเหลว")
+    expect(document.getElementById("mid-btn-reasons")!.textContent).not.toContain("มีงานกำลังทำอยู่")
+  })
+
+  it("jobOwnedElsewhere hides the panel's own progress but still blocks writes", () => {
+    panel(mk({ state: "uninstalling", job: J("uninstall", "archive", "running") }), true, vi.fn(), { jobOwnedElsewhere: true })
+    expect(screen.queryByTestId("job-progress")).toBeNull()
+    expect(btn("Start").disabled).toBe(true)
+  })
+
+  it("optimisticBusy blocks writes before the poll reports the job", () => {
+    panel(mk(), true, vi.fn(), { optimisticBusy: true })
+    expect(btn("Start").disabled).toBe(true)
+    expect(btn("ลบ").disabled).toBe(true)
+    expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("มีงานกำลังทำอยู่")
+  })
+
+  it("progress stays after the job ends (watched) until dismissed with onClose", () => {
+    const { rerender } = panel(mk({ state: "installing", job: J("install", "extract", "running") }))
+    const done = mk({ job: J("install", "markRemoved", "succeeded") })
+    rerender(<MidPanel mid={done} host={host} isAdmin onChanged={() => {}} onUninstall={() => {}} />)
+    expect(screen.getByTestId("job-progress")).toBeTruthy()
+    fireEvent.click(screen.getByText("close-progress"))
+    expect(screen.queryByTestId("job-progress")).toBeNull()
+  })
+
+  it("overview link: only for install/clone jobs that the panel does not already show", () => {
+    panel(mk({ job: J("clone", "markRemoved", "succeeded") }))
+    expect(screen.getByRole("link", { name: "ดูความคืบหน้า" })).toBeTruthy()
+    cleanup()
+    panel(mk({ state: "error", job: J("install", "extract", "failed") })) // shown in the panel already
+    expect(screen.queryByRole("link", { name: "ดูความคืบหน้า" })).toBeNull()
   })
 })

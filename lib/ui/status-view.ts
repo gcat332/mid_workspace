@@ -44,6 +44,11 @@ export function failedJobShown(m: Pick<MidView, "state" | "job">): boolean {
   return m.job?.status === "failed" && (m.state === "installing" || m.state === "error" || m.state === "uninstalling")
 }
 
+/** An uninstall job that is still running or failed: the dashboard resumes its dialog (progress, retry, record link). */
+export function resumableUninstall(m: Pick<MidView, "job">): boolean {
+  return m.job?.kind === "uninstall" && (isActiveJobStatus(m.job.status) || m.job.status === "failed")
+}
+
 export function statusView(m: JobPick): StatusView {
   if (m.job && jobIsActive(m)) return { icon: "🟡", label: runningJobLabel(m.job) }
   if (m.job && failedJobShown(m)) return { icon: "🔴", label: isRemovalKind(m.job.kind) ? "ลบไม่สำเร็จ" : "ติดตั้งไม่สำเร็จ" }

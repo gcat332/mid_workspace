@@ -28,6 +28,7 @@ const ACTION_TH: Record<Action, string> = { start: "Start", stop: "Stop", restar
 const HOST_UNKNOWN = "อ่านสถานะเครื่องไม่ได้ จึงยังกด Start ไม่ได้ รอสักครู่หรือรีเฟรชหน้า"
 const NOT_YET = "Upgrade ยังไม่เปิดให้ใช้ในเวอร์ชันนี้"
 const JOB_BUSY = "มีงานกำลังทำอยู่"
+const JOB_FAILED = "งานล้มเหลว — ลองใหม่หรือยกเลิกด้านล่าง"
 const NEED_ADMIN = "ต้องเป็น Admin"
 const UNINSTALL_STATE = "ลบได้เฉพาะ MID ที่ติดตั้งเสร็จหรือมีปัญหา"
 const RESTART_WHEN_UP = "Restart ใช้ได้เมื่อ MID กำลังรัน (ตอนนี้ใช้ Start แทน)"
@@ -38,11 +39,15 @@ type Props = {
   host: HostView | null
   isAdmin: boolean
   onChanged: () => void
+  /** The dashboard's uninstall dialog currently owns this MID's job (it shows the progress itself). */
+  jobOwnedElsewhere?: boolean
+  /** A job was just accepted but the next poll has not reported it yet. */
+  optimisticBusy?: boolean
   /** Opens the uninstall dialog (owned by the dashboard so it outlives this panel once the MID leaves the list). */
   onUninstall: (mid: MidView) => void
 }
 
-export function MidPanel({ mid, host, isAdmin, onChanged, onUninstall }: Props) {
+export function MidPanel({ mid, host, isAdmin, onChanged, onUninstall, jobOwnedElsewhere = false, optimisticBusy = false }: Props) {
   const [tab, setTab] = useState<TabId>("overview")
   const [pending, setPending] = useState<Pending | null>(null)
   const [busy, setBusy] = useState(false)
@@ -61,14 +66,16 @@ export function MidPanel({ mid, host, isAdmin, onChanged, onUninstall }: Props) 
   const transitional = mid.state === "installing" || mid.state === "upgrading" || mid.state === "uninstalling"
   const jobActive = jobIsActive(mid)
   // One reason for everything that writes: Start/Stop/Restart/fix, config save, file writes.
-  const busyReason = jobActive || transitional ? JOB_BUSY : null
+  const busyReason = jobActive || optimisticBusy ? JOB_BUSY
+    : transitional ? (failedJobShown(mid) ? JOB_FAILED : JOB_BUSY)
+    : null
   const uninstallReason = !isAdmin ? NEED_ADMIN
     : mid.state !== "installed" && mid.state !== "error" ? UNINSTALL_STATE
     : busyReason
   // A job started here stays on screen after it ends (so its result and links are not yanked away by the next poll).
   const [watched, setWatched] = useState<string | null>(null)
   if (mid.job && jobActive && watched !== mid.job.id) setWatched(mid.job.id)
-  const showJob = !!mid.job && (jobActive || failedJobShown(mid) || watched === mid.job.id)
+  const showJob = !jobOwnedElsewhere && !!mid.job && (jobActive || failedJobShown(mid) || watched === mid.job.id)
   const holdsStale = host !== null && host.quotaUsed > host.running
 
   // An open Stop/Restart confirm is moot once polling shows the MID is no longer up.
@@ -188,7 +195,7 @@ export function MidPanel({ mid, host, isAdmin, onChanged, onUninstall }: Props) 
         ))}
       </div>
       <div role="tabpanel" id="tabpanel" aria-labelledby={`tab-${tab}`} className="pt-4">
-        {tab === "overview" && <OverviewTab mid={mid} />}
+        {tab === "overview" && <OverviewTab mid={mid} jobShown={showJob} />}
         {tab === "config" && <ConfigTab midName={mid.name} busyReason={busyReason} canRestart={isUp && !transitional} onRestart={() => void send("restart", false)} />}
         {tab === "files" && <FilesTab midName={mid.name} busyReason={busyReason} onOpenConfig={() => selectTab("config")} />}
         {tab === "logs" && <LogTab midName={mid.name} />}

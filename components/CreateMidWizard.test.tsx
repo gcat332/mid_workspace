@@ -53,3 +53,34 @@ describe("CreateMidWizard", () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("CreateMidWizard with ?job=", () => {
+  class ES { onmessage = null; addEventListener() {} close() {} }
+  const withJob = (kind: string) => {
+    vi.stubGlobal("EventSource", ES)
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (url.endsWith("/jobs/j1")) return json({ id: "j1", kind, midName: "m1", stage: "extract", status: "running", error: null, stages: ["extract"], params: {} })
+      return json([])
+    }))
+  }
+  const show = (onClose = vi.fn()) => {
+    render(<CreateMidWizard isAdmin host={null} mids={[]} jobId="j1" onJobChange={() => {}} onOpenMid={() => {}} onClose={onClose} />)
+    return onClose
+  }
+
+  it("titles the progress modal from the job kind", async () => {
+    withJob("install")
+    show()
+    expect(await screen.findByRole("dialog", { name: "ติดตั้ง MID" })).toBeTruthy()
+    cleanup()
+    withJob("clone")
+    show()
+    expect(await screen.findByRole("dialog", { name: "Clone MID" })).toBeTruthy()
+  })
+
+  it.each(["uninstall", "cancel_install"])("refuses a %s job: closes instead of showing it", async (kind) => {
+    withJob(kind)
+    const onClose = show()
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+})
