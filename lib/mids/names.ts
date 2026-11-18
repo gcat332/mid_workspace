@@ -28,6 +28,10 @@ const ERRORS = {
   invalid_filename: [400, "ชื่อไฟล์/โฟลเดอร์ไม่ถูกต้อง: ห้ามว่าง ห้ามเป็น . หรือ .. ห้ามมี / หรือ \\ และยาวไม่เกิน 255 ไบต์ แก้ชื่อแล้วลองใหม่"],
   length_required: [411, "อัปโหลดต้องระบุขนาดไฟล์ (Content-Length) ลองอัปโหลดใหม่จากหน้านี้"],
   invalid_buildstamp: [400, "buildstamp ไม่ถูกต้อง ตรวจรูปแบบเช่น australia-02-11-2026__patch7…"],
+  instance_url: [400, "URL ต้องเป็น https://<ชื่อ>.service-now.com เท่านั้น"],
+  instance_auth: [400, "login ไม่ผ่าน: ตรวจ MID user/password"],
+  instance_role: [400, "login ได้แต่ user ไม่มีสิทธิ์: ตรวจว่า user มี role mid_server"],
+  instance_unreachable: [502, "ติดต่อ instance ไม่ได้: ตรวจ URL หรือว่า instance ตื่นอยู่ (demo instance อาจ hibernate)"],
   conflict: [409, "การดำเนินการนี้ขัดแย้งกับสถานะปัจจุบัน รีเฟรชหน้าแล้วลองใหม่"],
 } as const satisfies Record<string, readonly [number, string]>
 

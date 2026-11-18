@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 
 const links = [
   { href: "/admin/users", label: "ผู้ใช้" },
+  { href: "/admin/instances", label: "Instances" },
   { href: "/admin/idp", label: "IdP (SSO)" },
   { href: "/admin/ip-allowlist", label: "IP Allowlist" },
   { href: "/admin/audit", label: "Audit" },

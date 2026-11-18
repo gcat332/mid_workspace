@@ -1,0 +1,185 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import { ConfirmDialog } from "./ConfirmDialog"
+import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
+import { apiFetch } from "@/lib/ui/api"
+import { cardCls, ghostBtnCls, inputCls, labelCls } from "@/lib/ui/classes"
+
+type Instance = {
+  id: string; label: string; url: string; midUser: string | null; hasPassword: boolean
+  buildstamp: string | null; createdBy: string; createdAt: string
+}
+
+const NET: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" }
+const jsonInit = (method: string, body: unknown): RequestInit =>
+  ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+
+export function InstancesManager() {
+  const [items, setItems] = useState<Instance[]>([])
+  const [label, setLabel] = useState("")
+  const [url, setUrl] = useState("")
+  const [midUser, setMidUser] = useState("")
+  const [password, setPassword] = useState("")
+  const [editing, setEditing] = useState<Instance | null>(null)
+  const [eLabel, setELabel] = useState("")
+  const [eUser, setEUser] = useState("")
+  const [ePass, setEPass] = useState("")
+  const [err, setErr] = useState<ApiError | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
+  const [del, setDel] = useState<Instance | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [reload, setReload] = useState(0)
+
+  useEffect(() => {
+    apiFetch("/instances")
+      .then(async (r) => (r.ok ? setItems((await r.json()) as Instance[]) : setErr(await readApiError(r))))
+      .catch(() => setErr(NET))
+  }, [reload])
+
+  async function call(path: string, init: RequestInit): Promise<Response | null> {
+    setErr(null); setInfo(null); setBusy(true)
+    try {
+      const res = await apiFetch(path, init)
+      if (!res.ok) { setErr(await readApiError(res)); return null }
+      return res
+    } catch {
+      setErr(NET)
+      return null
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const formReady = url.trim() !== "" && midUser.trim() !== "" && password !== ""
+  const reason = formReady ? undefined : "กรอก URL, MID user และ password ให้ครบก่อน"
+
+  async function test() {
+    const res = await call("/instances/test", jsonInit("POST", { url, midUser, password, label }))
+    if (!res) return
+    const j = (await res.json()) as { buildstamp: string | null }
+    setInfo(`เชื่อมต่อสำเร็จ${j.buildstamp ? ` (build: ${j.buildstamp})` : ""}`)
+  }
+  async function add() {
+    const res = await call("/instances", jsonInit("POST", { label, url, midUser, password }))
+    if (!res) return
+    setLabel(""); setUrl(""); setMidUser(""); setPassword("")
+    setInfo("บันทึก instance แล้ว")
+    setReload((n) => n + 1)
+  }
+  function startEdit(i: Instance) {
+    setEditing(i); setELabel(i.label); setEUser(i.midUser ?? ""); setEPass(""); setErr(null); setInfo(null)
+  }
+  async function saveEdit() {
+    if (!editing) return
+    const body: Record<string, string> = {}
+    if (eLabel.trim() && eLabel !== editing.label) body.label = eLabel
+    if (eUser.trim() && eUser !== (editing.midUser ?? "")) body.midUser = eUser
+    if (ePass) body.password = ePass
+    if (!editing.hasPassword && !ePass && eUser.trim()) {
+      setErr({ message: "ต้องใส่ password ด้วยเมื่อตั้ง MID user ครั้งแรก" }); return
+    }
+    if (Object.keys(body).length === 0) { setEditing(null); return }
+    const res = await call(`/instances/${encodeURIComponent(editing.id)}`, jsonInit("PATCH", body))
+    if (!res) return
+    setEditing(null); setEPass("")
+    setInfo("บันทึกแล้ว")
+    setReload((n) => n + 1)
+  }
+  async function confirmDelete() {
+    if (!del) return
+    const res = await call(`/instances/${encodeURIComponent(del.id)}`, { method: "DELETE" })
+    setDel(null)
+    if (res) setReload((n) => n + 1)
+  }
+
+  return (
+    <section>
+      <h1 className="mb-2 text-xl font-semibold text-gray-900">Instances</h1>
+      <p className="mb-4 text-sm text-gray-600">
+        เก็บ URL ของ demo instance พร้อม MID user/password (เข้ารหัสไว้ ไม่แสดงกลับ) เพื่อใช้ตอนติดตั้ง MID ใหม่
+        ทุกครั้งที่บันทึกจะทดสอบการเชื่อมต่อก่อน
+      </p>
+      <form className={`${cardCls} mb-3 grid gap-3 p-4 sm:grid-cols-2`} onSubmit={(e) => { e.preventDefault(); if (formReady) void add() }}>
+        <div className="sm:col-span-2">
+          <label className={labelCls} htmlFor="inst-url">Instance URL</label>
+          <input id="inst-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://<ชื่อ>.service-now.com" className={inputCls} />
+        </div>
+        <div>
+          <label className={labelCls} htmlFor="inst-label">ชื่อเรียก (ไม่บังคับ)</label>
+          <input id="inst-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="ใช้ชื่อโฮสต์ถ้าเว้นว่าง" className={inputCls} />
+        </div>
+        <div>
+          <label className={labelCls} htmlFor="inst-user">MID user</label>
+          <input id="inst-user" value={midUser} onChange={(e) => setMidUser(e.target.value)} autoComplete="off" className={inputCls} />
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelCls} htmlFor="inst-pass">Password</label>
+          <input id="inst-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" className={inputCls} />
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+          <button type="button" disabled={busy || !formReady} onClick={() => void test()} className={ghostBtnCls}>ทดสอบการเชื่อมต่อ</button>
+          <button type="submit" disabled={busy || !formReady} className="btn-primary px-4 py-2 text-sm font-medium">บันทึก</button>
+          {reason && <span className="text-xs text-gray-500">{reason}</span>}
+        </div>
+      </form>
+      {err && <div className="mb-2"><ErrorNotice error={err} /></div>}
+      {info && <p role="status" className="mb-2 text-sm text-green-700 dark:text-green-400">{info}</p>}
+      {editing && (
+        <form className={`${cardCls} mb-3 grid gap-3 p-4 sm:grid-cols-3`} onSubmit={(e) => { e.preventDefault(); void saveEdit() }}>
+          <p className="text-sm text-gray-700 sm:col-span-3">แก้ไข {editing.url}</p>
+          <div>
+            <label className={labelCls} htmlFor="e-label">ชื่อเรียก</label>
+            <input id="e-label" value={eLabel} onChange={(e) => setELabel(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="e-user">MID user</label>
+            <input id="e-user" value={eUser} onChange={(e) => setEUser(e.target.value)} autoComplete="off" className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls} htmlFor="e-pass">Password</label>
+            <input id="e-pass" type="password" value={ePass} onChange={(e) => setEPass(e.target.value)} autoComplete="new-password"
+              placeholder={editing.hasPassword ? "ตั้งไว้แล้ว (เว้นว่าง = ไม่เปลี่ยน)" : "ยังไม่ได้ตั้ง"} className={inputCls} />
+          </div>
+          <div className="flex gap-2 sm:col-span-3">
+            <button type="submit" disabled={busy} className="btn-primary px-4 py-2 text-sm font-medium">บันทึก (ทดสอบก่อนบันทึก)</button>
+            <button type="button" onClick={() => setEditing(null)} className={ghostBtnCls}>ยกเลิก</button>
+          </div>
+        </form>
+      )}
+      <div className={`${cardCls} relative overflow-x-auto`}>
+        <table className="w-full text-sm">
+          <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600">
+            <tr>
+              <th className="px-4 py-3">ชื่อ</th><th className="px-4 py-3">URL</th><th className="px-4 py-3">MID user</th>
+              <th className="px-4 py-3">Password</th><th className="px-4 py-3">Build</th>
+              <th className="px-4 py-3"><span className="sr-only">จัดการ</span></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {items.map((i) => (
+              <tr key={i.id}>
+                <td className="whitespace-nowrap px-4 py-3 text-gray-900">{i.label}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-gray-700">{i.url}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-gray-700">{i.midUser ?? "—"}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-gray-500">{i.hasPassword ? "ตั้งไว้แล้ว" : "ยังไม่ได้ตั้ง"}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-gray-500">{i.buildstamp ?? "—"}</td>
+                <td className="space-x-3 whitespace-nowrap px-4 py-3 text-right">
+                  <button type="button" className="text-blue-600 hover:underline dark:text-blue-400" onClick={() => startEdit(i)}>แก้ไข</button>
+                  <button type="button" className="text-red-600 hover:underline" onClick={() => setDel(i)}>ลบ</button>
+                </td>
+              </tr>
+            ))}
+            {items.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-400">ยังไม่มี instance</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {del && (
+        <ConfirmDialog title={`ลบ instance ${del.label}?`} confirmLabel="ลบ instance" danger busy={busy}
+          onCancel={() => setDel(null)} onConfirm={() => void confirmDelete()}>
+          credentials ที่เก็บไว้จะถูกลบ การลบไม่สามารถย้อนกลับได้ (ลบไม่ได้ถ้ายังมี MID ใช้ instance นี้อยู่)
+        </ConfirmDialog>
+      )}
+    </section>
+  )
+}
