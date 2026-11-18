@@ -22,3 +22,25 @@ it("empty or non-JSON detail", () => {
   expect(detailPairs("{}")).toEqual([])
   expect(detailPairs("not json")).toBeNull()
 })
+
+it("labels AgentHub actions in Thai (spec §7)", () => {
+  for (const a of ["agent.file.write", "agent.file.upload", "agent.file.mkdir", "agent.file.rename", "agent.file.delete", "agent.restart", "agent.check_failed"]) {
+    expect(actionLabel(a), a).toMatch(/AgentHub/)
+  }
+  expect(actionLabel("agent.file.upload")).toBe("AgentHub อัปโหลดไฟล์")
+  expect(actionLabel("agent.check_failed")).toBe("AgentHub ถูกปฏิเสธ (เช็กไม่ผ่าน)")
+})
+
+it("shows via: agenthub and the taskId first in the detail pairs", () => {
+  const d = JSON.stringify({ path: "agent/extlib/a.jar", via: "agenthub", taskId: "task-9", sessionInstances: ["https://a.service-now.com/", "https://b.service-now.com/"], size: 10 })
+  expect(detailPairs(d)).toEqual([
+    ["ผ่าน", "agenthub"],
+    ["Task (AgentHub)", "task-9"],
+    ["พาธ", "agent/extlib/a.jar"],
+    ["Instance ของ session", "https://a.service-now.com/, https://b.service-now.com/"],
+    ["ขนาด", "10 B"],
+  ])
+  expect(detailPairs(JSON.stringify({ via: "agenthub", taskId: "t", failed: ["agent_access", "mid_ready"] }))).toEqual([
+    ["ผ่าน", "agenthub"], ["Task (AgentHub)", "t"], ["เช็กที่ไม่ผ่าน", "agent_access, mid_ready"],
+  ])
+})

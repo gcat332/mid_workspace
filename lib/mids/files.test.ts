@@ -11,7 +11,7 @@ vi.mock("@/lib/db/client", () => ({
 }))
 vi.mock("@/lib/mids/status", () => ({ readServiceStatus: async () => ({ state: "inactive", pid: null, memoryBytes: null, since: null }), runSystemctl: async () => ({ code: 0, stdout: "" }) }))
 
-import { dirReadOnly, hooks, listDir, openDownload, mkdir, readText, remove, rename, upload, writeText } from "./files"
+import { dirReadOnly, hooks, listDir, openDownload, mkdir, readText, remove, rename, upload, uploadStream, writeText } from "./files"
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex")
 let root: string
@@ -104,6 +104,23 @@ describe("readText / writeText", () => {
     await rejects(writeText("m1", "agent/conf/wrapper-override.conf", "x", sha("a=1\n")), "use_config_tab", 403)
     await rejects(readText("m1", "agent/config.xml"), "use_config_tab", 403)
     await rejects(openDownload("m1", "agent/config.xml"), "use_config_tab", 403)
+  })
+})
+
+describe("writeText with baseHash \"\" creates a new file (spec 5.3)", () => {
+  it("creates 0664 once; a second create or an existing file is stale; same rules as edits", async () => {
+    expect(await writeText("m1", "agent/extlib/new.properties", "a=1\n", "")).toEqual({ hash: sha("a=1\n") })
+    const p = path.join(m, "agent/extlib/new.properties")
+    expect(fs.readFileSync(p, "utf8")).toBe("a=1\n")
+    expect(fs.statSync(p).mode & 0o777).toBe(0o664)
+    await rejects(writeText("m1", "agent/extlib/new.properties", "b", ""), "stale", 409)
+    await rejects(writeText("m1", "work/note.txt", "b", ""), "stale", 409)
+    expect(fs.readFileSync(path.join(m, "work/note.txt"), "utf8")).toBe("hello")
+    await rejects(writeText("m1", "agent/bin/new.sh", "x", ""), "read_only", 403)
+    await rejects(writeText("m1", "agent/config.xml", "x", ""), "use_config_tab", 403)
+    await rejects(writeText("m1", "nodir/x.txt", "x", ""), "not_found", 404)
+    fs.symlinkSync("/nonexistent-zzz", path.join(m, "work/dl"))
+    await rejects(writeText("m1", "work/dl", "x", ""), "path_outside")
   })
 })
 
@@ -329,4 +346,88 @@ describe("FIFO at the target is refused promptly (no hang)", () => {
     fifo()
     expect((await listDir("m1", "work")).map((e) => e.name)).not.toContain("pipe")
   }, 2000)
+})
+
+describe("uploadStream (raw body, AgentHub)", () => {
+  afterEach(() => { hooks.beforeIo = undefined })
+  const streamOf = (...chunks: (string | Uint8Array)[]) => new ReadableStream<Uint8Array>({
+    start(c) { for (const x of chunks) c.enqueue(typeof x === "string" ? Buffer.from(x) : x); c.close() },
+  })
+  const parts = (d: string) => fs.readdirSync(path.join(m, d)).filter((n) => n.endsWith(".part"))
+
+  it("streams a new file (0664) and atomically replaces an existing one (new inode)", async () => {
+    expect(await uploadStream("m1", "agent/extlib", "x.jar", streamOf("v1", "-a"), 4)).toEqual({ size: 4, path: "agent/extlib/x.jar" })
+    const p = path.join(m, "agent/extlib/x.jar")
+    expect(fs.readFileSync(p, "utf8")).toBe("v1-a")
+    expect(fs.statSync(p).mode & 0o777).toBe(0o664)
+    const ino = fs.statSync(p).ino
+    await uploadStream("m1", "agent/extlib", "x.jar", streamOf("v2"), 2)
+    expect(fs.readFileSync(p, "utf8")).toBe("v2")
+    expect(fs.statSync(p).ino).not.toBe(ino)
+    expect(parts("agent/extlib")).toEqual([])
+  })
+  it("empty body with length 0 creates an empty file; null body counts as empty", async () => {
+    await uploadStream("m1", "work", "e", null, 0)
+    expect(fs.readFileSync(path.join(m, "work/e"), "utf8")).toBe("")
+  })
+  it("missing/invalid declared length -> 411 length_required; over 50 MiB -> 413 too_large; body never read", async () => {
+    let pulled = false
+    const watched = () => new ReadableStream<Uint8Array>({ pull(c) { pulled = true; c.close() } }, { highWaterMark: 0 })
+    for (const bad of [Number.NaN, -1, 1.5]) await rejects(uploadStream("m1", "work", "a", watched(), bad), "length_required", 411)
+    await rejects(uploadStream("m1", "work", "a", watched(), 52428801), "too_large", 413)
+    expect(pulled).toBe(false)
+    expect(fs.existsSync(path.join(m, "work/a"))).toBe(false)
+  })
+  it("body shorter than declared -> invalid_request, no file and no temp left", async () => {
+    await rejects(uploadStream("m1", "work", "s.bin", streamOf("abc"), 10), "invalid_request", 400)
+    expect(fs.existsSync(path.join(m, "work/s.bin"))).toBe(false)
+    expect(parts("work")).toEqual([])
+  })
+  it("body longer than declared -> invalid_request as soon as it overflows; existing file untouched", async () => {
+    let pulls = 0
+    const endless = new ReadableStream<Uint8Array>({ pull(c) { pulls++; c.enqueue(Buffer.from("zzzz")) } })
+    await rejects(uploadStream("m1", "work", "note.txt", endless, 5), "invalid_request", 400)
+    expect(pulls).toBeLessThan(5)
+    expect(fs.readFileSync(path.join(m, "work/note.txt"), "utf8")).toBe("hello")
+    expect(parts("work")).toEqual([])
+  })
+  it("a stream error removes the temp file and keeps the original", async () => {
+    const broken = new ReadableStream<Uint8Array>({
+      start(c) { c.enqueue(Buffer.from("par")) },
+      pull(c) { c.error(new Error("client went away")) },
+    })
+    await expect(uploadStream("m1", "work", "note.txt", broken, 10)).rejects.toThrow()
+    expect(fs.readFileSync(path.join(m, "work/note.txt"), "utf8")).toBe("hello")
+    expect(parts("work")).toEqual([])
+  })
+  it("same final-name rules as upload(): program dirs, config files, bad names, symlink/hardlink targets", async () => {
+    await rejects(uploadStream("m1", "agent/bin", "a", streamOf("x"), 1), "read_only", 403)
+    await rejects(uploadStream("m1", "agent", "config.xml", streamOf("x"), 1), "use_config_tab", 403)
+    await rejects(uploadStream("m1", "agent/conf", "wrapper-override.conf", streamOf("x"), 1), "use_config_tab", 403)
+    await rejects(uploadStream("m1", "work", "../x.jar", streamOf("x"), 1), "invalid_filename", 400)
+    fs.symlinkSync(path.join(m, "work/note.txt"), path.join(m, "work/ln"))
+    await rejects(uploadStream("m1", "work", "ln", streamOf("x"), 1), "conflict", 409)
+    fs.linkSync(path.join(m, "work/note.txt"), path.join(m, "work/hl"))
+    await rejects(uploadStream("m1", "work", "hl", streamOf("x"), 1), "conflict", 409)
+    fs.mkdirSync(path.join(m, "work/dd"))
+    await rejects(uploadStream("m1", "work", "dd", streamOf("x"), 1), "conflict", 409)
+    fs.symlinkSync(path.join(m, "agent/bin"), path.join(m, "work/bl"))
+    await rejects(uploadStream("m1", "work/bl", "x", streamOf("x"), 1), "read_only", 403)
+    expect(fs.readFileSync(path.join(m, "work/note.txt"), "utf8")).toBe("hello")
+    expect(fs.lstatSync(path.join(m, "work/ln")).isSymbolicLink()).toBe(true)
+    expect(parts("work")).toEqual([])
+  })
+  it("dir swapped for a symlink into agent/bin after the checks -> path_outside, nothing written", async () => {
+    fs.mkdirSync(path.join(m, "work/a/b"), { recursive: true })
+    fs.mkdirSync(path.join(m, "agent/bin/b"))
+    hooks.beforeIo = () => { fs.renameSync(path.join(m, "work/a"), path.join(m, "work/a.old")); fs.symlinkSync(path.join(m, "agent/bin"), path.join(m, "work/a")) }
+    await rejects(uploadStream("m1", "work/a/b", "x.txt", streamOf("x"), 1), "path_outside", 400)
+    expect(fs.readdirSync(path.join(m, "agent/bin/b"))).toEqual([])
+  })
+  it("exactly 50 MiB in many chunks is accepted", async () => {
+    const chunk = new Uint8Array(1024 * 1024)
+    const s = new ReadableStream<Uint8Array>({ start(c) { for (let i = 0; i < 50; i++) c.enqueue(chunk); c.close() } })
+    await uploadStream("m1", "work", "big", s, 52428800)
+    expect(fs.statSync(path.join(m, "work/big")).size).toBe(52428800)
+  })
 })

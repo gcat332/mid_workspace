@@ -29,12 +29,24 @@ const ACTION_LABELS: Record<string, string> = {
   "instance.test": "ทดสอบการเชื่อมต่อ Instance",
   "ip_allowlist.add": "เพิ่ม IP Allowlist",
   "ip_allowlist.remove": "ลบ IP Allowlist",
+  "agent.file.write": "AgentHub แก้ไขไฟล์",
+  "agent.file.upload": "AgentHub อัปโหลดไฟล์",
+  "agent.file.mkdir": "AgentHub สร้างโฟลเดอร์",
+  "agent.file.rename": "AgentHub เปลี่ยนชื่อไฟล์",
+  "agent.file.delete": "AgentHub ลบไฟล์",
+  "agent.restart": "AgentHub รีสตาร์ท MID",
+  "agent.check_failed": "AgentHub ถูกปฏิเสธ (เช็กไม่ผ่าน)",
 }
 
 /** Thai label of an audit action, or null when unknown (the page then shows the raw action name). */
 export const actionLabel = (action: string): string | null => ACTION_LABELS[action] ?? null
 
 const KEY_LABELS: Record<string, string> = {
+  via: "ผ่าน",
+  taskId: "Task (AgentHub)",
+  sessionInstances: "Instance ของ session",
+  failed: "เช็กที่ไม่ผ่าน",
+  mid: "MID",
   path: "พาธ",
   file: "ไฟล์",
   to: "เปลี่ยนเป็น",
@@ -83,6 +95,7 @@ function valueText(key: string, v: unknown): string {
   if (key === "size" && typeof v === "number") return bytes(v)
   if (key === "role" && typeof v === "string") return ROLE_TH[v] ?? v
   if (v === null || v === undefined || v === "") return "-"
+  if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v.length ? v.join(", ") : "-"
   return typeof v === "string" || typeof v === "number" ? String(v) : JSON.stringify(v)
 }
 
@@ -91,7 +104,10 @@ export function detailPairs(detail: string): [string, string][] | null {
   let j: unknown
   try { j = JSON.parse(detail) } catch { return null }
   if (typeof j !== "object" || j === null || Array.isArray(j)) return null
-  return Object.entries(j).map(([k, v]) => [KEY_LABELS[k] ?? k, valueText(k, v)])
+  // AgentHub entries lead with who acted through what: via + taskId first.
+  const rank = (k: string) => (k === "via" ? 0 : k === "taskId" ? 1 : 2)
+  const entries = Object.entries(j).sort(([a], [b]) => rank(a) - rank(b))
+  return entries.map(([k, v]) => [KEY_LABELS[k] ?? k, valueText(k, v)])
 }
 
 /** Compact one-line JSON; falls back to the raw text when detail is not valid JSON. */

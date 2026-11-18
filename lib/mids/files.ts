@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import { randomBytes } from "node:crypto"
 import { sha256 } from "@/lib/hash"
 import type { FileHandle } from "node:fs/promises"
 import path from "node:path"
@@ -183,6 +184,7 @@ export function readText(name: string, rel: string): Promise<{ content: string; 
   })
 }
 
+/** `baseHash: ""` creates a new file (O_EXCL; an existing one is `stale`), otherwise edits in place with stale detection. */
 export function writeText(name: string, rel: string, content: string, baseHash: string): Promise<{ hash: string }> {
   return mapped(async () => {
     const c = await ctxFor(name)
@@ -190,6 +192,7 @@ export function writeText(name: string, rel: string, content: string, baseHash: 
     assertWritable(c, abs)
     const data = Buffer.from(content, "utf8")
     if (data.length > MAX_TEXT_BYTES) throw new MidError("too_large", 413, TOO_BIG_TEXT)
+    if (baseHash === "") return createText(c, rel, data)
     await beforeIo()
     // In place so owner, group and mode are preserved; truncation happens only after all checks.
     const { h, st } = await openFile(abs, "rw", writeCheck(c))
@@ -204,6 +207,33 @@ export function writeText(name: string, rel: string, content: string, baseHash: 
     }
     return { hash: sha256(data) }
   })
+}
+
+async function createText(c: Ctx, rel: string, data: Buffer): Promise<{ hash: string }> {
+  const e = await entryOf(c, rel)
+  await statDirOf(e.parent)
+  assertWritable(c, e.parent)
+  assertWritable(c, e.abs)
+  await beforeIo()
+  const wc = writeCheck(c)
+  const d = await openDir(e.parent, wc)
+  try {
+    let h: FileHandle
+    try {
+      h = await createFileIn(d, e.parent, e.base, wc)
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") throw new MidError("stale") // created meanwhile: reload first
+      throw err
+    }
+    try {
+      await h.write(data, 0, data.length, 0)
+    } finally {
+      await h.close()
+    }
+  } finally {
+    await d.close()
+  }
+  return { hash: sha256(data) }
 }
 
 export function upload(name: string, dirRel: string, filename: string, data: Buffer): Promise<{ size: number; path: string }> {
@@ -238,6 +268,73 @@ export function upload(name: string, dirRel: string, filename: string, data: Buf
       await d.close()
     }
     return { size: data.length, path: path.relative(c.root, path.join(dir, filename)) }
+  })
+}
+
+const LENGTH_REQUIRED_MSG = "อัปโหลดต้องส่ง Content-Length เป็นจำนวนไบต์ของไฟล์ (เช่น curl --data-binary @ไฟล์) แล้วลองใหม่"
+const LENGTH_MISMATCH_MSG = "ข้อมูลที่ส่งมาไม่ตรงกับ Content-Length (ส่งไม่ครบหรือเกิน) ไฟล์จึงไม่ถูกบันทึก ส่งไฟล์ใหม่อีกครั้ง"
+
+/**
+ * Raw-body upload (AgentHub). Same rules for the final name as upload(), but the body is streamed into a temp file
+ * `.midhub-upload-<random>.part` created O_EXCL in the verified target dir, counted against `declaredLength` (and the
+ * 50 MiB cap) as it arrives, and renamed over the final name through the dir fd only when exactly `declaredLength`
+ * bytes arrived. Any failure removes the temp file; an existing file is replaced atomically or left untouched.
+ * The length checks run before anything else, so an oversized/unsized request never has its body read.
+ */
+export function uploadStream(
+  name: string, dirRel: string, filename: string, body: ReadableStream<Uint8Array> | null, declaredLength: number,
+): Promise<{ size: number; path: string }> {
+  return mapped(async () => {
+    if (!Number.isInteger(declaredLength) || declaredLength < 0) throw new MidError("length_required", 411, LENGTH_REQUIRED_MSG)
+    if (declaredLength > MAX_UPLOAD_BYTES) throw new MidError("too_large")
+    const c = await ctxFor(name)
+    plainName(filename)
+    const dir = await resolveMidPath(name, dirRel)
+    await statDirOf(dir)
+    assertWritable(c, dir)
+    assertWritable(c, path.join(dir, filename))
+    await beforeIo()
+    const wc = writeCheck(c)
+    const d = await openDir(dir, wc)
+    try {
+      // Final name: exactly upload()'s overwrite rules (never a symlink/dir, regular file with nlink 1, real path checked).
+      try {
+        await (await openFileIn(d, dir, filename, wc)).h.close()
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code
+        if (code === "ELOOP" || code === "EISDIR") throw new MidError("conflict")
+        if (code !== "ENOENT") throw e
+      }
+      const tmp = `.midhub-upload-${randomBytes(8).toString("hex")}.part`
+      const h = await createFileIn(d, dir, tmp, wc)
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+      let n = 0
+      try {
+        try {
+          reader = body?.getReader()
+          for (;;) {
+            if (!reader) break
+            const { done, value } = await reader.read()
+            if (done) break
+            n += value.byteLength
+            if (n > declaredLength || n > MAX_UPLOAD_BYTES) throw new MidError("invalid_request", 400, LENGTH_MISMATCH_MSG)
+            let off = 0
+            while (off < value.byteLength) off += (await h.write(value, off, value.byteLength - off)).bytesWritten
+          }
+          if (n !== declaredLength) throw new MidError("invalid_request", 400, LENGTH_MISMATCH_MSG)
+        } finally {
+          await h.close()
+        }
+        await renameIn(d, tmp, filename)
+      } catch (e) {
+        await reader?.cancel().catch(() => {})
+        await fs.promises.unlink(fdPath(d, tmp)).catch(() => {})
+        throw e
+      }
+    } finally {
+      await d.close()
+    }
+    return { size: declaredLength, path: path.relative(c.root, path.join(dir, filename)) }
   })
 }
 

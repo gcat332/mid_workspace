@@ -4,15 +4,12 @@ import { recordAudit } from "@/lib/audit"
 import { callHelper } from "@/lib/helper/client"
 import { handleRouteError, readJsonObject } from "@/lib/http/route"
 import { getMid } from "@/lib/mids/registry"
-import { readHostMemory } from "@/lib/mids/status"
+import { lowMemoryResponse, startNeedsMemory } from "@/lib/mids/memory-guard"
 
 const ACTIONS = ["start", "stop", "restart", "fixOwnership"] as const
 type Action = (typeof ACTIONS)[number]
 /** Audit action names (fixOwnership keeps the dotted snake_case style of the others). */
 const AUDIT: Record<Action, string> = { start: "mid.start", stop: "mid.stop", restart: "mid.restart", fixOwnership: "mid.fix_ownership" }
-
-const GIB = 1024 ** 3
-const LOW_MEMORY_BYTES = GIB
 
 function invalid(message: string) {
   return NextResponse.json({ code: "invalid_request", message }, { status: 400 })
@@ -35,21 +32,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ name: string }
 
     const mid = await getMid((await ctx.params).name)
 
-    const state = mid.status.state
-    const needsMemory = action === "start" || (action === "restart" && state !== "running" && state !== "starting")
-    if (needsMemory && !confirmLowMemory) {
-      const { availableBytes } = await readHostMemory()
-      if (availableBytes < LOW_MEMORY_BYTES) {
-        const gb = (availableBytes / GIB).toFixed(1)
-        return NextResponse.json(
-          {
-            code: "low_memory",
-            message: `RAM ว่างเหลือน้อย (${gb} GB) การ start อาจทำให้เครื่องช้าหรือ AgentHub ล่ม — กดยืนยันถ้าต้องการทำต่อ`,
-            availableBytes,
-          },
-          { status: 409 },
-        )
-      }
+    if (startNeedsMemory(action, mid.status.state) && !confirmLowMemory) {
+      const low = await lowMemoryResponse("กดยืนยันถ้าต้องการทำต่อ")
+      if (low) return low
     }
 
     const detail = confirmLowMemory === undefined ? {} : { confirmLowMemory }

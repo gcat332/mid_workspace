@@ -1,6 +1,6 @@
 import { recordAudit } from "@/lib/audit"
 import { normalizeInstanceUrl } from "@/lib/instances/url"
-import { MidError } from "@/lib/mids/names"
+import { MidError, validateMidName } from "@/lib/mids/names"
 import { getMid, type MidSummary } from "@/lib/mids/registry"
 import { isActiveJobStatus, jobStageLabel } from "@/lib/ui/stages"
 import type { AgentCaller } from "@/lib/agent/auth"
@@ -90,6 +90,13 @@ export class AgentCheckError extends MidError {
   }
 }
 
+/** The audit detail every agent.* entry starts with (spec 5.3); never carries the secret. */
+export const agentAuditDetail = (caller: AgentCaller) => ({
+  via: "agenthub" as const,
+  taskId: caller.taskId,
+  sessionInstances: caller.sessionInstances,
+})
+
 /** Loads the MID and requires every check to pass; failures are audited under the real actor and thrown. */
 export async function requireUsableMid(caller: AgentCaller, name: string): Promise<MidSummary> {
   const mid = await getMid(name)
@@ -97,11 +104,14 @@ export async function requireUsableMid(caller: AgentCaller, name: string): Promi
   const failed = checks.filter((c) => !c.ok)
   if (failed.length === 0) return mid
   await recordAudit(caller.user, "agent.check_failed", mid.name, {
-    via: "agenthub",
-    taskId: caller.taskId,
-    sessionInstances: caller.sessionInstances,
+    ...agentAuditDetail(caller),
     mid: mid.name,
     failed: failed.map((c) => c.id),
   })
   throw new AgentCheckError(failed[0].message ?? "MID นี้ยังไม่ผ่านเงื่อนไขสำหรับ AgentHub", checks)
+}
+
+/** For per-MID routes: name syntax first, then the full checklist (audited on failure); nothing else may run before. */
+export async function usableMidParam(caller: AgentCaller, params: Promise<{ name: string }>): Promise<MidSummary> {
+  return requireUsableMid(caller, validateMidName((await params).name))
 }
