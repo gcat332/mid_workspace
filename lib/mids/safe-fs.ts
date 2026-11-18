@@ -6,7 +6,8 @@
 // fs.protected_hardlinks=1 (default) so midsvc cannot hardlink files it does not own into the tree.
 // Residual races that are inherent in Node/POSIX and NOT closed here:
 //  - rename() has no RENAME_NOREPLACE: a target created between our exists-check and the rename is overwritten.
-//  - Writes are in place and not atomic: readers (the running MID) may see a truncated/partial file.
+//  - Writes through openFile/openFileIn are in place and not atomic (readers may see a partial file); provision's
+//    atomicWrite (mid-files.ts) writes a temp file in the same verified dir and renames it instead.
 //  - A name inside a verified directory can still be swapped by midsvc between our lstat and our
 //    unlink/rmdir; the effect is confined to that (verified, in-sandbox, writable) directory.
 import fs from "node:fs"

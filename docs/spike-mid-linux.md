@@ -11,7 +11,7 @@ by a human (it is a write to the instance).
 
 - group `midhub` (system), user `midsvc` (system, nologin, no home, primary group `midhub`),
   `bsmmidhub` added to `midhub`; `fs.protected_hardlinks=1`.
-- `/opt/midhub` root:root 0755; `mids` midsvc:midhub 2775; `packages`, `archive`, `db` bsmmidhub 0750.
+- `/opt/midhub` root:root 0755; `mids` midsvc:midhub 2770 (was 2775; no access for others because config.xml holds a plaintext password until first start); `packages`, `archive`, `db` bsmmidhub 0750.
 - `packages/` is not readable by `midsvc`, so the package is extracted **as bsmmidhub** into `mids/<name>`
   (group `midhub`, setgid dir) and then ownership is normalised exactly like the helper's `fixOwnership`
   (`chown -R -P -h midsvc:midhub` as root, then `chmod -R g+rwX` as midsvc via `setpriv`). This is the flow

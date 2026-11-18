@@ -115,13 +115,29 @@ describe("configureMid", () => {
     expect(rd("new1", "agent/config.xml")).toBe(a)
   })
 
-  it("attacker values stay inside their attribute", async () => {
-    const evil = 'a"/><parameter name="x" value="y\n]]>--><!--\x01\x7f'
-    const r = await configureMid("new1", { ...INPUT, snName: evil, password: evil }).then(() => null, (e: Error) => e)
-    expect(r).toBeNull()
-    const p = readParams(rd("new1", "agent/config.xml"))
+  it("escapes \\x7f, quote, <, ]]> and newline so they stay inside the attribute", async () => {
+    const evil = 'a"/><parameter name="x" value="y\n]]>--><!--\x7f'
+    await configureMid("new1", { ...INPUT, snName: evil, password: evil })
+    const xml = rd("new1", "agent/config.xml")
+    expect(validateXml(xml).ok).toBe(true)
+    const p = readParams(xml)
     expect(p.name).toBe(evil)
     expect(p.x).toBeUndefined()
+  })
+
+  it.each(["\x01", "\x0b", "\x1f", "\ufffe", "\uffff", "\ud800", "a\udc00"])("rejects XML-forbidden char %j in every string field", async (c) => {
+    const proxy = { host: "h", port: 1 }
+    const cases: ProvisionInput[] = [
+      { ...INPUT, url: "u" + c }, { ...INPUT, midUser: c }, { ...INPUT, password: "p" + c }, { ...INPUT, snName: c },
+      { ...INPUT, proxy: { ...proxy, host: "h" + c } }, { ...INPUT, proxy: { ...proxy, user: c } }, { ...INPUT, proxy: { ...proxy, password: c } },
+    ]
+    for (const i of cases) await expect(configureMid("new1", i)).rejects.toMatchObject({ code: "invalid_request" })
+    expect(rd("new1", "agent/config.xml")).toBe(TEMPLATE)
+  })
+
+  it("error detail names the field only", async () => {
+    const e = await configureMid("new1", { ...INPUT, password: "SECRET\x01" }).then(() => new Error("no"), (x: Error) => x)
+    expect(JSON.stringify([e.message, (e as { detail?: string }).detail])).not.toMatch(/SECRET/)
   })
 
   it("invalid_xml error (registered, 400) carries only the line, never values", async () => {
@@ -241,6 +257,19 @@ describe("cloneFiles", () => {
     ac.abort(new Error("stop"))
     await expect(cloneFiles("src1", "new1", ac.signal)).rejects.toThrow("stop")
     expect(fs.readdirSync(path.join(mid("new1"), "agent")).filter((n) => n.includes(".midhub-"))).toEqual([])
+  })
+
+  it("aborts mid-copy of a large file and leaves no temp file in the dst subdir", async () => {
+    fs.mkdirSync(path.join(mid("src1"), "agent/extlib/big"))
+    fs.writeFileSync(path.join(mid("src1"), "agent/extlib/big/huge.jar"), Buffer.alloc(64 * 1024 ** 2, 1))
+    const ac = new AbortController()
+    const dstDir = path.join(mid("new1"), "agent/extlib/big")
+    const p = cloneFiles("src1", "new1", ac.signal)
+    const t = setInterval(() => {
+      if (fs.existsSync(dstDir) && fs.readdirSync(dstDir).some((n) => n.includes(".midhub-"))) ac.abort(new Error("stop"))
+    }, 1)
+    await expect(p).rejects.toThrow("stop").finally(() => clearInterval(t))
+    expect(fs.readdirSync(dstDir)).toEqual([])
   })
 
   it("writes atomically: no temp files left behind", async () => {

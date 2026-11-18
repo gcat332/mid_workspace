@@ -4,7 +4,7 @@ import { recordAudit } from "@/lib/audit"
 import type { SessionPayload } from "@/lib/auth/jwt"
 import { callHelper } from "@/lib/helper/client"
 import { MAX_HEAP_MB, MIN_HEAP_MB } from "@/lib/helper/protocol"
-import { readAllParams, readParams, setParams, validateXml } from "./config-xml"
+import { findInvalidXmlChar, invalidXmlCharLine, readAllParams, readParams, setParams, validateXml } from "./config-xml"
 import { CONFIG_XML, WRAPPER_OVERRIDE } from "./layout"
 import { MidError, validateMidName } from "./names"
 import { openFile, readAll, translateFsError } from "./safe-fs"
@@ -167,6 +167,10 @@ function validate(file: ConfigFile, content: string): void {
     if (!v.ok) {
       throw new MidError("invalid_xml", 400, `config.xml รูปแบบ XML ไม่ถูกต้อง ตรวจแท็กที่เปิด/ปิดไม่ตรงกันรอบบรรทัด ${v.line} แก้ไขแล้วบันทึกใหม่`, v.message)
     }
+    const line = invalidXmlCharLine(content)
+    if (line > 0) {
+      throw new MidError("invalid_xml", 400, `config.xml มีอักขระที่ XML ไม่อนุญาต (ตัวควบคุม) ใกล้บรรทัด ${line} ลบออกแล้วบันทึกใหม่`, `line ${line}`)
+    }
     return
   }
   const m = /^[ \t]*wrapper\.java\.maxmemory[ \t]*=[ \t]*(.*?)[ \t]*\r?$/m.exec(content)
@@ -251,6 +255,11 @@ export function saveForm(name: string, form: ConfigFormInput, baseHash: string, 
     const heap = form.heapMb
     if (!Number.isInteger(heap) || heap < MIN_HEAP_MB || heap > MAX_HEAP_MB) {
       throw new MidError("invalid_heap", 400, `RAM (heap) ต้องเป็นจำนวนเต็ม ${MIN_HEAP_MB}-${MAX_HEAP_MB} MB`)
+    }
+    for (const [k, v] of Object.entries({ url: form.url, username: form.username, midName: form.midName, proxyHost: form.proxyHost, proxyPort: form.proxyPort, proxyUser: form.proxyUser, password: form.password, proxyPassword: form.proxyPassword })) {
+      if (v !== undefined && findInvalidXmlChar(String(v)) !== -1) {
+        throw new MidError("invalid_request", 400, "ค่าที่กรอกมีอักขระควบคุมที่ XML ไม่อนุญาต ลบออกแล้วลองใหม่", `field ${k}`)
+      }
     }
     const row = await midRow(name)
     const xml = await readDisk(name, "config.xml")

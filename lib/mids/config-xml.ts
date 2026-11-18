@@ -189,3 +189,29 @@ export function readParamAttrs(xml: string): Array<{ name: string; attrs: Record
   }
   return out
 }
+
+// XML 1.0 forbids C0 controls except TAB/LF/CR, U+FFFE/U+FFFF and unpaired surrogates (also as character references).
+const BAD_CHAR = /[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+const BAD_REF = /&#(?:x0*([0-9a-fA-F]+)|(\d+));/g
+const badCode = (c: number): boolean =>
+  c < 9 || c === 0x0b || c === 0x0c || (c >= 0x0e && c <= 0x1f) || (c >= 0xd800 && c <= 0xdfff) || c === 0xfffe || c === 0xffff || c > 0x10ffff
+
+/** Index of the first character (or numeric character reference) that XML 1.0 forbids, or -1. */
+export function findInvalidXmlChar(text: string): number {
+  const m = BAD_CHAR.exec(text)
+  let at = m ? m.index : -1
+  for (const r of text.matchAll(BAD_REF)) {
+    if (at !== -1 && r.index > at) break
+    if (badCode(r[1] !== undefined ? parseInt(r[1], 16) : Number(r[2]))) {
+      at = r.index
+      break
+    }
+  }
+  return at
+}
+
+/** 1-based line of the first forbidden XML character in `text`, or 0 when there is none. */
+export function invalidXmlCharLine(text: string): number {
+  const at = findInvalidXmlChar(text)
+  return at === -1 ? 0 : text.slice(0, at).split("\n").length
+}

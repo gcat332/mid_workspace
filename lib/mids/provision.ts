@@ -6,7 +6,7 @@ import path from "node:path"
 import fs from "node:fs"
 import type { FileHandle } from "node:fs/promises"
 import { MAX_HEAP_MB, MIN_HEAP_MB } from "@/lib/helper/protocol"
-import { readParamAttrs, setParams, validateXml } from "./config-xml"
+import { findInvalidXmlChar, readParamAttrs, setParams, validateXml } from "./config-xml"
 import { setProp } from "./java-props"
 import { CONFIG_XML, GLIDE_PROPERTIES, LOG_COUNT_KEYS, MAX_LOG_FILES, MIN_LOG_FILES, WRAPPER_OVERRIDE } from "./layout"
 import { atomicWrite, isEnoent, readOpt, target, writeFileAt } from "./mid-files"
@@ -43,7 +43,7 @@ const xmlError = (line: number): MidError =>
 function validateInput(i: ProvisionInput): void {
   if (!i || typeof i !== "object") throw bad("input")
   for (const [k, v] of [["url", i.url], ["midUser", i.midUser], ["password", i.password], ["snName", i.snName]] as const) {
-    if (typeof v !== "string" || (k !== "password" && v === "") || /\0/.test(v)) throw bad(`field ${k}`)
+    if (typeof v !== "string" || (k !== "password" && v === "") || findInvalidXmlChar(v) !== -1) throw bad(`field ${k}`)
   }
   if (!Number.isInteger(i.logFiles) || i.logFiles < MIN_LOG_FILES || i.logFiles > MAX_LOG_FILES) {
     throw new MidError("invalid_request", undefined, `จำนวนไฟล์ log ต้องอยู่ระหว่าง ${MIN_LOG_FILES}-${MAX_LOG_FILES}`, "logFiles")
@@ -55,8 +55,9 @@ function validateInput(i: ProvisionInput): void {
   if (p !== undefined) {
     if (typeof p !== "object" || p === null || typeof p.host !== "string" || p.host === "") throw bad("proxy.host")
     if (!Number.isInteger(p.port) || p.port < 1 || p.port > 65535) throw bad("proxy.port")
+    if (findInvalidXmlChar(p.host) !== -1) throw bad("proxy.host")
     for (const [k, v] of [["user", p.user], ["password", p.password]] as const) {
-      if (v !== undefined && typeof v !== "string") throw bad(`proxy.${k}`)
+      if (v !== undefined && (typeof v !== "string" || findInvalidXmlChar(v) !== -1)) throw bad(`proxy.${k}`)
     }
   }
 }
@@ -137,15 +138,16 @@ async function copyFile(s: CloneState, srcDir: FileHandle, srcAbs: string, dstAb
   try {
     if (st.nlink !== 1) return skip(s, rel, "hardlink")
     if (s.bytes + st.size > CLONE_MAX_BYTES) throw capError(`bytes>${CLONE_MAX_BYTES}`)
-    const buf = Buffer.allocUnsafe(Math.min(CHUNK, Math.max(st.size, 1)))
+    const buf = Buffer.allocUnsafe(CHUNK)
+    const size = st.size // a file that grows during the copy is cut here
     await atomicWrite(
       { abs: dstAbs, check: s.dstCheck },
       async (w) => {
-        for (let pos = 0; ; ) {
+        for (let pos = 0; pos < size; ) {
           s.signal?.throwIfAborted()
-          const { bytesRead } = await h.read(buf, 0, buf.length, pos)
+          const { bytesRead } = await h.read(buf, 0, Math.min(CHUNK, size - pos), pos)
           if (bytesRead === 0) break
-          s.bytes += bytesRead // actual bytes: a file that grew after fstat still counts
+          s.bytes += bytesRead
           if (s.bytes > CLONE_MAX_BYTES) throw capError(`bytes>${CLONE_MAX_BYTES}`)
           await writeAll(w, buf.subarray(0, bytesRead))
           pos += bytesRead

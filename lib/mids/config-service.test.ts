@@ -109,6 +109,14 @@ describe("saveConfigFile", () => {
     expect(rd(xmlPath)).toBe(XML)
     expect(db.backups).toHaveLength(0)
   })
+  it("raw save with a forbidden control char or char reference -> invalid_xml with the line", async () => {
+    for (const bad of [XML.replace("old", "o\x01ld"), XML.replace("old", "o&#1;ld")]) {
+      const err = await saveConfigFile("m1", "config.xml", bad, sha(XML), user).catch((e) => e)
+      expect(err).toMatchObject({ code: "invalid_xml", status: 400 })
+      expect(err.detail).toMatch(/^line \d+$/)
+    }
+    expect(rd(xmlPath)).toBe(XML)
+  })
   it("invalid XML -> 400 with a Thai message + line number, parser text only in detail (Q-M3), file unchanged", async () => {
     const bad = XML.replace("</parameters>", "<oops>\n</parameters>")
     const err = await saveConfigFile("m1", "config.xml", bad, sha(XML), user).catch((e) => e)
@@ -182,6 +190,12 @@ describe("partial retry", () => {
 })
 
 describe("saveForm", () => {
+  it("rejects XML-forbidden control chars in form values, file unchanged", async () => {
+    const form = { url: "https://old.service-now.com/", username: "svc", midName: "mid-one", useProxy: false, proxyHost: "", proxyPort: "", proxyUser: "", heapMb: 1024, password: "pw\x01", proxyPassword: "" }
+    const err = await saveForm("m1", form, sha(XML), sha(WRAP), user).catch((e) => e)
+    expect(err).toMatchObject({ code: "invalid_request", detail: "field password" })
+    expect(rd(xmlPath)).toBe(XML)
+  })
   it("edits only the changed parameters; empty password means unchanged", async () => {
     const form = { url: "https://new.service-now.com/", username: "svc", midName: "mid-one", useProxy: false, proxyHost: "", proxyPort: "", proxyUser: "", heapMb: 1024, password: "", proxyPassword: "" }
     await saveForm("m1", form, sha(XML), sha(WRAP), user)
