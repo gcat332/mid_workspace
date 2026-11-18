@@ -1,0 +1,100 @@
+import { NextResponse } from "next/server"
+import { requireUser } from "@/lib/auth/helpers"
+import { recordAudit } from "@/lib/audit"
+import { handleRouteError } from "@/lib/http/route"
+import { MAX_UPLOAD_BYTES, listDir, mkdir, readText, remove, rename, upload, writeText } from "@/lib/mids/files"
+import { MidError } from "@/lib/mids/names"
+
+type Ctx = { params: Promise<{ name: string }> }
+
+// GET    ?path=            -> { entries }           (list a directory)
+// GET    ?path=&content=1  -> { content, hash }     (open a text file)
+// PUT    { path, content, baseHash }                -> { hash }
+// POST   multipart { dir, file }                    -> { size }      (upload)
+// POST   JSON { op: "mkdir", parent, name } | { op: "rename", path, newName } -> {} | { to }
+// DELETE ?path=                                     -> {}
+const bad = () => new MidError("invalid_request")
+const str = (v: unknown): string => {
+  if (typeof v !== "string") throw bad()
+  return v
+}
+const MULTIPART_OVERHEAD = 1024 * 1024
+
+export async function GET(req: Request, ctx: Ctx) {
+  try {
+    await requireUser()
+    const { name } = await ctx.params
+    const url = new URL(req.url)
+    const p = url.searchParams.get("path") ?? ""
+    if (url.searchParams.get("content") === "1") return NextResponse.json(await readText(name, p))
+    return NextResponse.json({ entries: await listDir(name, p) })
+  } catch (e) {
+    return handleRouteError(e)
+  }
+}
+
+export async function PUT(req: Request, ctx: Ctx) {
+  try {
+    const user = await requireUser()
+    const { name } = await ctx.params
+    const b = (await req.json().catch(() => null)) as Record<string, unknown> | null
+    if (typeof b !== "object" || b === null) throw bad()
+    const path = str(b.path)
+    const r = await writeText(name, path, str(b.content), str(b.baseHash))
+    await recordAudit(user, "file.write", name, { path })
+    return NextResponse.json(r)
+  } catch (e) {
+    return handleRouteError(e)
+  }
+}
+
+export async function POST(req: Request, ctx: Ctx) {
+  try {
+    const user = await requireUser()
+    const { name } = await ctx.params
+    const type = req.headers.get("content-type") ?? ""
+    if (type.startsWith("multipart/form-data")) {
+      const len = Number(req.headers.get("content-length") ?? "0")
+      if (len > MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD) throw new MidError("too_large")
+      const form = await req.formData().catch(() => null)
+      const file = form?.get("file")
+      if (!form || !(file instanceof File)) throw bad()
+      if (file.size > MAX_UPLOAD_BYTES) throw new MidError("too_large")
+      const dir = form.get("dir") ?? ""
+      const r = await upload(name, str(dir), file.name, Buffer.from(await file.arrayBuffer()))
+      await recordAudit(user, "file.upload", name, { path: `${dir}/${file.name}`.replace(/^\//, ""), size: r.size })
+      return NextResponse.json(r)
+    }
+    const b = (await req.json().catch(() => null)) as Record<string, unknown> | null
+    if (typeof b !== "object" || b === null) throw bad()
+    if (b.op === "mkdir") {
+      const parent = str(b.parent)
+      const dn = str(b.name)
+      await mkdir(name, parent, dn)
+      await recordAudit(user, "file.mkdir", name, { path: `${parent}/${dn}`.replace(/^\//, "") })
+      return NextResponse.json({})
+    }
+    if (b.op === "rename") {
+      const path = str(b.path)
+      const r = await rename(name, path, str(b.newName))
+      await recordAudit(user, "file.rename", name, { path, to: r.to })
+      return NextResponse.json(r)
+    }
+    throw bad()
+  } catch (e) {
+    return handleRouteError(e)
+  }
+}
+
+export async function DELETE(req: Request, ctx: Ctx) {
+  try {
+    const user = await requireUser()
+    const { name } = await ctx.params
+    const path = new URL(req.url).searchParams.get("path") ?? ""
+    await remove(name, path)
+    await recordAudit(user, "file.delete", name, { path })
+    return NextResponse.json({})
+  } catch (e) {
+    return handleRouteError(e)
+  }
+}

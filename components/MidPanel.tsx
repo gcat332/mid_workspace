@@ -4,6 +4,7 @@ import { useRef, useState } from "react"
 import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { ConfigTab } from "./ConfigTab"
+import { FilesTab } from "./FilesTab"
 import { OverviewTab } from "./OverviewTab"
 import { TabPlaceholder } from "./TabPlaceholder"
 import { apiFetch } from "@/lib/ui/api"
@@ -117,7 +118,7 @@ export function MidPanel({ mid, host, onChanged }: Props) {
       <div role="tabpanel" id="tabpanel" aria-labelledby={`tab-${tab}`} className="pt-4">
         {tab === "overview" && <OverviewTab mid={mid} />}
         {tab === "config" && <ConfigTab midName={mid.name} canRestart={isUp && !transitional} onRestart={() => void send("restart", false)} />}
-        {tab === "files" && <TabPlaceholder title="ไฟล์" />}
+        {tab === "files" && <FilesTab midName={mid.name} />}
         {tab === "logs" && <TabPlaceholder title="Log" />}
       </div>
 
