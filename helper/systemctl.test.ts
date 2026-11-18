@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { makeSystemctl, parseActiveMidUnits, parseEnabledMidUnits } from "./systemctl"
+import { makeSystemctl, mapExecResult, parseActiveMidUnits, parseEnabledMidUnits } from "./systemctl"
 
 const FIXTURE = `midhub-mid-a1.service     loaded active   running MidHub MID Server
 midhub-mid-b2.service     loaded activating start   MidHub MID Server
@@ -40,7 +40,25 @@ describe("makeSystemctl list commands", () => {
     await expect(mk(1, "some real error").activeMidUnits()).rejects.toThrow()
     await expect(mk(4, "").enabledMidUnits()).rejects.toThrow()
   })
+  it("non-numeric failure (code -1) throws for both commands", async () => {
+    await expect(mk(-1, "").enabledMidUnits()).rejects.toThrow()
+    await expect(mk(-1, "").activeMidUnits()).rejects.toThrow()
+  })
   it("exit 0 parses output", async () => {
     expect(await mk(0, "midhub-mid-a1.service enabled enabled\n").enabledMidUnits()).toEqual(["midhub-mid-a1.service"])
+  })
+})
+
+describe("mapExecResult", () => {
+  it("keeps numeric exit codes", () => {
+    expect(mapExecResult(null, "o", "e")).toEqual({ code: 0, stdout: "oe" })
+    expect(mapExecResult(Object.assign(new Error("x"), { code: 1 }), "", "")).toEqual({ code: 1, stdout: "" })
+  })
+  it("maps timeout, spawn and maxBuffer errors to -1 with the cause", () => {
+    const killed = mapExecResult(Object.assign(new Error("t"), { code: null, killed: true, signal: "SIGTERM" }), "", "")
+    expect(killed.code).toBe(-1)
+    expect(killed.stdout).toContain("SIGTERM")
+    expect(mapExecResult(Object.assign(new Error("s"), { code: "ENOENT" }), "", "")).toMatchObject({ code: -1 })
+    expect(mapExecResult(Object.assign(new Error("s"), { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" }), "", "").stdout).toContain("MAXBUFFER")
   })
 })

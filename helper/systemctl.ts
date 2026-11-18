@@ -17,11 +17,24 @@ export type Systemctl = {
 }
 
 /** execFile with an argument array; never a shell. stdout includes stderr so callers can see failures. */
+/** Pure mapping of an execFile callback result. Real numeric exit codes are kept; anything else (timeout kill,
+ * signal, spawn error, maxBuffer overflow) becomes -1 with the cause in the output, so it can never look like exit 1. */
+export function mapExecResult(
+  err: (Error & { code?: unknown; signal?: string | null; killed?: boolean }) | null,
+  stdout: string,
+  stderr: string,
+): RunResult {
+  if (!err) return { code: 0, stdout: `${stdout}${stderr}` }
+  if (typeof err.code === "number") return { code: err.code, stdout: `${stdout}${stderr}` }
+  const cause = `[exec error: ${err.signal ?? err.code ?? err.message}${err.killed ? " (killed)" : ""}]`
+  return { code: -1, stdout: `${stdout}${stderr}${cause}` }
+}
+
+/** execFile with an argument array; never a shell. stdout includes stderr so callers can see failures. */
 export const realExec: Exec = (file, args) =>
   new Promise((resolve) => {
     execFile(file, args, { timeout: EXEC_TIMEOUT_MS, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-      const code = err ? (typeof err.code === "number" ? err.code : 1) : 0
-      resolve({ code, stdout: `${stdout}${stderr}` })
+      resolve(mapExecResult(err, stdout, stderr))
     })
   })
 
