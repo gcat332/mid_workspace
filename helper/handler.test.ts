@@ -119,11 +119,11 @@ describe("quota", () => {
     setEnabled("aaa", "bbb", "ccc", "ddd")
     expect(await handleRequest({ op: "restart", name: "aaa" }, deps())).toEqual({ ok: true })
   })
-  it("start of an already-active unit at the cap -> ok without systemctl start", async () => {
+  it("start of an already-active unit at the cap -> ok, enable only (no start)", async () => {
     install("aaa")
     setActive("aaa", "bbb", "ccc", "ddd")
     expect(await handleRequest({ op: "start", name: "aaa" }, deps())).toEqual({ ok: true })
-    expect(calls).toEqual([])
+    expect(calls).toEqual([["enable", "midhub-mid-aaa.service"]])
   })
 })
 

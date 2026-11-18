@@ -50,18 +50,23 @@ export function parseActiveMidUnits(out: string): string[] {
   return units
 }
 
+/** systemctl list-* exits 1 with empty output (or "0 unit files listed") when nothing matches; that is not an error. */
+function listOutput(r: RunResult, what: string): string {
+  if (r.code === 0) return r.stdout
+  if (r.code === 1 && (r.stdout.trim() === "" || /^0 (unit files|units) listed\.?$/.test(r.stdout.trim()))) return ""
+  throw new Error(`${what} failed (code ${r.code}): ${r.stdout.trim().slice(0, 200)}`)
+}
+
 export function makeSystemctl(exec: Exec = realExec): Systemctl {
   return {
     run: (args) => exec(SYSTEMCTL, args),
     async activeMidUnits() {
       const r = await exec(SYSTEMCTL, ["list-units", "midhub-mid-*", "--all", "--plain", "--no-legend", "--no-pager"])
-      if (r.code !== 0) throw new Error("systemctl list-units failed")
-      return parseActiveMidUnits(r.stdout)
+      return parseActiveMidUnits(listOutput(r, "systemctl list-units"))
     },
     async enabledMidUnits() {
       const r = await exec(SYSTEMCTL, ["list-unit-files", "midhub-mid-*", "--state=enabled", "--no-legend", "--plain", "--no-pager"])
-      if (r.code !== 0) throw new Error("systemctl list-unit-files failed")
-      return parseEnabledMidUnits(r.stdout)
+      return parseEnabledMidUnits(listOutput(r, "systemctl list-unit-files"))
     },
   }
 }

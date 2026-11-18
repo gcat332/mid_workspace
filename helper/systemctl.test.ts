@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseActiveMidUnits, parseEnabledMidUnits } from "./systemctl"
+import { makeSystemctl, parseActiveMidUnits, parseEnabledMidUnits } from "./systemctl"
 
 const FIXTURE = `midhub-mid-a1.service     loaded active   running MidHub MID Server
 midhub-mid-b2.service     loaded activating start   MidHub MID Server
@@ -25,5 +25,22 @@ describe("parseEnabledMidUnits", () => {
     const out = "midhub-mid-a1.service enabled enabled\nmidhub-mid-b2.service enabled-runtime enabled\nother.service enabled enabled\nmidhub-mid-../x.service enabled enabled\n"
     expect(parseEnabledMidUnits(out)).toEqual(["midhub-mid-a1.service"])
     expect(parseEnabledMidUnits("")).toEqual([])
+  })
+})
+
+describe("makeSystemctl list commands", () => {
+  const mk = (code: number, stdout: string) => makeSystemctl(async () => ({ code, stdout }))
+  it("exit 1 with empty output (nothing matches) -> []", async () => {
+    expect(await mk(1, "").enabledMidUnits()).toEqual([])
+    expect(await mk(1, "0 unit files listed.\n").enabledMidUnits()).toEqual([])
+    expect(await mk(1, "").activeMidUnits()).toEqual([])
+  })
+  it("exit 1 with a real error, or other codes, throw", async () => {
+    await expect(mk(1, "some real error").enabledMidUnits()).rejects.toThrow()
+    await expect(mk(1, "some real error").activeMidUnits()).rejects.toThrow()
+    await expect(mk(4, "").enabledMidUnits()).rejects.toThrow()
+  })
+  it("exit 0 parses output", async () => {
+    expect(await mk(0, "midhub-mid-a1.service enabled enabled\n").enabledMidUnits()).toEqual(["midhub-mid-a1.service"])
   })
 })

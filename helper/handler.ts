@@ -87,7 +87,8 @@ async function startLike(op: "start" | "restart", name: string, deps: HandlerDep
   others.delete(unit)
   if (others.size >= deps.maxRunning) return fail("quota_full", `max ${deps.maxRunning} MIDs running`)
   if (op === "start") {
-    if (active.includes(unit)) return OK
+    // Already running: still enable so it comes back after reboot.
+    if (active.includes(unit)) return (await sc(deps, ["enable", unit])) ?? OK
     return (await sc(deps, ["enable", unit])) ?? (await sc(deps, ["start", unit])) ?? OK
   }
   return (await sc(deps, ["enable", unit])) ?? (await sc(deps, ["restart", unit])) ?? OK
