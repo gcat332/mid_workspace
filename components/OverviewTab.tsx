@@ -1,3 +1,4 @@
+import { safeHttpUrl } from "@/lib/ui/api"
 import { formatBytes, formatUptime, statusView, type MidView } from "@/lib/ui/status-view"
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -11,13 +12,13 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export function OverviewTab({ mid }: { mid: MidView }) {
   const sv = statusView(mid)
-  const url = mid.instanceUrl
+  const url = safeHttpUrl(mid.instanceUrl)
   const recordUrl = url && mid.midName ? `${url}/ecc_agent_list.do?sysparm_query=name=${encodeURIComponent(mid.midName)}` : null
   const running = mid.status.state === "running"
   return (
     <dl className="divide-y divide-gray-100">
       <Row label="Instance">
-        {url ? <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{url}</a> : "-"}
+        {url ? <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{url}</a> : (mid.instanceUrl ?? "-")}
       </Row>
       <Row label="ชื่อ MID ใน ServiceNow">{mid.midName ?? "-"}</Row>
       <Row label="เวอร์ชัน">{mid.version ?? "-"}</Row>

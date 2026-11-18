@@ -3,7 +3,8 @@ import path from "node:path"
 
 export const DEFAULT_MIDHUB_ROOT = "/opt/midhub"
 
-export const MID_NAME_RE = /^[a-z0-9][a-z0-9-]{1,39}$/
+import { MID_NAME_RE } from "./name-regex"
+export { MID_NAME_RE }
 
 const ERRORS = {
   invalid_name: [400, "ชื่อ MID ไม่ถูกต้อง ใช้ได้เฉพาะ a-z, 0-9 และ - (2-40 ตัวอักษร ขึ้นต้นด้วยตัวอักษรหรือตัวเลข)"],

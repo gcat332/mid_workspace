@@ -1,23 +1,24 @@
 "use client"
 
 import { useState } from "react"
+import { Modal } from "./Modal"
+import { apiFetch } from "@/lib/ui/api"
+import { MID_NAME_RE } from "@/lib/mids/name-regex"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 
-const API = "/midhub/api/mids/import"
-const NAME_RE = /^[a-z0-9][a-z0-9-]{1,39}$/
 
 export function ImportMidDialog({ onDone, onCancel }: { onDone: (name: string) => void; onCancel: () => void }) {
   const [name, setName] = useState("")
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<ApiError | null>(null)
-  const valid = NAME_RE.test(name)
+  const valid = MID_NAME_RE.test(name)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!valid || busy) return
     setBusy(true); setErr(null)
     try {
-      const res = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) })
+      const res = await apiFetch("/mids/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) })
       if (!res.ok) { setErr(await readApiError(res)); return }
       onDone(name)
     } catch {
@@ -28,16 +29,15 @@ export function ImportMidDialog({ onDone, onCancel }: { onDone: (name: string) =
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <form onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="import-title"
-        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+    <Modal labelledBy="import-title" onClose={onCancel} busy={busy}>
+      <form onSubmit={submit}>
         <h2 id="import-title" className="text-lg font-semibold text-gray-900">Import MID ที่มีอยู่</h2>
         <p className="mt-1 text-sm text-gray-600">
           ใส่ชื่อโฟลเดอร์ของ MID ที่อยู่ใน <code className="font-mono">/opt/midhub/mids/</code> แล้ว ระบบจะอ่านค่าจาก config.xml ให้เอง
         </p>
         <label className="mt-3 block text-sm text-gray-800">
           ชื่อ MID
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value.trim())} placeholder="เช่น demo-mid-1"
+          <input data-autofocus value={name} onChange={(e) => setName(e.target.value.trim())} placeholder="เช่น demo-mid-1"
             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </label>
         {name && !valid && (
@@ -53,6 +53,6 @@ export function ImportMidDialog({ onDone, onCancel }: { onDone: (name: string) =
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   )
 }

@@ -1,16 +1,17 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { ImportMidDialog } from "./ImportMidDialog"
 import { MidList } from "./MidList"
 import { MidPanel } from "./MidPanel"
 import { TopBar } from "./TopBar"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
+import { apiFetch } from "@/lib/ui/api"
+import { createLatest } from "@/lib/ui/latest"
 import type { HostView, MidView } from "@/lib/ui/status-view"
 
 const POLL_MS = 5000
-const API = "/midhub/api"
 
 export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean }) {
   const router = useRouter()
@@ -20,19 +21,36 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
 
   const [mids, setMids] = useState<MidView[] | null>(null)
   const [host, setHost] = useState<HostView | null>(null)
-  const [err, setErr] = useState<ApiError | null>(null)
+  const [midsErr, setMidsErr] = useState<ApiError | null>(null)
+  const [hostErr, setHostErr] = useState<ApiError | null>(null)
   const [importing, setImporting] = useState(false)
 
+  const latest = useRef(createLatest())
+
   const refresh = useCallback(async () => {
-    try {
-      const [m, h] = await Promise.all([fetch(`${API}/mids`), fetch(`${API}/host`)])
-      if (m.status === 401 || h.status === 401) { router.replace("/login"); return }
-      if (m.ok) { setMids((await m.json()) as MidView[]); setErr(null) } else setErr(await readApiError(m))
-      if (h.ok) setHost((await h.json()) as HostView)
-    } catch {
-      setErr({ message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่าย ระบบจะลองใหม่อัตโนมัติ" })
+    const token = latest.current.next()
+    const load = async <T,>(path: string, what: string): Promise<{ data?: T; err?: ApiError }> => {
+      let res: Response
+      try {
+        res = await apiFetch(path)
+      } catch {
+        return { err: { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่าย ระบบจะลองใหม่อัตโนมัติ" } }
+      }
+      if (!res.ok) return { err: await readApiError(res) }
+      try {
+        return { data: (await res.json()) as T }
+      } catch {
+        return { err: { message: `อ่านข้อมูล${what}จากเซิร์ฟเวอร์ไม่ได้ ลองรีเฟรชหน้า`, detail: "invalid JSON" } }
+      }
     }
-  }, [router])
+    const [m, h] = await Promise.all([load<MidView[]>("/mids", "MID"), load<HostView>("/host", "สถานะเครื่อง")])
+    if (!latest.current.isCurrent(token)) return // a newer refresh started; this response is stale
+    if (m.data) setMids(m.data)
+    setMidsErr(m.err ?? null)
+    // Host unknown must not leave stale quota behind: Start is disabled while host is null.
+    setHost(h.data ?? null)
+    setHostErr(h.err ? { ...h.err, message: `อ่านสถานะเครื่องไม่ได้ (RAM/โควต้า): ${h.err.message}` } : null)
+  }, [])
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined
@@ -54,7 +72,8 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
     <div className="min-h-screen bg-gray-50">
       <TopBar email={email} isAdmin={isAdmin} host={host} mids={mids ?? []} onImport={() => setImporting(true)} />
       <main className="mx-auto max-w-6xl p-4">
-        {err && <div className="mb-4"><ErrorNotice error={err} /></div>}
+        {midsErr && <div className="mb-4"><ErrorNotice error={midsErr} /></div>}
+        {hostErr && <div className="mb-4"><ErrorNotice error={hostErr} /></div>}
         {mids === null ? (
           <p className="text-sm text-gray-500">กำลังโหลด...</p>
         ) : mids.length === 0 ? (

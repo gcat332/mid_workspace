@@ -1,7 +1,9 @@
 "use client"
 
 import Link from "next/link"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { apiFetch } from "@/lib/ui/api"
 import { formatBytes, quotaView, type HostView, type MidView } from "@/lib/ui/status-view"
 
 const GIB = 1024 ** 3
@@ -21,8 +23,16 @@ export function TopBar({ email, isAdmin, host, mids, onImport }: Props) {
   const midRam = mids.reduce((s, m) => s + (m.status.memoryBytes ?? 0), 0)
   const lowRam = host !== null && host.availableBytes < GIB
 
+  const [logoutErr, setLogoutErr] = useState(false)
   async function logout() {
-    try { await fetch("/midhub/api/auth/logout", { method: "POST" }) } finally { router.replace("/login"); router.refresh() }
+    setLogoutErr(false)
+    try {
+      const res = await apiFetch("/auth/logout", { method: "POST" })
+      if (!res.ok) { setLogoutErr(true); return }
+    } catch {
+      setLogoutErr(true); return
+    }
+    router.replace("/login"); router.refresh()
   }
 
   return (
@@ -47,6 +57,7 @@ export function TopBar({ email, isAdmin, host, mids, onImport }: Props) {
         {isAdmin && <Link href="/admin/users" className={`${btn} text-blue-600 hover:underline`}>Admin</Link>}
         <span className="text-sm text-gray-500">{email}</span>
         <button type="button" onClick={logout} className={`${btn} text-gray-700 hover:bg-gray-100`}>ออกจากระบบ</button>
+        {logoutErr && <span role="alert" className="text-sm text-red-600">ออกจากระบบไม่สำเร็จ ลองกดอีกครั้ง</span>}
       </div>
     </header>
   )

@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { OverviewTab } from "./OverviewTab"
 import { TabPlaceholder } from "./TabPlaceholder"
+import { apiFetch } from "@/lib/ui/api"
 import { statusView, type HostView, type MidView } from "@/lib/ui/status-view"
 
 // Tasks 12-14 replace the placeholders below with the real tab components.
@@ -21,6 +22,7 @@ type Pending = { action: Action; lowMemory?: string }
 
 const ACTION_TH: Record<Action, string> = { start: "Start", stop: "Stop", restart: "Restart" }
 const FULL_REASON = "รันครบ 4 ตัวแล้ว ให้หยุดตัวอื่นก่อน"
+const HOST_UNKNOWN = "อ่านสถานะเครื่องไม่ได้ จึงยังกด Start ไม่ได้ รอสักครู่หรือรีเฟรชหน้า"
 const PHASE_HINT = "เปิดใช้ใน Phase 2/3"
 const hdrBtn = "rounded-lg border px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
 
@@ -35,15 +37,23 @@ export function MidPanel({ mid, host, onChanged }: Props) {
   const sv = statusView(mid)
   const st = mid.status.state
   const isUp = st === "running" || st === "starting"
+  const hostKnown = host !== null
   const quotaFull = host !== null && host.quotaUsed >= host.maxRunning
-  const startBlocked = !isUp && quotaFull
+  const startBlocked = !isUp && (quotaFull || !hostKnown)
+  const startReason = !hostKnown ? HOST_UNKNOWN : FULL_REASON
+  const inFlight = useRef(false)
   const transitional = mid.state === "installing" || mid.state === "upgrading" || mid.state === "uninstalling"
   const holdsStale = host !== null && host.quotaUsed > host.running
 
+  // An open Stop/Restart confirm is moot once polling shows the MID is no longer up.
+  if (pending && !pending.lowMemory && pending.action !== "start" && !isUp && !busy) setPending(null)
+
   async function send(action: Action, confirmLowMemory: boolean) {
+    if (inFlight.current) return
+    inFlight.current = true
     setBusy(true); setErr(null)
     try {
-      const res = await fetch(`/midhub/api/mids/${encodeURIComponent(mid.name)}/actions`, {
+      const res = await apiFetch(`/mids/${encodeURIComponent(mid.name)}/actions`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(confirmLowMemory ? { action, confirmLowMemory: true } : { action }),
       })
@@ -54,6 +64,7 @@ export function MidPanel({ mid, host, onChanged }: Props) {
     } catch {
       setPending(null); setErr({ message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" })
     } finally {
+      inFlight.current = false
       setBusy(false)
     }
   }
@@ -78,15 +89,15 @@ export function MidPanel({ mid, host, onChanged }: Props) {
               className={`${hdrBtn} border-red-300 text-red-700 hover:bg-red-50`}>Stop</button>
           ) : (
             <button type="button" onClick={() => request("start")} disabled={busy || transitional || startBlocked}
-              title={startBlocked ? FULL_REASON : undefined}
+              title={startBlocked ? startReason : undefined}
               className={`${hdrBtn} border-green-600 bg-green-600 text-white hover:bg-green-700`}>Start</button>
           )}
           <button type="button" disabled title={PHASE_HINT} className={`${hdrBtn} border-gray-300 text-gray-800`}>Upgrade</button>
           <button type="button" disabled title={PHASE_HINT} className={`${hdrBtn} border-gray-300 text-gray-800`}>ลบ</button>
         </div>
       </div>
-      {startBlocked && <p className="mt-2 text-sm text-amber-700">{FULL_REASON}</p>}
-      {quotaFull && holdsStale && (
+      {startBlocked && <p className="mt-2 text-sm text-amber-700">{startReason}</p>}
+      {holdsStale && (
         <p className="mt-1 text-xs text-gray-500">
           MID ที่ล่มหรือหยุดเองยังนับเป็น 1 ช่องจนกว่าจะกด Stop
         </p>
@@ -109,18 +120,17 @@ export function MidPanel({ mid, host, onChanged }: Props) {
         {tab === "logs" && <TabPlaceholder title="Log" />}
       </div>
 
-      {pending && !pending.lowMemory && (
-        <ConfirmDialog title={`${ACTION_TH[pending.action]} ${mid.name}?`} danger busy={busy}
-          confirmLabel={ACTION_TH[pending.action]} onCancel={() => setPending(null)} onConfirm={() => void send(pending.action, false)}>
-          {pending.action === "stop"
-            ? "MID จะหยุดทำงานและ ServiceNow จะเห็นว่า MID นี้ down"
-            : "MID จะหยุดแล้วเริ่มใหม่ งานที่กำลังทำอยู่จะถูกขัดจังหวะ"}
-        </ConfirmDialog>
-      )}
-      {pending?.lowMemory && (
-        <ConfirmDialog title="RAM เหลือน้อย ทำต่อหรือไม่?" danger busy={busy}
-          confirmLabel="ยืนยัน ทำต่อ" onCancel={() => setPending(null)} onConfirm={() => void send(pending.action, true)}>
-          {pending.lowMemory}
+      {pending && (
+        // One dialog instance for both steps so the opener (and focus restore) survives the low-memory handoff.
+        <ConfirmDialog
+          title={pending.lowMemory ? "RAM เหลือน้อย ทำต่อหรือไม่?" : `${ACTION_TH[pending.action]} ${mid.name}?`}
+          danger busy={busy}
+          confirmLabel={pending.lowMemory ? "ยืนยัน ทำต่อ" : ACTION_TH[pending.action]}
+          onCancel={() => setPending(null)} onConfirm={() => void send(pending.action, !!pending.lowMemory)}>
+          {pending.lowMemory ??
+            (pending.action === "stop"
+              ? "MID จะหยุดทำงานและ ServiceNow จะเห็นว่า MID นี้ down"
+              : "MID จะหยุดแล้วเริ่มใหม่ งานที่กำลังทำอยู่จะถูกขัดจังหวะ")}
         </ConfirmDialog>
       )}
     </section>
