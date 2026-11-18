@@ -1,12 +1,22 @@
 import { execFile } from "node:child_process"
 import { EXEC_TIMEOUT_MS } from "../lib/helper/protocol"
+import {
+  LIST_ACTIVE_ARGS,
+  LIST_ENABLED_ARGS,
+  listOutput,
+  mapExecResult,
+  parseActiveMidUnits,
+  parseEnabledMidUnits,
+  type RunResult,
+} from "../lib/mids/unit-list"
 
 export const SYSTEMCTL = "/usr/bin/systemctl"
 export const CHOWN = "/usr/bin/chown"
 export const CHMOD = "/usr/bin/chmod"
 export const SETPRIV = "/usr/bin/setpriv"
 
-export type RunResult = { code: number; stdout: string }
+export type { RunResult }
+export { mapExecResult, parseActiveMidUnits, parseEnabledMidUnits }
 export type Exec = (file: string, args: string[]) => Promise<RunResult>
 export type Systemctl = {
   run(args: string[]): Promise<RunResult>
@@ -17,20 +27,6 @@ export type Systemctl = {
 }
 
 /** execFile with an argument array; never a shell. stdout includes stderr so callers can see failures. */
-/** Pure mapping of an execFile callback result. Real numeric exit codes are kept; anything else (timeout kill,
- * signal, spawn error, maxBuffer overflow) becomes -1 with the cause in the output, so it can never look like exit 1. */
-export function mapExecResult(
-  err: (Error & { code?: unknown; signal?: string | null; killed?: boolean }) | null,
-  stdout: string,
-  stderr: string,
-): RunResult {
-  if (!err) return { code: 0, stdout: `${stdout}${stderr}` }
-  if (typeof err.code === "number") return { code: err.code, stdout: `${stdout}${stderr}` }
-  const cause = `[exec error: ${err.signal ?? err.code ?? err.message}${err.killed ? " (killed)" : ""}]`
-  return { code: -1, stdout: `${stdout}${stderr}${cause}` }
-}
-
-/** execFile with an argument array; never a shell. stdout includes stderr so callers can see failures. */
 export const realExec: Exec = (file, args) =>
   new Promise((resolve) => {
     execFile(file, args, { timeout: EXEC_TIMEOUT_MS, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
@@ -38,47 +34,15 @@ export const realExec: Exec = (file, args) =>
     })
   })
 
-const UNIT_RE = /^midhub-mid-[a-z0-9][a-z0-9-]{1,39}\.service$/
-const COUNTED = new Set(["active", "activating", "reloading", "deactivating"])
-
-/** Parses `systemctl list-unit-files --state=enabled --plain --no-legend`: UNIT STATE [PRESET]. */
-export function parseEnabledMidUnits(out: string): string[] {
-  const units: string[] = []
-  for (const line of out.split("\n")) {
-    const [unit, state] = line.trim().split(/\s+/)
-    if (UNIT_RE.test(unit ?? "") && state === "enabled") units.push(unit)
-  }
-  return units
-}
-
-/** Parses `systemctl list-units --all --plain --no-legend` text: UNIT LOAD ACTIVE SUB DESCRIPTION. */
-export function parseActiveMidUnits(out: string): string[] {
-  const units: string[] = []
-  for (const line of out.split("\n")) {
-    const cols = line.replace(/^[\s●*×]+/, "").trim().split(/\s+/)
-    if (cols.length < 3) continue
-    const [unit, , active] = cols
-    if (UNIT_RE.test(unit) && COUNTED.has(active)) units.push(unit)
-  }
-  return units
-}
-
-/** systemctl list-* exits 1 with empty output (or "0 unit files listed") when nothing matches; that is not an error. */
-function listOutput(r: RunResult, what: string): string {
-  if (r.code === 0) return r.stdout
-  if (r.code === 1 && (r.stdout.trim() === "" || /^0 (unit files|units) listed\.?$/.test(r.stdout.trim()))) return ""
-  throw new Error(`${what} failed (code ${r.code}): ${r.stdout.trim().slice(0, 200)}`)
-}
-
 export function makeSystemctl(exec: Exec = realExec): Systemctl {
   return {
     run: (args) => exec(SYSTEMCTL, args),
     async activeMidUnits() {
-      const r = await exec(SYSTEMCTL, ["list-units", "midhub-mid-*", "--all", "--plain", "--no-legend", "--no-pager"])
+      const r = await exec(SYSTEMCTL, LIST_ACTIVE_ARGS)
       return parseActiveMidUnits(listOutput(r, "systemctl list-units"))
     },
     async enabledMidUnits() {
-      const r = await exec(SYSTEMCTL, ["list-unit-files", "midhub-mid-*", "--state=enabled", "--no-legend", "--plain", "--no-pager"])
+      const r = await exec(SYSTEMCTL, LIST_ENABLED_ARGS)
       return parseEnabledMidUnits(listOutput(r, "systemctl list-unit-files"))
     },
   }

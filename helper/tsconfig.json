@@ -10,6 +10,6 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["*.ts", "../lib/helper/protocol.ts", "../lib/mids/names.ts"],
+  "include": ["*.ts", "../lib/helper/protocol.ts", "../lib/mids/names.ts", "../lib/mids/unit-list.ts"],
   "exclude": ["*.test.ts", "dist"]
 }
