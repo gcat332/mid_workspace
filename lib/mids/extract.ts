@@ -61,23 +61,38 @@ export const hooks: { onSpawn?: () => void } = {}
 
 /**
  * Walk of the extracted tree (private 0700 staging, owned by us, so path-based chmod is safe): only regular files
- * (nlink 1) and dirs. Normalises modes: dirs 2775 (setgid keeps group midhub), files 0664 (0775 if any x bit).
+ * (nlink 1) and dirs. Normalises modes: dirs 2775 (setgid keeps the app user's group until fixOwnership), files 0664
+ * (0775 if any x bit). A dir is chmod'ed BEFORE it is opened so mode-000 entries cannot wedge the walk or cleanup.
+ * Any fs error inside the walk is reported as zip_invalid with the relative path.
  */
-async function verifyTree(abs: string, check: (r: string) => void): Promise<void> {
-  const d = await openDir(abs, check)
+async function verifyTree(abs: string, check: (r: string) => void, rel = ""): Promise<void> {
   try {
-    for (const n of await fs.promises.readdir(fdPath(d))) {
-      const st = await fs.promises.lstat(fdPath(d, n))
-      if (st.isDirectory()) {
-        await verifyTree(path.join(abs, n), check)
-        await fs.promises.chmod(fdPath(d, n), 0o2775)
-      } else if (st.isFile() && st.nlink === 1) {
-        await fs.promises.chmod(fdPath(d, n), st.mode & 0o111 ? 0o775 : 0o664)
-      } else throw bad(path.join(abs, n))
+    const d = await openDir(abs, check)
+    try {
+      for (const n of await fs.promises.readdir(fdPath(d))) {
+        const st = await fs.promises.lstat(fdPath(d, n))
+        if (st.isDirectory()) {
+          await fs.promises.chmod(fdPath(d, n), 0o2775)
+          await verifyTree(path.join(abs, n), check, path.posix.join(rel, n))
+        } else if (st.isFile() && st.nlink === 1) {
+          await fs.promises.chmod(fdPath(d, n), st.mode & 0o111 ? 0o775 : 0o664)
+        } else throw bad(path.posix.join(rel, n))
+      }
+    } finally {
+      await d.close()
     }
-  } finally {
-    await d.close()
+  } catch (e) {
+    if (e instanceof MidError) throw e
+    throw bad(rel || ".")
   }
+}
+
+/** Staging-only (private tree): make every dir rwx for us so removal cannot hit EACCES. */
+async function unlockTree(abs: string): Promise<void> {
+  const st = await fs.promises.lstat(abs)
+  if (!st.isDirectory()) return
+  await fs.promises.chmod(abs, 0o700)
+  for (const n of await fs.promises.readdir(abs)) await unlockTree(path.join(abs, n))
 }
 
 /** Trusted "already extracted" only for an app-owned, single-link regular marker holding this jobId. */
@@ -126,8 +141,6 @@ export async function extractPackage(zipPath: string, name: string, jobId: strin
     await extractInner(zipPath, name, jobId, signal)
   } catch (e) {
     if (e instanceof MidError || (e as Error)?.name === "AbortError") throw e
-    const code = (e as NodeJS.ErrnoException)?.code
-    if (code === "ENOTDIR" || code === "ENOTEMPTY" || code === "EEXIST") throw new MidError("conflict")
     return translateFsError(e)
   }
 }
@@ -146,7 +159,10 @@ async function extractInner(zipPath: string, name: string, jobId: string, signal
     try {
       const tmpName = `.extract-${jobId}`
       const tmpReal = path.join(stagingReal, tmpName)
-      const clean = () => removeIn(stDir, stagingReal, tmpName, stCheck)
+      const clean = async () => {
+        await unlockTree(tmpReal)
+        await removeIn(stDir, stagingReal, tmpName, stCheck)
+      }
       if (await lstatIn(stDir, tmpName)) {
         await clean().catch((e) => {
           throw new MidError("internal", undefined, undefined, `cannot remove leftover ${tmpName}: ${(e as Error).message}`)
@@ -176,7 +192,14 @@ async function extractInner(zipPath: string, name: string, jobId: string, signal
           await t.close()
         }
         if (await lstatIn(midsDir, name)) throw new MidError("conflict")
-        await fs.promises.rename(fdPath(stDir, tmpName), fdPath(midsDir, name))
+        try {
+          await fs.promises.rename(fdPath(stDir, tmpName), fdPath(midsDir, name))
+        } catch (e) {
+          const c = (e as NodeJS.ErrnoException).code
+          if (c === "ENOTDIR" || c === "ENOTEMPTY" || c === "EEXIST") throw new MidError("conflict")
+          if (c === "EXDEV") throw new MidError("internal", undefined, undefined, "staging และ mids อยู่คนละ filesystem — ตั้ง MIDHUB_ROOT ให้อยู่ใน filesystem เดียวกัน")
+          throw e
+        }
       } catch (e) {
         try {
           if (await lstatIn(stDir, tmpName)) await clean()
