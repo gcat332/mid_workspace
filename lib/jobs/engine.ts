@@ -15,6 +15,7 @@ export type JobCtx = {
   signal: AbortSignal
 }
 // Every stage must be safe to run again after a crash (idempotent).
+// run MUST be idempotent and MUST honour ctx.signal (pass it to fetch/execFile/streams).
 export type Stage = { name: string; run(ctx: JobCtx): Promise<void>; /** default 30 min */ timeoutMs?: number }
 export type KindHooks = {
   onSuccess?(ctx: JobCtx): Promise<void>
@@ -25,6 +26,9 @@ const MAX_CONCURRENT = 2
 const DEFAULT_STAGE_TIMEOUT_MS = 30 * 60_000
 const ABORT_GRACE_MS = 60_000
 const HEARTBEAT_MS = 30_000
+const HOOK_TIMEOUT_MS = 5 * 60_000
+const HOOK_GRACE_MS = 30_000
+const ZOMBIE_TTL_MS = 10 * 60_000
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 // Best-effort journal write: a journal failure must never strand a committed job.
@@ -66,6 +70,7 @@ interface EngineState {
   running: Set<string>
   inflight: Set<Promise<void>>
   locks: Map<string, Promise<unknown>>
+  zombies: Map<string, ReturnType<typeof setTimeout>>
   abort: AbortController
 }
 
@@ -78,6 +83,7 @@ function state(): EngineState {
     running: new Set(),
     inflight: new Set(),
     locks: new Map(),
+    zombies: new Map(),
     abort: new AbortController(),
   })
 }
@@ -136,6 +142,12 @@ function withMidLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
   return next
 }
 
+function assertNoZombie(midName: string): void {
+  if (state().zombies.has(midName)) {
+    throw new MidError("job_active", undefined, undefined, "ขั้นตอนเดิมยังไม่หยุดสนิท รอสักครู่")
+  }
+}
+
 function kindOrThrow(kind: JobKind) {
   const k = state().kinds.get(kind)
   if (!k) throw new MidError("internal", undefined, undefined, `job kind "${kind}" is not registered`)
@@ -174,7 +186,10 @@ export async function createJob(user: SessionPayload, kind: JobKind, midName: st
   validateMidName(midName)
   assertNoSecrets(params)
   kindOrThrow(kind)
-  const row = await withMidLock(midName, () => insertJob(kind, midName, user.userId, params))
+  const row = await withMidLock(midName, () => {
+    assertNoZombie(midName)
+    return insertJob(kind, midName, user.userId, params)
+  })
   enqueue(row.id)
   return row
 }
@@ -188,6 +203,9 @@ export async function retryJob(user: SessionPayload, id: string): Promise<JobRow
   if (job.status !== "failed") throw new MidError("conflict")
   kindOrThrow(job.kind as JobKind)
   const row = await withMidLock(job.midName, async () => {
+    assertNoZombie(job.midName)
+    // Still in its failure end window (journal/onFailure): enqueue would be dropped, so ask the user to retry shortly.
+    if (state().running.has(id)) throw new MidError("job_running")
     const active = await prisma.job.findFirst({ where: { midName: job.midName, status: { in: ACTIVE } }, select: { id: true } })
     if (active) throw new MidError("job_active")
     const res = await prisma.job.updateMany({
@@ -208,6 +226,7 @@ export async function cancelJob(user: SessionPayload, id: string): Promise<JobRo
   const isAdmin = user.role === "admin"
   const kind = job.kind as JobKind
   if (job.status === "running") throw new MidError("job_running")
+  assertNoZombie(job.midName)
 
   if (job.status === "queued") {
     if (!isAdmin) throw new MidError("forbidden")
@@ -224,6 +243,8 @@ export async function cancelJob(user: SessionPayload, id: string): Promise<JobRo
     if (!isAdmin && job.createdBy !== user.userId) throw new MidError("forbidden")
     kindOrThrow("cancel_install")
     const created = await withMidLock(job.midName, async () => {
+      assertNoZombie(job.midName)
+      if (state().running.has(id)) throw new MidError("job_running")
       const fresh = await prisma.job.findUniqueOrThrow({ where: { id } })
       if (fresh.status !== "failed") throw new MidError("conflict")
       return insertJob("cancel_install", job.midName, user.userId, { cancelOf: id, midId: job.midId }, async (tx) => {
@@ -279,45 +300,96 @@ function pump(st: EngineState): void {
 
 const ACTIVE_STATUS = { in: ACTIVE }
 
-// Runs one stage with a timeout, abort signal, heartbeat and a hard stop if it ignores the abort.
-async function runStage(st: EngineState, stage: Stage, job: JobRow, params: Record<string, unknown>): Promise<void> {
+// Runs fn with a timeout: abort the signal at timeoutMs, then reject via hardErr() after graceMs if fn still hasn't settled.
+// The late settlement of fn is ignored. onHardStop receives the zombie run promise.
+async function guarded(
+  st: EngineState,
+  jobId: string,
+  label: string,
+  timeoutMs: number,
+  graceMs: number,
+  fn: (signal: AbortSignal) => Promise<void>,
+  hardErr: () => Error,
+  opts: { heartbeat?: boolean; onHardStop?: (run: Promise<void>) => void } = {},
+): Promise<void> {
   const ac = new AbortController()
   const onAbort = () => ac.abort()
   st.abort.signal.addEventListener("abort", onAbort)
   if (st.abort.signal.aborted) ac.abort()
-  const ctx: JobCtx = {
-    job,
-    params,
-    signal: ac.signal,
-    log: (msg, level = "info") => appendJournal(job.id, { type: "log", level, msg }),
-  }
   const timers: ReturnType<typeof setTimeout>[] = []
-  const heartbeat = setInterval(() => {
-    prisma.job.updateMany({ where: { id: job.id, status: "running" }, data: { updatedAt: new Date() } }).catch(() => undefined)
-  }, HEARTBEAT_MS)
+  const heartbeat = opts.heartbeat
+    ? setInterval(() => {
+        prisma.job.updateMany({ where: { id: jobId, status: "running" }, data: { updatedAt: new Date() } }).catch(() => undefined)
+      }, HEARTBEAT_MS)
+    : undefined
+  let run: Promise<void> = Promise.resolve()
   let hardStop!: (e: unknown) => void
   const stopped = new Promise<never>((_, rej) => (hardStop = rej))
   timers.push(
     setTimeout(() => {
       ac.abort()
-      void tryJournal(job.id, { type: "log", level: "warn", msg: `stage ${stage.name} timed out; aborting` })
+      void tryJournal(jobId, { type: "log", level: "warn", msg: `${label} timed out; aborting` })
       timers.push(
-        setTimeout(
-          () => hardStop(new MidError("stage_timeout", undefined, `ขั้นตอน ${stage.name} ใช้เวลานานเกินกำหนด งานถูกหยุด กด ลองใหม่ หรือแจ้ง Admin`)),
-          ABORT_GRACE_MS,
-        ),
+        setTimeout(() => {
+          opts.onHardStop?.(run)
+          hardStop(hardErr())
+        }, graceMs),
       )
-    }, stage.timeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS),
+    }, timeoutMs),
   )
-  const run = stage.run(ctx)
-  run.catch(() => undefined) // a late settlement after the hard stop is ignored
+  // Promise.resolve().then: a synchronous throw becomes a rejection handled below, never an unhandled one.
+  run = Promise.resolve().then(() => fn(ac.signal))
+  run.catch(() => undefined)
   try {
     await Promise.race([run, stopped])
   } finally {
-    clearInterval(heartbeat)
+    if (heartbeat) clearInterval(heartbeat)
     timers.forEach(clearTimeout)
     st.abort.signal.removeEventListener("abort", onAbort)
   }
+}
+
+function runStage(st: EngineState, stage: Stage, job: JobRow, params: Record<string, unknown>): Promise<void> {
+  return guarded(
+    st,
+    job.id,
+    `stage ${stage.name}`,
+    stage.timeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS,
+    ABORT_GRACE_MS,
+    (signal) =>
+      stage.run({ job, params, signal, log: (msg, level = "info") => appendJournal(job.id, { type: "log", level, msg }) }),
+    () => new MidError("stage_timeout", undefined, `ขั้นตอน ${stage.name} ใช้เวลานานเกินกำหนด งานถูกหยุด กด ลองใหม่ หรือแจ้ง Admin`),
+    {
+      heartbeat: true,
+      onHardStop: (run) => {
+        // Remember the zombie so a new job for this MID can't overlap with the still-running old stage.
+        const name = job.midName
+        const clear = () => {
+          const t = st.zombies.get(name)
+          if (t === timer) {
+            clearTimeout(t)
+            st.zombies.delete(name)
+          }
+        }
+        const timer = setTimeout(clear, ZOMBIE_TTL_MS)
+        timer.unref?.()
+        st.zombies.set(name, timer)
+        run.then(clear, clear)
+      },
+    },
+  )
+}
+
+function runHook(st: EngineState, job: JobRow, name: string, ctx: JobCtx, fn: (ctx: JobCtx) => Promise<void>): Promise<void> {
+  return guarded(
+    st,
+    job.id,
+    `hook ${name}`,
+    HOOK_TIMEOUT_MS,
+    HOOK_GRACE_MS,
+    (signal) => fn({ ...ctx, signal }),
+    () => new MidError("internal", undefined, undefined, `hook ${name} ไม่ตอบสนอง (timeout)`),
+  )
 }
 
 async function execute(st: EngineState, id: string): Promise<void> {
@@ -353,9 +425,9 @@ async function execute(st: EngineState, id: string): Promise<void> {
       ctx = { job, params, signal: st.abort.signal, log: (msg, level = "info") => appendJournal(id, { type: "log", level, msg }) }
       await runStage(st, stage, job, params)
     }
-    await k.hooks.onSuccess?.(ctx)
+    if (k.hooks.onSuccess) await runHook(st, job, "onSuccess", ctx, k.hooks.onSuccess)
   } catch (err) {
-    await failJob(job, err, k.hooks.onFailure ? (e) => k.hooks.onFailure!(ctx, e) : undefined)
+    await failJob(job, err, k.hooks.onFailure ? (e) => runHook(st, job as JobRow, "onFailure", ctx, (c) => k.hooks.onFailure!(c, e)) : undefined)
     return
   }
   await writeOnce("success", id, async () => {
@@ -384,6 +456,7 @@ async function failJob(job: JobRow, err: unknown, onFailure?: (e: unknown) => Pr
     try {
       await onFailure(err)
     } catch (e) {
+      console.error(`[jobs] CRITICAL: onFailure hook for job ${job.id} did not complete`, e)
       await tryJournal(job.id, { type: "log", level: "error", msg: redact(`onFailure hook failed: ${e instanceof Error ? e.message : String(e)}`) })
     }
   }

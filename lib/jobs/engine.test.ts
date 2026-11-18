@@ -490,4 +490,96 @@ describe("review fixes", () => {
       await eng.__idleForTests()
     })
   })
+
+  it("retry/cancel during the failure end window (onFailure running) -> job_running; works afterwards", async () => {
+    const gate = deferred()
+    eng.registerKind("install", [{ name: "a", run: async () => { if (calls.length === 0) { calls.push("a"); throw new Error("x") } calls.push("a2") } }], {
+      onFailure: () => gate.promise,
+    })
+    eng.registerKind("cancel_install", [{ name: "c", run: async () => { calls.push("cancel") } }])
+    const job = await eng.createJob(alice, "install", "m-a", {})
+    await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "failed")
+    await expect(eng.retryJob(alice, job.id)).rejects.toMatchObject({ code: "job_running" })
+    await expect(eng.cancelJob(alice, job.id)).rejects.toMatchObject({ code: "job_running" })
+    gate.resolve()
+    await eng.__idleForTests()
+    await eng.retryJob(alice, job.id)
+    await eng.__idleForTests()
+    expect(calls).toEqual(["a", "a2"])
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("succeeded")
+  })
+
+  it("a stage that throws synchronously fails the job and leaks nothing", async () => {
+    const unhandled: unknown[] = []
+    const h = (e: unknown) => unhandled.push(e)
+    process.on("unhandledRejection", h)
+    eng.registerKind("install", [{ name: "a", run: (() => { throw new Error("sync boom") }) as () => Promise<void> }])
+    const job = await eng.createJob(alice, "install", "m-a", {})
+    await eng.__idleForTests()
+    for (let i = 0; i < 20; i++) await tick()
+    process.off("unhandledRejection", h)
+    const row = await prisma.job.findUniqueOrThrow({ where: { id: job.id } })
+    expect(row.status).toBe("failed")
+    expect(unhandled).toEqual([])
+  })
+
+  describe("hooks timeout and zombie guard (fake timers)", () => {
+    beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] }))
+    afterEach(() => vi.useRealTimers())
+
+    it("a hung onFailure hook is aborted, logged CRITICAL, slot freed, status unchanged", async () => {
+      const err = vi.spyOn(console, "error").mockImplementation(() => undefined)
+      let sig: AbortSignal | undefined
+      eng.registerKind("install", [{ name: "a", run: async () => { throw new Error("x") } }], {
+        onFailure: (ctx) => { sig = ctx.signal; return new Promise<void>(() => undefined) },
+      })
+      const job = await eng.createJob(alice, "install", "m-a", {})
+      await until(async () => !!sig)
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+      expect(sig!.aborted).toBe(true)
+      await vi.advanceTimersByTimeAsync(30_000)
+      await eng.__idleForTests()
+      expect(err.mock.calls.some((c) => String(c[0]).includes("CRITICAL"))).toBe(true)
+      err.mockRestore()
+      expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("failed")
+    })
+
+    it("zombie stage blocks createJob/retryJob/cancelJob for the MID until it settles", async () => {
+      const g = deferred()
+      eng.registerKind("install", [{ name: "a", timeoutMs: 1000, run: () => g.promise }])
+      eng.registerKind("cancel_install", [{ name: "c", run: async () => undefined }])
+      const job = await eng.createJob(alice, "install", "m-a", {})
+      await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "running")
+      for (let i = 0; i < 50; i++) await tick()
+      await vi.advanceTimersByTimeAsync(1000)
+      await vi.advanceTimersByTimeAsync(60_000)
+      await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "failed")
+      await eng.__idleForTests()
+      const blocked = { code: "job_active", detail: "ขั้นตอนเดิมยังไม่หยุดสนิท รอสักครู่" }
+      await expect(eng.createJob(alice, "install", "m-a", {})).rejects.toMatchObject(blocked)
+      await expect(eng.retryJob(alice, job.id)).rejects.toMatchObject(blocked)
+      await expect(eng.cancelJob(alice, job.id)).rejects.toMatchObject(blocked)
+      await expect(eng.createJob(alice, "install", "m-other", {})).resolves.toBeTruthy()
+      g.resolve() // zombie settles -> guard lifted
+      for (let i = 0; i < 20; i++) await tick()
+      await eng.__idleForTests()
+      await expect(eng.createJob(alice, "install", "m-a", {})).resolves.toBeTruthy()
+    })
+
+    it("zombie guard expires after 10 minutes", async () => {
+      const g = deferred()
+      eng.registerKind("install", [{ name: "a", timeoutMs: 1000, run: () => g.promise }])
+      const job = await eng.createJob(alice, "install", "m-a", {})
+      await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "running")
+      for (let i = 0; i < 50; i++) await tick()
+      await vi.advanceTimersByTimeAsync(61_000)
+      await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "failed")
+      await eng.__idleForTests()
+      await expect(eng.retryJob(alice, job.id)).rejects.toMatchObject({ code: "job_active" })
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+      await expect(eng.retryJob(alice, job.id)).resolves.toBeTruthy()
+      g.resolve()
+      await eng.__idleForTests()
+    })
+  })
 })
