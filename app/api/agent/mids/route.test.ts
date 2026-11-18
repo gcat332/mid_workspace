@@ -23,7 +23,12 @@ beforeEach(() => audit.mockClear())
 it("lists MIDs with checks and usable, without auditing", async () => {
   reg.listMids.mockResolvedValue([
     mid("ok1"),
-    mid("off", { agentAccess: false, status: { state: "stopped", pid: null, memoryBytes: null, since: null } }),
+    mid("off", { agentAccess: false }),
+    mid("stopped", { status: { state: "stopped", pid: null, memoryBytes: null, since: null } }),
+    mid("done", { job: { id: "j0", kind: "install", stage: "waitConnected", status: "succeeded", createdAt: new Date() } }),
+    mid("failedold", { job: { id: "j1", kind: "install", stage: "extract", status: "failed", createdAt: new Date() } }),
+    mid("cancelled", { job: { id: "j2", kind: "install", stage: "extract", status: "cancelled", createdAt: new Date() } }),
+    mid("err", { state: "error" }),
     mid("busy", { job: { id: "j", kind: "install", stage: "extract", status: "running", createdAt: new Date() } }),
     mid("other", { instanceUrl: "https://b.service-now.com/", configUrl: "https://b.service-now.com/" }),
   ])
@@ -31,11 +36,12 @@ it("lists MIDs with checks and usable, without auditing", async () => {
   expect(res.status).toBe(200)
   const { mids } = await res.json()
   expect(mids.map((m: { name: string; usable: boolean }) => [m.name, m.usable])).toEqual([
-    ["ok1", true], ["off", false], ["busy", false], ["other", false],
+    ["ok1", true], ["off", false], ["stopped", true], ["done", true], ["failedold", true], ["cancelled", true],
+    ["err", false], ["busy", false], ["other", false],
   ])
   expect(mids[0]).toMatchObject({ snName: "sn-ok1", instanceUrl: A, status: "กำลังรัน" })
   expect(mids[0].checks).toHaveLength(5)
-  expect(mids[1].status).toBe("หยุด")
-  expect(mids[2].checks.find((c: { id: string }) => c.id === "mid_ready").ok).toBe(false)
+  expect(mids[2].status).toBe("หยุด")
+  expect(mids[7].checks.find((c: { id: string }) => c.id === "mid_ready").ok).toBe(false)
   expect(audit).not.toHaveBeenCalled()
 })

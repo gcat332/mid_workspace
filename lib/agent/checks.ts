@@ -2,7 +2,7 @@ import { recordAudit } from "@/lib/audit"
 import { normalizeInstanceUrl } from "@/lib/instances/url"
 import { MidError } from "@/lib/mids/names"
 import { getMid, type MidSummary } from "@/lib/mids/registry"
-import { isActiveJobStatus } from "@/lib/ui/stages"
+import { isActiveJobStatus, jobStageLabel } from "@/lib/ui/stages"
 import type { AgentCaller } from "@/lib/agent/auth"
 
 export type CheckId = "user_registered" | "session_instance" | "instance_match" | "agent_access" | "mid_ready"
@@ -21,6 +21,13 @@ const canon = (u: string | null): string | null => {
   try { return normalizeInstanceUrl(u) } catch { return null }
 }
 const host = (u: string): string => { try { return new URL(u).hostname } catch { return u } }
+
+const STATE_LABELS: Record<string, string> = {
+  installing: "กำลังติดตั้ง",
+  uninstalling: "กำลังลบ",
+  upgrading: "กำลังอัปเกรด",
+  error: "ผิดพลาด",
+}
 
 /** Pure: the five checks of spec 5.2 in fixed order. */
 export function evaluateChecks(caller: AgentCaller, mid: MidFacts): Check[] {
@@ -47,9 +54,10 @@ export function evaluateChecks(caller: AgentCaller, mid: MidFacts): Check[] {
   }
 
   let ready: Check
-  if (mid.activeJob) ready = fail("mid_ready", `MID นี้กำลังมีงานอยู่ (${mid.activeJob}) รอให้เสร็จก่อน`)
-  else if (mid.state === "removed" || mid.state === "installing" || mid.state === "uninstalling") {
-    ready = fail("mid_ready", `MID นี้กำลังมีงานอยู่ (${mid.state}) รอให้เสร็จก่อน`)
+  if (mid.activeJob) ready = fail("mid_ready", `MID นี้กำลังมีงานอยู่ (${jobStageLabel(mid.activeJob)}) รอให้เสร็จก่อน`)
+  else if (mid.state === "removed") ready = fail("mid_ready", "MID นี้ถูกลบออกจาก MidHub แล้ว เลือก MID อื่น")
+  else if (mid.state !== "installed") {
+    ready = fail("mid_ready", `MID นี้ยังไม่พร้อมใช้งาน (${STATE_LABELS[mid.state] ?? mid.state}) รอให้เสร็จหรือให้ Admin ตรวจสอบก่อน`)
   } else ready = ok("mid_ready")
 
   return [

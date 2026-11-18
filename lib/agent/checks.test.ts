@@ -6,6 +6,7 @@ const reg = vi.hoisted(() => ({ getMid: vi.fn() }))
 vi.mock("@/lib/mids/registry", () => reg)
 
 import { evaluateChecks, requireUsableMid, type MidFacts } from "./checks"
+import { MidError } from "@/lib/mids/names"
 import { handleRouteError } from "@/lib/http/route"
 import type { AgentCaller } from "./auth"
 
@@ -51,10 +52,20 @@ describe("evaluateChecks", () => {
   it.each(["removed", "installing", "uninstalling"])("state %s is not ready", (state) => {
     expect(failedIds(caller(), { ...good, state })).toEqual(["mid_ready"])
   })
-  it("active job names its stage; stopped MID is still ready", () => {
+  it.each(["error", "upgrading", "something-new"])("any non-installed state (%s) fails closed with no active job", (state) => {
+    expect(failedIds(caller(), { ...good, state })).toEqual(["mid_ready"])
+  })
+  it("removed gets its own Thai message", () => {
+    const c = evaluateChecks(caller(), { ...good, state: "removed" }).find((x) => x.id === "mid_ready")!
+    expect(c.message).toContain("ถูกลบ")
+  })
+  it("active job shows the Thai stage label, not the raw id", () => {
     const c = evaluateChecks(caller(), { ...good, activeJob: "extract" }).find((x) => x.id === "mid_ready")!
-    expect(c.message).toContain("extract")
-    expect(failedIds(caller(), { ...good, state: "installed" })).toEqual([])
+    expect(c.message).toContain("แตกไฟล์")
+    expect(c.message).not.toContain("extract")
+  })
+  it("installed MID (process stopped is irrelevant to the checks) is usable", () => {
+    expect(evaluateChecks(caller(), good).every((c) => c.ok)).toBe(true)
   })
 })
 
@@ -68,6 +79,11 @@ describe("requireUsableMid", () => {
     reg.getMid.mockResolvedValue(summary())
     expect((await requireUsableMid(caller(), "m1")).name).toBe("m1")
     expect(audit).not.toHaveBeenCalled()
+  })
+  it("an ordinary MidError body has no checks key", async () => {
+    const res = handleRouteError(new MidError("not_found"))
+    expect(res.status).toBe(404)
+    expect(Object.keys(await res.json())).not.toContain("checks")
   })
   it("audits and throws 403 with checks in the body", async () => {
     reg.getMid.mockResolvedValue(summary({ agentAccess: false }))
