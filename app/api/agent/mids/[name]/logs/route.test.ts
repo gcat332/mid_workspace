@@ -6,7 +6,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 const SECRET = "Lg5-logs-route-agent-secret-" + "s".repeat(20)
 vi.mock("@/lib/env", () => ({ env: { agentSecret: "Lg5-logs-route-agent-secret-" + "s".repeat(20) } }))
 vi.mock("@/lib/db/client", () => ({
-  prisma: { user: { findUnique: async () => ({ id: "u1", email: "alice@x.com", role: "member", lockedAt: null }) } },
+  prisma: {
+    user: { findUnique: async () => ({ id: "u1", email: "alice@x.com", role: "member", lockedAt: null }) },
+    ipAllowlist: { findMany: async () => [] },
+  },
 }))
 const audit = vi.hoisted(() => vi.fn(async (...a: unknown[]) => void a))
 vi.mock("@/lib/audit", () => ({ recordAudit: audit }))

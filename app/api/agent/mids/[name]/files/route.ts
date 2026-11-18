@@ -21,6 +21,11 @@ const str = (v: unknown): string => {
 }
 const clean = (p: string) => p.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/")
 
+/** Parallel agent uploads per process (bounds open fds, temp files and disk churn); kept on globalThis so dev reloads share it. */
+const MAX_PARALLEL_UPLOADS = 2
+const slots = globalThis as typeof globalThis & { __midhubAgentUploads?: number }
+const BUSY_MSG = "มีการอัปโหลดจาก AgentHub กำลังทำอยู่ครบ 2 รายการแล้ว รอให้รายการก่อนหน้าเสร็จแล้วลองใหม่"
+
 export const GET = agentRoute<Ctx>(async (req, caller, ctx) => {
   const { name } = await usableMidParam(caller, ctx.params)
   const sp = new URL(req.url).searchParams
@@ -47,7 +52,14 @@ export const POST = agentRoute<Ctx>(async (req, caller, ctx) => {
   if (filename !== null) {
     const lenHeader = req.headers.get("content-length")
     const declared = lenHeader !== null && /^\d+$/.test(lenHeader) ? Number(lenHeader) : Number.NaN // NaN -> length_required
-    const r = await uploadStream(name, sp.get("dir") ?? "", filename, req.body, declared)
+    if ((slots.__midhubAgentUploads ?? 0) >= MAX_PARALLEL_UPLOADS) throw new MidError("busy", 429, BUSY_MSG)
+    slots.__midhubAgentUploads = (slots.__midhubAgentUploads ?? 0) + 1
+    let r: Awaited<ReturnType<typeof uploadStream>>
+    try {
+      r = await uploadStream(name, sp.get("dir") ?? "", filename, req.body, declared)
+    } finally {
+      slots.__midhubAgentUploads = (slots.__midhubAgentUploads ?? 1) - 1
+    }
     await recordAudit(caller.user, "agent.file.upload", name, { ...agentAuditDetail(caller), path: r.path, size: r.size })
     return Response.json(r)
   }

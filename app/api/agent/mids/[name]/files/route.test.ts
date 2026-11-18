@@ -7,7 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const SECRET = "Qv3-files-route-agent-secret-" + "s".repeat(20)
 vi.mock("@/lib/env", () => ({ env: { agentSecret: "Qv3-files-route-agent-secret-" + "s".repeat(20) } }))
 vi.mock("@/lib/db/client", () => ({
-  prisma: { user: { findUnique: async () => ({ id: "u1", email: "alice@x.com", role: "member", lockedAt: null }) } },
+  prisma: {
+    user: { findUnique: async () => ({ id: "u1", email: "alice@x.com", role: "member", lockedAt: null }) },
+    ipAllowlist: { findMany: async () => [] },
+  },
 }))
 const audit = vi.hoisted(() => vi.fn(async (...a: unknown[]) => void a))
 vi.mock("@/lib/audit", () => ({ recordAudit: audit }))
@@ -212,6 +215,35 @@ describe("POST raw upload", () => {
     const cfg = await POST(raw("?dir=agent&filename=config.xml", ["x"], { "content-length": "1" }), ctx())
     expect((await cfg.json()).code).toBe("use_config_tab")
     expect(fs.readFileSync(path.join(m, "agent/config.xml"), "utf8")).toBe("<parameters/>")
+  })
+})
+
+describe("parallel agent uploads (I1)", () => {
+  it("at most 2 at a time: a third gets 429 busy; slots are freed on success and on failure", async () => {
+    const gates: Array<() => void> = []
+    const held = (name: string) => new Request(url(`?dir=work&filename=${name}`), {
+      method: "POST", headers: { ...H, "content-length": "1" }, duplex: "half",
+      body: new ReadableStream<Uint8Array>({
+        async pull(c) { await new Promise<void>((r) => gates.push(r)); c.enqueue(Buffer.from("x")); c.close() },
+      }, { highWaterMark: 0 }),
+    } as RequestInit)
+    const a = POST(held("a"), ctx())
+    const b = POST(held("b"), ctx())
+    await vi.waitFor(() => expect(gates).toHaveLength(2))
+    const c = await POST(raw("?dir=work&filename=c", ["x"], { "content-length": "1" }), ctx())
+    expect(c.status).toBe(429)
+    const cb = await c.json()
+    expect(cb.code).toBe("busy")
+    expect(cb.message).toMatch(/AgentHub.*ลองใหม่/)
+    expect(fs.existsSync(path.join(m, "work/c"))).toBe(false)
+    gates.forEach((g) => g())
+    expect((await a).status).toBe(200)
+    expect((await b).status).toBe(200)
+    // a failing upload (short body) releases its slot too
+    expect((await POST(raw("?dir=work&filename=s", ["x"], { "content-length": "9" }), ctx())).status).toBe(400)
+    const d = POST(raw("?dir=work&filename=d", ["x"], { "content-length": "1" }), ctx())
+    const e = POST(raw("?dir=work&filename=e", ["x"], { "content-length": "1" }), ctx())
+    expect([(await d).status, (await e).status]).toEqual([200, 200])
   })
 })
 

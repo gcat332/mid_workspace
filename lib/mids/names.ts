@@ -49,6 +49,7 @@ const ERRORS = {
   agent_auth: [401, "AgentHub ยืนยันตัวตนกับ MidHub ไม่ผ่าน ตรวจ MIDHUB_AGENT_SECRET ทั้งสองฝั่ง"],
   agent_user: [403, "ผู้ใช้ยังไม่มีสิทธิ์ใช้ MidHub ให้ Admin เพิ่มในหน้า Users"],
   agent_check_failed: [403, "MID นี้ยังไม่ผ่านเงื่อนไขสำหรับ AgentHub ตรวจรายการเช็กแล้วลองใหม่"],
+  exists: [409, "มีไฟล์ชื่อนี้อยู่แล้ว อ่านไฟล์ก่อนเพื่อเอา hash (content=1) แล้วส่ง hash นั้นเป็น baseHash เพื่อแก้ไขแทนการสร้างใหม่"],
   conflict: [409, "การดำเนินการนี้ขัดแย้งกับสถานะปัจจุบัน รีเฟรชหน้าแล้วลองใหม่"],
 } as const satisfies Record<string, readonly [number, string]>
 

@@ -5,7 +5,13 @@ const fakeEnv = vi.hoisted(() => ({ agentSecret: "Zq7-distinct-secret-value-Zq7-
 vi.mock("@/lib/env", () => ({ env: fakeEnv }))
 let dbUser: { id: string; email: string; role: string; lockedAt: Date | null } | null = null
 const findUnique = vi.fn(async (...args: unknown[]) => (void args, dbUser))
-vi.mock("@/lib/db/client", () => ({ prisma: { user: { findUnique: (a: unknown) => findUnique(a) } } }))
+let cidrs: string[] = []
+vi.mock("@/lib/db/client", () => ({
+  prisma: {
+    user: { findUnique: (a: unknown) => findUnique(a) },
+    ipAllowlist: { findMany: async () => cidrs.map((cidr) => ({ cidr })) },
+  },
+}))
 
 import { authenticateAgent, parseSessionInstances, cameDirectlyOverLoopback } from "./auth"
 import { agentRoute } from "./http"
@@ -30,6 +36,7 @@ beforeEach(() => {
   fakeEnv.agentSecret = SECRET
   dbUser = { id: "u1", email: "alice@x.com", role: "member", lockedAt: null }
   findUnique.mockClear()
+  cidrs = []
 })
 
 describe("authenticateAgent", () => {
@@ -57,6 +64,20 @@ describe("authenticateAgent", () => {
   })
   it("wrong secret wins over forwarding headers: 401, not 403", async () => {
     expect(await fail(req({ "x-midhub-agent-secret": "bad", "x-forwarded-for": "1.2.3.4" }))).toMatchObject({ code: "agent_auth", status: 401 })
+  })
+  it("IP allowlist still applies (the proxy no longer runs here): after the secret, before the loopback check", async () => {
+    cidrs = ["10.0.0.0/8"]
+    const blocked = await fail(req({ "x-forwarded-for": "8.8.8.8" }))
+    expect(blocked).toBeInstanceOf(Response)
+    const r = blocked as unknown as Response
+    expect(r.status).toBe(403)
+    expect(await r.json()).toEqual({ code: "ip_blocked", message: "IP ของคุณ (8.8.8.8) ไม่อยู่ใน IP Allowlist กรุณาให้ Admin เพิ่ม IP นี้", ip: "8.8.8.8" })
+    expect(await fail(req({ "x-midhub-agent-secret": "bad", "x-forwarded-for": "8.8.8.8" }))).toMatchObject({ code: "agent_auth", status: 401 })
+    expect(await fail(req({ "x-forwarded-for": "::ffff:127.0.0.1" }))).toBeNull() // loopback is always allowed
+    expect(findUnique).toHaveBeenCalledTimes(1)
+    const viaRoute = await agentRoute(async () => new Response("ran"))(req({ "x-forwarded-for": "8.8.8.8" }), undefined)
+    expect(viaRoute.status).toBe(403)
+    expect((await viaRoute.json()).code).toBe("ip_blocked")
   })
   it("401 carries the exact catalogue text", async () => {
     expect((await fail(req({ "x-midhub-agent-secret": "bad" })))!.message).toBe("AgentHub ยืนยันตัวตนกับ MidHub ไม่ผ่าน ตรวจ MIDHUB_AGENT_SECRET ทั้งสองฝั่ง")

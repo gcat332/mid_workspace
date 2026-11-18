@@ -184,7 +184,7 @@ export function readText(name: string, rel: string): Promise<{ content: string; 
   })
 }
 
-/** `baseHash: ""` creates a new file (O_EXCL; an existing one is `stale`), otherwise edits in place with stale detection. */
+/** `baseHash: ""` creates a new file (O_EXCL; an existing one is `exists` 409), otherwise edits in place with stale detection. */
 export function writeText(name: string, rel: string, content: string, baseHash: string): Promise<{ hash: string }> {
   return mapped(async () => {
     const c = await ctxFor(name)
@@ -222,7 +222,7 @@ async function createText(c: Ctx, rel: string, data: Buffer): Promise<{ hash: st
     try {
       h = await createFileIn(d, e.parent, e.base, wc)
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "EEXIST") throw new MidError("stale") // created meanwhile: reload first
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") throw new MidError("exists") // read it, then edit with its hash
       throw err
     }
     try {
@@ -271,6 +271,22 @@ export function upload(name: string, dirRel: string, filename: string, data: Buf
   })
 }
 
+const UPLOAD_TMP_RE = /^\.midhub-upload-[0-9a-f]{16}\.part$/
+const STALE_TMP_MS = 60 * 60 * 1000
+
+/** Best effort: drop upload temp files of crashed/killed uploads (regular files, > 1 h old) in this verified dir. */
+async function sweepStaleTemps(d: FileHandle): Promise<void> {
+  try {
+    const cutoff = Date.now() - STALE_TMP_MS
+    for (const n of await fs.promises.readdir(fdPath(d))) {
+      if (!UPLOAD_TMP_RE.test(n)) continue
+      const st = await lstatIn(d, n).catch(() => null)
+      // unlink through the dir fd never follows the last component
+      if (st?.isFile() && st.mtimeMs < cutoff) await fs.promises.unlink(fdPath(d, n)).catch(() => {})
+    }
+  } catch { /* cleanup only */ }
+}
+
 const LENGTH_REQUIRED_MSG = "อัปโหลดต้องส่ง Content-Length เป็นจำนวนไบต์ของไฟล์ (เช่น curl --data-binary @ไฟล์) แล้วลองใหม่"
 const LENGTH_MISMATCH_MSG = "ข้อมูลที่ส่งมาไม่ตรงกับ Content-Length (ส่งไม่ครบหรือเกิน) ไฟล์จึงไม่ถูกบันทึก ส่งไฟล์ใหม่อีกครั้ง"
 
@@ -297,15 +313,20 @@ export function uploadStream(
     const wc = writeCheck(c)
     const d = await openDir(dir, wc)
     try {
+      await sweepStaleTemps(d)
       // Final name: exactly upload()'s overwrite rules (never a symlink/dir, regular file with nlink 1, real path checked).
+      // A replaced file keeps its permission bits (not its owner: the new inode belongs to the app user).
+      let keepMode: number | null = null
       try {
-        await (await openFileIn(d, dir, filename, wc)).h.close()
+        const old = await openFileIn(d, dir, filename, wc)
+        keepMode = old.st.mode & 0o777
+        await old.h.close()
       } catch (e) {
         const code = (e as NodeJS.ErrnoException).code
         if (code === "ELOOP" || code === "EISDIR") throw new MidError("conflict")
         if (code !== "ENOENT") throw e
       }
-      const tmp = `.midhub-upload-${randomBytes(8).toString("hex")}.part`
+      const tmp = `.midhub-upload-${randomBytes(8).toString("hex")}.part` // matches UPLOAD_TMP_RE
       const h = await createFileIn(d, dir, tmp, wc)
       let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
       let n = 0
@@ -322,6 +343,7 @@ export function uploadStream(
             while (off < value.byteLength) off += (await h.write(value, off, value.byteLength - off)).bytesWritten
           }
           if (n !== declaredLength) throw new MidError("invalid_request", 400, LENGTH_MISMATCH_MSG)
+          if (keepMode !== null) await h.chmod(keepMode) // fchmod on the temp fd
         } finally {
           await h.close()
         }

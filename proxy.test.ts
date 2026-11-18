@@ -7,7 +7,14 @@ vi.mock("@/lib/db/client", () => ({
   prisma: { ipAllowlist: { findMany: vi.fn(async () => cidrs.map((cidr) => ({ cidr }))) } },
 }))
 
-import { proxy } from "@/proxy"
+import { config, proxy } from "@/proxy"
+// Next's own matcher compiler and runtime matcher (internal modules of the pinned next@16.4.6).
+import * as pageStaticInfo from "next/dist/build/analysis/get-page-static-info"
+import { getMiddlewareRouteMatcher } from "next/dist/shared/lib/router/utils/middleware-route-matcher"
+// Exported at runtime but not in the .d.ts.
+const { getMiddlewareMatchers } = pageStaticInfo as unknown as {
+  getMiddlewareMatchers: (m: string[], cfg: { basePath: string }) => Parameters<typeof getMiddlewareRouteMatcher>[0]
+}
 
 // Real Next strips basePath from request.nextUrl.pathname in the proxy; NextRequest only does the
 // same when told the basePath via nextConfig. Passing it makes these tests behave like production.
@@ -137,22 +144,18 @@ describe("auth gate", () => {
   })
 })
 
-describe("/api/agent/* (server-to-server)", () => {
-  it("passes without a cookie, for any method, with no CSRF or cookie handling", async () => {
-    for (const method of ["GET", "POST", "PUT", "DELETE"]) {
-      const res = await proxy(req("/api/agent/mids", { method, headers: { origin: "http://evil.example" } }))
-      expect(res.status).toBe(200)
-      expect(res.headers.get("set-cookie")).toBeNull()
+describe("/api/agent/* bypasses the proxy (I1: Next would clone and buffer request bodies)", () => {
+  // Mirror Next exactly: compile config.matcher the way Next does (basePath prefix, data/transport suffixes)
+  // and run it on the full pathname, as next-server does.
+  const matches = (p: string) => getMiddlewareRouteMatcher(getMiddlewareMatchers(config.matcher, { basePath: "/midhub" }))(p, {} as never, {})
+  it("the matcher excludes /api/agent/* but still covers everything else", () => {
+    for (const p of ["/midhub/api/agent/mids", "/midhub/api/agent/mids/x/files", "/midhub/api/agent/mids/x/restart"]) expect(matches(p), p).toBe(false)
+    for (const p of ["/midhub/", "/midhub/api/mids", "/midhub/api/mids/x/files", "/midhub/api/agentx", "/midhub/api/agentx/mids", "/midhub/api/agent", "/midhub/login", "/midhub/audit"]) {
+      expect(matches(p), p).toBe(true)
     }
   })
-  it("still enforces the IP allowlist", async () => {
-    cidrs = ["10.0.0.0/8"]
-    const res = await proxy(req("/api/agent/mids", { headers: { "x-forwarded-for": "8.8.8.8" } }))
-    expect(res.status).toBe(403)
-    expect(await res.json()).toMatchObject({ code: "ip_blocked" })
-    expect((await proxy(req("/api/agent/mids", { headers: { "x-forwarded-for": "10.1.1.1" } }))).status).toBe(200)
-  })
-  it("does not exempt look-alike paths", async () => {
+  it("the proxy itself has no agent exemption left: called anyway, it gates like any API path", async () => {
+    expect((await proxy(req("/api/agent/mids"))).status).toBe(401)
     expect((await proxy(req("/api/agentx/mids"))).status).toBe(401)
     expect((await proxy(req("/api/agent"))).status).toBe(401)
   })

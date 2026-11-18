@@ -4,6 +4,7 @@ import { env } from "@/lib/env"
 import { isLocked } from "@/lib/auth/lockout"
 import type { SessionPayload } from "@/lib/auth/jwt"
 import { normalizeInstanceUrl } from "@/lib/instances/url"
+import { blockedClientIp, ipBlockedResponse } from "@/lib/net/ip-gate"
 import { MidError } from "@/lib/mids/names"
 
 export type AgentCaller = { user: SessionPayload; taskId: string; sessionInstances: string[] }
@@ -78,7 +79,7 @@ export function parseSessionInstances(raw: string | null): string[] {
 
 /**
  * Authenticates an AgentHub -> MidHub call (spec 5, 5.1). Order: feature off -> 404, secret -> 401,
- * loopback-only -> 403, then the actor from the DB (checked on every request, never cached).
+ * IP allowlist -> 403 ip_blocked, loopback-only -> 403, then the actor from the DB (checked on every request, never cached).
  * The secret value is never logged or put into any error.
  */
 export async function authenticateAgent(req: Request): Promise<AgentCaller> {
@@ -87,6 +88,9 @@ export async function authenticateAgent(req: Request): Promise<AgentCaller> {
 
   const given = req.headers.get("x-midhub-agent-secret")
   if (given === null || !secretMatches(given, secret)) throw new MidError("agent_auth")
+  // The proxy matcher skips /api/agent/* (body buffering), so the IP allowlist is applied here instead.
+  const blocked = await blockedClientIp(req.headers)
+  if (blocked !== null) throw ipBlockedResponse(blocked)
   if (!cameDirectlyOverLoopback(req.headers)) {
     throw new MidError("agent_auth", 403, "MidHub รับคำขอ AgentHub เฉพาะที่เรียกตรงผ่าน loopback เท่านั้น ไม่รับผ่าน Caddy/proxy")
   }

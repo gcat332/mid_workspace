@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { signToken, verifyToken, SESSION_COOKIE, type SessionPayload } from "@/lib/auth/jwt"
 import { sessionCookieOptions } from "@/lib/auth/cookie"
 import { validLoginNext, LOGIN_NEXT_COOKIE } from "@/lib/auth/login-next"
-import { isAllowed, clientIpFrom } from "@/lib/net/ip-allowlist"
+import { blockedClientIp, ipBlockedResponse } from "@/lib/net/ip-gate"
 
 // request.nextUrl.pathname excludes basePath ("/midhub"), so these are basePath-relative.
 const PUBLIC_PATHS = new Set(["/login", "/api/auth/login", "/api/auth/idp", "/api/auth/oidc/start", "/api/auth/oidc/callback"])
@@ -50,23 +50,16 @@ export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   // 1) IP allowlist (empty = allow all, loopback always allowed), before auth.
-  const ip = clientIpFrom(req.headers)
-  if (!(await isAllowed(ip))) {
+  const ip = await blockedClientIp(req.headers)
+  if (ip !== null) {
     // Echo the IP the gate checked so a blocked admin knows what to whitelist.
     // text/plain on purpose: X-Forwarded-For is client-supplied.
     const chain = req.headers.get("x-forwarded-for") ?? ""
-    if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ code: "ip_blocked", message: `IP ของคุณ (${ip}) ไม่อยู่ใน IP Allowlist กรุณาให้ Admin เพิ่ม IP นี้`, ip }, { status: 403 })
-    }
+    if (pathname.startsWith("/api/")) return ipBlockedResponse(ip)
     const body = `Access from your network is not allowed.\n\nYour IP as this server sees it: ${ip}` +
       (chain.includes(",") ? `\nX-Forwarded-For: ${chain}` : "") + "\n"
     return new NextResponse(body, { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8" } })
   }
-
-  // /api/agent/* is server-to-server (AgentHub over loopback, no cookie, not a browser): it skips the CSRF
-  // check and the cookie gate. It authenticates itself per request in lib/agent/auth.ts; the IP allowlist
-  // above still applies.
-  if (pathname.startsWith("/api/agent/")) return NextResponse.next()
 
   // 2) CSRF: unsafe API methods must come from this origin (public login included).
   if (pathname.startsWith("/api/") && !SAFE_METHODS.has(req.method) && crossOrigin(req)) {
@@ -110,6 +103,10 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  // Skip the gate for Next internals and public static assets (logos, icons, fonts).
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf)$).*)"],
+  // Skip the gate for Next internals and public static assets (logos, icons, fonts), and for /api/agent/*:
+  // server-to-server (AgentHub over loopback, no cookie, no browser), it authenticates itself and applies the
+  // IP allowlist in lib/agent/auth.ts. Excluded here because Next clones and fully buffers the body of every
+  // non-GET request the proxy matches (up to proxyClientMaxBodySize) before the route runs, which would defeat
+  // the streamed agent upload and its early 413.
+  matcher: ["/((?!_next/static|_next/image|api/agent/|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf)$).*)"],
 }
