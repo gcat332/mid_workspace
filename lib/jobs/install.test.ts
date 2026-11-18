@@ -237,4 +237,17 @@ describe("install kinds", () => {
     const job = await run("install", "m11", params({ proxy: undefined }))
     expect((readFileSync(job.journalPath, "utf8").match(/package 100%/g) ?? []).length).toBe(1)
   })
+
+  it("precheck failure (disk_low) is retryable: state error goes back to installing and ends installed", async () => {
+    await mkMid("m12")
+    freeBytes = 1024
+    const job = await run("install", "m12", params({ proxy: undefined }))
+    expect(job).toMatchObject({ status: "failed", stage: "precheck" })
+    expect((await prisma.midServer.findUniqueOrThrow({ where: { name: "m12" } })).state).toBe("error")
+    freeBytes = 10 * 1024 ** 3
+    await eng.retryJob(admin, job.id)
+    await eng.__idleForTests()
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("succeeded")
+    expect((await prisma.midServer.findUniqueOrThrow({ where: { name: "m12" } })).state).toBe("installed")
+  })
 })

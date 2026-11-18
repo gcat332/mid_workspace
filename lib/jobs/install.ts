@@ -33,9 +33,11 @@ const precheck: Stage = {
     ctx.signal.throwIfAborted()
     validateMidName(name(ctx))
     const row = await prisma.midServer.findUnique({ where: { name: name(ctx) } })
-    if (!row || row.state !== "installing") {
+    if (!row || (row.state !== "installing" && row.state !== "error")) {
       throw new MidError("internal", undefined, undefined, "MID record ไม่อยู่ในสถานะติดตั้ง")
     }
+    // Retry after onFailure (state "error"): show the job as installing again.
+    if (row.state === "error") await prisma.midServer.update({ where: { name: name(ctx) }, data: { state: "installing" } })
     if (p.cloneFrom === name(ctx)) throw new MidError("invalid_request", undefined, undefined, "cloneFrom ต้องไม่ใช่ MID เดียวกับที่กำลังสร้าง")
     const { freeBytes } = await deps.diskStatus()
     if (freeBytes !== null && freeBytes < MIN_FREE_BYTES) throw new MidError("disk_low")
