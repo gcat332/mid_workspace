@@ -40,7 +40,7 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-const props = { jobId: "j1", onJobChange: vi.fn(), onOpenMid: vi.fn(), onClose: vi.fn() }
+const props = { jobId: "j1", onJobChange: vi.fn(), onOpenMid: vi.fn(), onClose: vi.fn(), viewer: { isAdmin: true, userId: "u1" } }
 const mount = async () => {
   render(<JobProgress {...props} />)
   await screen.findByText("ดาวน์โหลดแพ็กเกจ MID")
@@ -189,5 +189,47 @@ describe("JobProgress", () => {
     await mount()
     const live = document.querySelector('[aria-live="polite"]')!
     expect(live.textContent).toContain("ดาวน์โหลดแพ็กเกจ MID")
+  })
+})
+
+describe("JobProgress retry/cancel permissions (engine rules)", () => {
+  const failed = (kind: string, createdBy: string) => { job = { ...job, kind, status: "failed", stage: "extract", error: "boom", createdBy } }
+  const show = async (viewer: { isAdmin: boolean; userId: string }) => {
+    render(<JobProgress {...props} viewer={viewer} />)
+    await screen.findByText("boom")
+  }
+  const member = (userId: string) => ({ isAdmin: false, userId })
+
+  it("removal kinds: a member sees no retry and sees 'ต้องเป็น Admin'; an admin sees retry", async () => {
+    failed("uninstall", "someone")
+    await show(member("m1"))
+    expect(screen.queryByText("ลองใหม่")).toBeNull()
+    expect(screen.getByText(/ต้องเป็น Admin/)).toBeTruthy()
+    cleanup()
+    failed("uninstall", "someone")
+    await show({ isAdmin: true, userId: "a1" })
+    expect(screen.getByText("ลองใหม่")).toBeTruthy()
+  })
+
+  it("removal kinds: even the creator (member) cannot retry cancel_install", async () => {
+    failed("cancel_install", "m1")
+    await show(member("m1"))
+    expect(screen.queryByText("ลองใหม่")).toBeNull()
+    expect(screen.getByText(/ต้องเป็น Admin/)).toBeTruthy()
+  })
+
+  it("install: the creator member sees retry and cancel", async () => {
+    failed("install", "m1")
+    await show(member("m1"))
+    expect(screen.getByText("ลองใหม่")).toBeTruthy()
+    expect(screen.getByText("ยกเลิกและลบ")).toBeTruthy()
+  })
+
+  it("install: another member sees neither and the reason 'เฉพาะผู้สร้างงานหรือ Admin'", async () => {
+    failed("clone", "m1")
+    await show(member("m2"))
+    expect(screen.queryByText("ลองใหม่")).toBeNull()
+    expect(screen.queryByText("ยกเลิกและลบ")).toBeNull()
+    expect(screen.getByText(/เฉพาะผู้สร้างงานหรือ Admin/)).toBeTruthy()
   })
 })

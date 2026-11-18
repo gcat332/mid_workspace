@@ -38,6 +38,7 @@ type Props = {
   mid: MidView
   host: HostView | null
   isAdmin: boolean
+  userId: string
   onChanged: () => void
   /** The dashboard's uninstall dialog currently owns this MID's job (it shows the progress itself). */
   jobOwnedElsewhere?: boolean
@@ -47,7 +48,7 @@ type Props = {
   onUninstall: (mid: MidView) => void
 }
 
-export function MidPanel({ mid, host, isAdmin, onChanged, onUninstall, jobOwnedElsewhere = false, optimisticBusy = false }: Props) {
+export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, jobOwnedElsewhere = false, optimisticBusy = false }: Props) {
   const [tab, setTab] = useState<TabId>("overview")
   const [pending, setPending] = useState<Pending | null>(null)
   const [busy, setBusy] = useState(false)
@@ -180,7 +181,7 @@ export function MidPanel({ mid, host, isAdmin, onChanged, onUninstall, jobOwnedE
       {err && <div className="mt-3"><ErrorNotice error={err} /></div>}
       {showJob && mid.job && (
         <div className="mt-4 rounded-xl border border-gray-200 p-4">
-          <JobProgress key={mid.job.id} jobId={mid.job.id} onJobChange={() => onChanged()}
+          <JobProgress key={mid.job.id} viewer={{ isAdmin, userId }} jobId={mid.job.id} onJobChange={() => onChanged()}
             onOpenMid={() => setWatched(null)} onClose={() => setWatched(null)} />
         </div>
       )}

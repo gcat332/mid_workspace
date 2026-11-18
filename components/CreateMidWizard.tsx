@@ -24,6 +24,7 @@ type Props = {
   onClose: () => void
   /** The create POST was accepted (host shows the MID as busy until its next poll confirms the job). */
   onStarted?: (name: string) => void
+  userId: string
 }
 
 const STEPS = ["Instance", "ตั้งค่า", "ตรวจสอบ", "ติดตั้ง"] as const
@@ -32,7 +33,7 @@ const INITIAL: WizardState = {
   heapMb: String(DEFAULT_HEAP_MB), logFiles: String(DEFAULT_LOG_FILES), proxyOn: false, proxyHost: "", proxyPort: "",
 }
 
-export function CreateMidWizard({ isAdmin, host, mids, jobId, onJobChange, onOpenMid, onClose, onStarted }: Props) {
+export function CreateMidWizard({ isAdmin, host, mids, jobId, onJobChange, onOpenMid, onClose, onStarted, userId }: Props) {
   const [jobKind, setJobKind] = useState<string | null>(null)
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [state, setState] = useState<WizardState>(INITIAL)
@@ -126,7 +127,7 @@ export function CreateMidWizard({ isAdmin, host, mids, jobId, onJobChange, onOpe
 
       <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
         {running ? (
-          <JobProgress key={jobId} jobId={jobId} onJobChange={onJobChange} onOpenMid={onOpenMid} onClose={onClose}
+          <JobProgress key={jobId} viewer={{ isAdmin, userId }} jobId={jobId} onJobChange={onJobChange} onOpenMid={onOpenMid} onClose={onClose}
             onStatus={(j) => {
               // This view is for installs only: a removal job (e.g. from a stale ?job= link) is shown by the panel/dialog instead.
               if (j.kind !== "install" && j.kind !== "clone") onClose()

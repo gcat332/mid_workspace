@@ -13,7 +13,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 const mount = (onClose = vi.fn()) => {
-  render(<CreateMidWizard isAdmin host={null} mids={[]} jobId={null} onJobChange={() => {}} onOpenMid={() => {}} onClose={onClose} />)
+  render(<CreateMidWizard isAdmin userId="u1" host={null} mids={[]} jobId={null} onJobChange={() => {}} onOpenMid={() => {}} onClose={onClose} />)
   return onClose
 }
 
@@ -64,7 +64,7 @@ describe("CreateMidWizard with ?job=", () => {
     }))
   }
   const show = (onClose = vi.fn()) => {
-    render(<CreateMidWizard isAdmin host={null} mids={[]} jobId="j1" onJobChange={() => {}} onOpenMid={() => {}} onClose={onClose} />)
+    render(<CreateMidWizard isAdmin userId="u1" host={null} mids={[]} jobId="j1" onJobChange={() => {}} onOpenMid={() => {}} onClose={onClose} />)
     return onClose
   }
 

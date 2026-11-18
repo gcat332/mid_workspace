@@ -11,6 +11,7 @@ import { parseProgress, type JournalEntry } from "@/lib/ui/wizard"
 
 type JobView = {
   id: string; kind: string; midName: string; stage: string; status: string; error: string | null
+  createdBy?: string
   stages: string[]; params: { snName?: string }
 }
 type Props = {
@@ -20,6 +21,8 @@ type Props = {
   onOpenMid: (name: string) => void
   onClose: () => void
   /** Called whenever the loaded job's kind/status changes (lets a host show a follow-up such as the instance record link). */
+  /** Who is looking: retry/cancel follow the engine's rules (removal = admin only; install/clone = creator or admin). */
+  viewer: { isAdmin: boolean; userId: string }
   onStatus?: (job: { kind: string; status: string }) => void
 }
 
@@ -38,7 +41,7 @@ function lineText(e: JournalEntry): string | null {
   }
 }
 
-export function JobProgress({ jobId, onJobChange, onOpenMid, onClose, onStatus }: Props) {
+export function JobProgress({ jobId, onJobChange, onOpenMid, onClose, onStatus, viewer }: Props) {
   const [job, setJob] = useState<JobView | null>(null)
   const [lines, setLines] = useState<JournalEntry[]>([])
   const [streamErr, setStreamErr] = useState<ApiError | null>(null)
@@ -145,6 +148,8 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose, onStatus }
   const succeeded = job?.status === "succeeded"
   const active = job ? isActiveJobStatus(job.status) : true
   const removal = job ? isRemovalKind(job.kind) : false
+  const mayAct = viewer.isAdmin || (!removal && !!job && job.createdBy === viewer.userId)
+  const noActReason = removal ? "ต้องเป็น Admin" : "เฉพาะผู้สร้างงานหรือ Admin"
   const isInstall = job?.kind === "install" || job?.kind === "clone"
   const progress = parseProgress(lines.map((l) => (l.type === "log" && l.msg ? l.msg : "")))
 
@@ -256,11 +261,12 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose, onStatus }
             message: job?.error ?? "งานล้มเหลว",
             detail: [...lines].reverse().find((l) => l.type === "error")?.detail,
           }} />
-          <div className="flex flex-wrap gap-2">
+          {!mayAct && <p role="status" className="text-sm text-amber-700">ลองใหม่หรือยกเลิกไม่ได้: {noActReason}</p>}
+          {mayAct && <div className="flex flex-wrap gap-2">
             <button type="button" disabled={busy} onClick={() => void retry()} className="btn-primary px-4 py-2 text-sm font-medium">ลองใหม่</button>
             {!removal && <button type="button" disabled={busy} onClick={() => setConfirmCancel(true)} className={ghostBtnCls}>ยกเลิกและลบ</button>}
-          </div>
-          <p className="text-xs text-gray-500">“ลองใหม่” ทำต่อจากขั้นที่ล้มเหลว{!removal && " · “ยกเลิกและลบ” ลบ MID ที่ติดตั้งค้างไว้ทั้งหมด"}</p>
+          </div>}
+          {mayAct && <p className="text-xs text-gray-500">“ลองใหม่” ทำต่อจากขั้นที่ล้มเหลว{!removal && " · “ยกเลิกและลบ” ลบ MID ที่ติดตั้งค้างไว้ทั้งหมด"}</p>}
         </div>
       )}
       {actionErr && <ErrorNotice error={actionErr} />}

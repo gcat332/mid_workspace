@@ -23,7 +23,7 @@ const J = (kind: string, stage: string, status: string) => ({ id: "j1", kind, st
 const btn = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement
 type Extra = { jobOwnedElsewhere?: boolean; optimisticBusy?: boolean }
 const panel = (mid: MidView, isAdmin = true, onUninstall = vi.fn(), extra: Extra = {}) =>
-  render(<MidPanel mid={mid} host={host} isAdmin={isAdmin} onChanged={() => {}} onUninstall={onUninstall} {...extra} />)
+  render(<MidPanel userId="u1" mid={mid} host={host} isAdmin={isAdmin} onChanged={() => {}} onUninstall={onUninstall} {...extra} />)
 
 describe("MidPanel lifecycle", () => {
   it("idle admin: Start and ลบ enabled, no job panel", () => {
@@ -124,7 +124,7 @@ describe("MidPanel lifecycle", () => {
   it("progress stays after the job ends (watched) until dismissed with onClose", () => {
     const { rerender } = panel(mk({ state: "installing", job: J("install", "extract", "running") }))
     const done = mk({ job: J("install", "markRemoved", "succeeded") })
-    rerender(<MidPanel mid={done} host={host} isAdmin onChanged={() => {}} onUninstall={() => {}} />)
+    rerender(<MidPanel userId="u1" mid={done} host={host} isAdmin onChanged={() => {}} onUninstall={() => {}} />)
     expect(screen.getByTestId("job-progress")).toBeTruthy()
     fireEvent.click(screen.getByText("close-progress"))
     expect(screen.queryByTestId("job-progress")).toBeNull()

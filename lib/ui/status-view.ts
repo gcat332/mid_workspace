@@ -45,8 +45,9 @@ export function failedJobShown(m: Pick<MidView, "state" | "job">): boolean {
 }
 
 /** An uninstall job that is still running or failed: the dashboard resumes its dialog (progress, retry, record link). */
-export function resumableUninstall(m: Pick<MidView, "job">): boolean {
-  return m.job?.kind === "uninstall" && (isActiveJobStatus(m.job.status) || m.job.status === "failed")
+export function resumableUninstall(m: Pick<MidView, "job" | "state">): boolean {
+  // A failed uninstall only counts while the MID is still "uninstalling" (not re-imported or revived since).
+  return m.job?.kind === "uninstall" && (isActiveJobStatus(m.job.status) || (m.job.status === "failed" && m.state === "uninstalling"))
 }
 
 export function statusView(m: JobPick): StatusView {

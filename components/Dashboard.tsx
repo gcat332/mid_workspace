@@ -26,8 +26,7 @@ function dismissedJobs(): string[] {
   } catch { return [...memDismissed] }
 }
 function dismissJob(id: string) {
-  memDismissed.add(id)
-  try { sessionStorage.setItem(DISMISS_KEY, JSON.stringify([...dismissedJobs(), id].slice(-50))) } catch { /* private mode: reopens on reload only */ }
+  try { sessionStorage.setItem(DISMISS_KEY, JSON.stringify([...dismissedJobs(), id].slice(-50))) } catch { memDismissed.add(id) /* private mode: kept for this page load only */ }
 }
 
 const noopSubscribe = () => () => undefined
@@ -35,7 +34,7 @@ const noopSubscribe = () => () => undefined
 // Polls are not user activity: the proxy does not slide the session for them, so the 4 h idle timeout still fires.
 const BACKGROUND: RequestInit = { headers: { "X-Background": "1" } }
 
-export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean }) {
+export function Dashboard({ email, userId, isAdmin }: { email: string; userId: string; isAdmin: boolean }) {
   const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
@@ -53,7 +52,7 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
   const [importing, setImporting] = useState(false)
   const [uninstalling, setUninstalling] = useState<{ mid: MidView; jobId: string | null } | null>(null)
   // A job was accepted but the next poll has not reported it yet: the MID counts as busy meanwhile.
-  const [optimistic, setOptimistic] = useState<string | null>(null)
+  const [optimistic, setOptimistic] = useState<{ name: string; prevJobId: string | null } | null>(null)
 
   const latest = useRef(createLatest())
 
@@ -78,7 +77,12 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
     if (m.data) {
       setMids(m.data)
       // Confirmed: the poll now reports an active job for that MID.
-      setOptimistic((o) => (o && m.data!.some((x) => x.name === o && jobIsActive(x)) ? null : o))
+      // ...or it is gone, or its latest job is no longer the one seen when the request was made (it finished fast / failed).
+      setOptimistic((o) => {
+        if (!o) return o
+        const x = m.data!.find((y) => y.name === o.name)
+        return !x || jobIsActive(x) || (x.job?.id ?? null) !== o.prevJobId ? null : o
+      })
     }
     setMidsErr(m.err ?? null)
     // Host unknown must not leave stale quota behind: Start is disabled while host is null.
@@ -136,6 +140,8 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
     if (m) setUninstalling({ mid: m, jobId: m.job!.id })
   }
 
+  const startOptimistic = (name: string) => setOptimistic({ name, prevJobId: mids?.find((x) => x.name === name)?.job?.id ?? null })
+
   const current = mids?.find((m) => m.name === selected) ?? null
 
   return (
@@ -172,8 +178,8 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
             </nav>
             <div ref={panelRef} className="min-w-0 scroll-mt-4 rounded-xl border border-gray-200 bg-white dark:bg-neutral-800 p-4 sm:p-5">
               {current
-                ? <MidPanel key={current.name} mid={current} host={host} isAdmin={isAdmin} onChanged={() => void refresh()} onUninstall={(m) => setUninstalling({ mid: m, jobId: null })}
-                    jobOwnedElsewhere={uninstalling?.mid.name === current.name} optimisticBusy={optimistic === current.name} />
+                ? <MidPanel key={current.name} mid={current} host={host} isAdmin={isAdmin} userId={userId} onChanged={() => void refresh()} onUninstall={(m) => setUninstalling({ mid: m, jobId: null })}
+                    jobOwnedElsewhere={uninstalling?.mid.name === current.name} optimisticBusy={optimistic?.name === current.name} />
                 : <p className="text-sm text-gray-500">เลือก MID จากรายการเพื่อดูรายละเอียด</p>}
             </div>
           </div>
@@ -182,11 +188,11 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
       {creating && (
         <CreateMidWizard isAdmin={isAdmin} host={host} mids={mids ?? []} jobId={jobParam}
           onJobChange={setWizardJob} onOpenMid={openCreated} onClose={closeWizard}
-          onStarted={(name) => { setOptimistic(name); void refresh() }} />
+          userId={userId} onStarted={(name) => { startOptimistic(name); void refresh() }} />
       )}
       {uninstalling && (
         <UninstallDialog mid={uninstalling.mid} jobId={uninstalling.jobId}
-          onStarted={() => { setOptimistic(uninstalling.mid.name); void refresh() }}
+          viewer={{ isAdmin, userId }} onStarted={() => { startOptimistic(uninstalling.mid.name); void refresh() }}
           onClose={(id) => { if (id) dismissJob(id); setUninstalling(null); void refresh() }} />
       )}
       {importing && (

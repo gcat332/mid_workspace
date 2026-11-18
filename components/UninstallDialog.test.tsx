@@ -11,6 +11,7 @@ class FakeES {
 }
 
 const json = (b: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } }))
+const ADMIN = { isAdmin: true, userId: "u1" }
 const mid = { name: "mid-a", instanceUrl: "https://dev1.service-now.com", midName: "sn mid&a" }
 let calls: { url: string; method: string; body?: string }[]
 let jobStatus: string
@@ -36,7 +37,7 @@ const type = (v: string) => fireEvent.change(screen.getByLabelText(/พิมพ
 
 describe("UninstallDialog", () => {
   it("explains that the instance record is not deleted and gates confirm on the exact name", () => {
-    render(<UninstallDialog mid={mid} onClose={() => {}} />)
+    render(<UninstallDialog viewer={ADMIN} mid={mid} onClose={() => {}} />)
     expect(screen.getByText(/ไม่ถูกลบ/)).toBeTruthy()
     expect(confirmBtn().disabled).toBe(true)
     type("mid-")
@@ -53,20 +54,20 @@ describe("UninstallDialog", () => {
 
   it("Esc closes before confirming", () => {
     const onClose = vi.fn()
-    render(<UninstallDialog mid={mid} onClose={onClose} />)
+    render(<UninstallDialog viewer={ADMIN} mid={mid} onClose={onClose} />)
     fireEvent.keyDown(document, { key: "Escape" })
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it("Enter in the field cannot submit while the name does not match", () => {
-    render(<UninstallDialog mid={mid} onClose={() => {}} />)
+    render(<UninstallDialog viewer={ADMIN} mid={mid} onClose={() => {}} />)
     type("nope")
     fireEvent.submit(screen.getByLabelText(/พิมพ์ชื่อ MID/).closest("form")!)
     expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(0)
   })
 
   it("sends DELETE {confirmName} and shows job progress on 202, then the encoded instance record link on success", async () => {
-    render(<UninstallDialog mid={mid} onClose={() => {}} />)
+    render(<UninstallDialog viewer={ADMIN} mid={mid} onClose={() => {}} />)
     type("mid-a")
     fireEvent.click(confirmBtn())
     await screen.findByRole("list", { name: "ขั้นตอน" })
@@ -78,7 +79,7 @@ describe("UninstallDialog", () => {
 
   it("shows the record link once the uninstall job succeeded", async () => {
     jobStatus = "succeeded"
-    render(<UninstallDialog mid={mid} onClose={() => {}} />)
+    render(<UninstallDialog viewer={ADMIN} mid={mid} onClose={() => {}} />)
     type("mid-a")
     fireEvent.click(confirmBtn())
     expect(await screen.findByText("ลบ record นี้ใน instance เองถ้าไม่ใช้แล้ว")).toBeTruthy()
@@ -88,7 +89,7 @@ describe("UninstallDialog", () => {
 
   it("shows the server error and stays on the confirm step when DELETE fails", async () => {
     deleteReply = () => json({ code: "job_active", message: "มีงานอื่นกำลังทำอยู่" }, 409)
-    render(<UninstallDialog mid={mid} onClose={() => {}} />)
+    render(<UninstallDialog viewer={ADMIN} mid={mid} onClose={() => {}} />)
     type("mid-a")
     fireEvent.click(confirmBtn())
     expect(await screen.findByText(/มีงานอื่นกำลังทำอยู่/)).toBeTruthy()
@@ -98,7 +99,7 @@ describe("UninstallDialog", () => {
 
   it("rejects a 202 without a job id", async () => {
     deleteReply = () => json({}, 202)
-    render(<UninstallDialog mid={mid} onClose={() => {}} />)
+    render(<UninstallDialog viewer={ADMIN} mid={mid} onClose={() => {}} />)
     type("mid-a")
     fireEvent.click(confirmBtn())
     expect(await screen.findByRole("alert")).toBeTruthy()
@@ -107,7 +108,7 @@ describe("UninstallDialog", () => {
 
   it("resume mode skips typing, shows the job, and the record link after success", async () => {
     jobStatus = "succeeded"
-    render(<UninstallDialog mid={mid} jobId="u1" onClose={() => {}} />)
+    render(<UninstallDialog viewer={ADMIN} mid={mid} jobId="u1" onClose={() => {}} />)
     expect(screen.queryByLabelText(/พิมพ์ชื่อ MID/)).toBeNull()
     expect(await screen.findByText("ลบ record นี้ใน instance เองถ้าไม่ใช้แล้ว")).toBeTruthy()
     expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(0)
@@ -115,9 +116,22 @@ describe("UninstallDialog", () => {
 
   it("reports the shown job id when closed (so the host can remember the dismissal)", async () => {
     const onClose = vi.fn()
-    render(<UninstallDialog mid={mid} jobId="u1" onClose={onClose} />)
+    render(<UninstallDialog viewer={ADMIN} mid={mid} jobId="u1" onClose={onClose} />)
     await screen.findByRole("list", { name: "ขั้นตอน" })
     fireEvent.keyDown(document, { key: "Escape" })
     expect(onClose).toHaveBeenCalledWith("u1")
+  })
+
+  it("resume mode as a member: failed uninstall shows no retry and the admin-only reason", async () => {
+    jobStatus = "failed"
+    render(<UninstallDialog viewer={{ isAdmin: false, userId: "m1" }} mid={mid} jobId="u1" onClose={() => {}} />)
+    expect(await screen.findByText(/ต้องเป็น Admin/)).toBeTruthy()
+    expect(screen.queryByText("ลองใหม่")).toBeNull()
+  })
+
+  it("resume mode as an admin: failed uninstall offers retry", async () => {
+    jobStatus = "failed"
+    render(<UninstallDialog viewer={ADMIN} mid={mid} jobId="u1" onClose={() => {}} />)
+    expect(await screen.findByText("ลองใหม่")).toBeTruthy()
   })
 })

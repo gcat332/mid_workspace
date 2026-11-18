@@ -44,7 +44,7 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
-const load = async () => { render(<Dashboard email="a@b" isAdmin />); await act(async () => { await vi.advanceTimersByTimeAsync(50) }) }
+const load = async (isAdmin = true) => { render(<Dashboard email="a@b" userId="u1" isAdmin={isAdmin} />); await act(async () => { await vi.advanceTimersByTimeAsync(50) }) }
 const poll = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(5100) }) }
 
 describe("Dashboard uninstall ownership", () => {
@@ -77,6 +77,18 @@ describe("Dashboard uninstall ownership", () => {
     expect(screen.getAllByTestId("job-progress")).toHaveLength(1)
   })
 
+  it("a failed uninstall whose MID is no longer 'uninstalling' is not resumed", async () => {
+    mids = [mk("installed", J("uninstall", "failed"))]
+    await load()
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("a member also gets the resumed dialog (retry gating lives in JobProgress)", async () => {
+    mids = [mk("uninstalling", J("uninstall", "failed"))]
+    await load(false)
+    expect(screen.getByRole("dialog")).toBeTruthy()
+  })
+
   it("stays closed across polls even when sessionStorage throws", async () => {
     mids = [mk("uninstalling", J("uninstall", "running"))]
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked") })
@@ -99,5 +111,31 @@ describe("Dashboard optimistic busy", () => {
     fireEvent.click(screen.getByText("wizard-started"))
     await act(async () => { await vi.advanceTimersByTimeAsync(50) })
     expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("is cleared once a poll shows the job finished (latest job changed, not active), so writes unlock", async () => {
+    search = "mid=demo-x&create=1"
+    mids = [mk("installed", null)]
+    await load()
+    mids = [mk("installed", null)]
+    fireEvent.click(screen.getByText("wizard-started"))
+    await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+    expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(true)
+    mids = [mk("installed", J("install", "succeeded"))] // finished between polls: never seen active
+    await poll()
+    expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it("is cleared when the MID is no longer listed", async () => {
+    search = "mid=demo-x&create=1"
+    mids = [mk("installed", null)]
+    await load()
+    fireEvent.click(screen.getByText("wizard-started"))
+    await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+    mids = [{ ...mk("installed", null), name: "other" }] // demo-x vanished
+    await poll()
+    mids = [mk("installed", null)] // reappears idle
+    await poll()
+    expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(false)
   })
 })

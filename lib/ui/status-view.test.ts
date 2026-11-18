@@ -78,6 +78,8 @@ describe("jobIsActive / failedJobShown", () => {
 describe("resumableUninstall", () => {
   it("true for queued/running/failed uninstall jobs only", () => {
     for (const s of ["queued", "running", "failed"]) expect(resumableUninstall(withJob("uninstalling", J("uninstall", "stop", s)))).toBe(true)
+    expect(resumableUninstall(withJob("installed", J("uninstall", "stop", "failed")))).toBe(false) // revived/re-imported since
+    expect(resumableUninstall(withJob("error", J("uninstall", "stop", "failed")))).toBe(false)
     expect(resumableUninstall(withJob("uninstalling", J("uninstall", "stop", "succeeded")))).toBe(false)
     expect(resumableUninstall(withJob("uninstalling", J("uninstall", "stop", "cancelled")))).toBe(false)
     expect(resumableUninstall(withJob("installing", J("install", "extract", "running")))).toBe(false)

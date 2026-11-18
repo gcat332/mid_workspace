@@ -10,7 +10,7 @@ export default async function Home() {
   if (!user) redirect("/login")
   return (
     <Suspense>
-      <Dashboard email={user.email} isAdmin={user.role === "admin"} />
+      <Dashboard email={user.email} userId={user.userId} isAdmin={user.role === "admin"} />
     </Suspense>
   )
 }
