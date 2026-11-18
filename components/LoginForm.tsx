@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState, type FormEvent } from "react"
 import { useSearchParams } from "next/navigation"
 import { errorTextCls, inputCls, labelCls } from "@/lib/ui/classes"
+import { BASE_PATH } from "@/lib/ui/api"
 
 // Only these codes (from the SSO routes) are ever shown; anything else gets the generic text.
 const SSO_ERRORS: Record<string, string> = {
@@ -72,9 +73,9 @@ function LoginFormInner() {
       <div className="bg-white dark:bg-neutral-800 rounded-xl shadow-lg w-full max-w-sm mx-4 p-8">
         <div className="mb-6 flex items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/midhub/logo-mfec-black.png" alt="MFEC" className="h-6 w-auto dark:hidden" />
+          <img src={`${BASE_PATH}/logo-mfec-black.png`} alt="MFEC" className="h-6 w-auto dark:hidden" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/midhub/logo-mfec-white.png" alt="MFEC" className="h-6 w-auto hidden dark:block" />
+          <img src={`${BASE_PATH}/logo-mfec-white.png`} alt="MFEC" className="h-6 w-auto hidden dark:block" />
           <span className="h-5 w-px bg-gray-200 dark:bg-neutral-700" />
           <span className="text-xl font-bold tracking-tight">
             <span className="bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 bg-clip-text text-transparent">BSM</span> <span className="text-blue-600 dark:text-blue-400">MIDHub</span>
@@ -106,9 +107,9 @@ function LoginFormInner() {
             <a href="/midhub/api/auth/oidc/start"
               className="w-full py-3 px-4 text-sm font-semibold rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-700 transition-colors flex items-center justify-center gap-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/midhub/logo-mfec-black.png" alt="" className="h-5 w-auto dark:hidden" />
+              <img src={`${BASE_PATH}/logo-mfec-black.png`} alt="" className="h-5 w-auto dark:hidden" />
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/midhub/logo-mfec-white.png" alt="" className="h-5 w-auto hidden dark:block" />
+              <img src={`${BASE_PATH}/logo-mfec-white.png`} alt="" className="h-5 w-auto hidden dark:block" />
               เข้าสู่ระบบด้วย {idp.label}
             </a>
           </>

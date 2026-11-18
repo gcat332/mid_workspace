@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { apiFetch } from "@/lib/ui/api"
-import { applyTheme, readTheme, saveTheme, type Theme } from "@/lib/ui/theme"
+import { applyTheme, readTheme, saveTheme, THEME_KEY, type Theme } from "@/lib/ui/theme"
 
 function initials(email: string): string {
   const local = email.split("@")[0] ?? email
@@ -33,6 +33,8 @@ export function ProfileMenu({ email, role }: { email: string; role: string }) {
   const [theme, setTheme] = useState<Theme>("system")
   const [logoutErr, setLogoutErr] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const isAdmin = role === "admin"
 
   useEffect(() => {
@@ -43,6 +45,15 @@ export function ProfileMenu({ email, role }: { email: string; role: string }) {
     applyTheme(saved)
   }, [])
   useEffect(() => {
+    // Another tab changed the preference: follow it.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== THEME_KEY) return
+      const t = readTheme(); setTheme(t); applyTheme(t)
+    }
+    window.addEventListener("storage", onStorage)
+    return () => window.removeEventListener("storage", onStorage)
+  }, [])
+  useEffect(() => {
     if (theme !== "system") return
     const mq = window.matchMedia("(prefers-color-scheme: dark)")
     const handler = () => applyTheme("system")
@@ -50,9 +61,12 @@ export function ProfileMenu({ email, role }: { email: string; role: string }) {
     return () => mq.removeEventListener("change", handler)
   }, [theme])
   useEffect(() => {
+    if (open) menuRef.current?.querySelector<HTMLElement>('[role^="menuitem"]')?.focus()
+  }, [open])
+  useEffect(() => {
     if (!open) return
     const onClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setOpen(false); triggerRef.current?.focus() } }
     document.addEventListener("mousedown", onClick)
     document.addEventListener("keydown", onKey)
     return () => { document.removeEventListener("mousedown", onClick); document.removeEventListener("keydown", onKey) }
@@ -77,7 +91,7 @@ export function ProfileMenu({ email, role }: { email: string; role: string }) {
 
   return (
     <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} aria-label="เมนูผู้ใช้"
+      <button ref={triggerRef} type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} aria-label="เมนูผู้ใช้"
         className={`flex items-center gap-2.5 rounded-full py-1 pl-1 pr-3 transition-colors ${open ? "bg-gray-100 dark:bg-neutral-700" : "hover:bg-gray-100 dark:hover:bg-neutral-700"}`}>
         <span className={avatar} aria-hidden>{initials(email)}</span>
         <span className="hidden sm:flex flex-col items-start leading-tight">
@@ -90,7 +104,7 @@ export function ProfileMenu({ email, role }: { email: string; role: string }) {
       </button>
 
       {open && (
-        <div role="menu" className="absolute right-0 top-[calc(100%+10px)] w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 shadow-xl p-2 z-40">
+        <div ref={menuRef} role="menu" className="absolute right-0 top-[calc(100%+10px)] w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 shadow-xl p-2 z-40">
           <div className="flex items-center gap-3 px-2 py-2">
             <span className={avatar.replace("h-9 w-9", "h-11 w-11")} aria-hidden>{initials(email)}</span>
             <div className="min-w-0">
@@ -100,9 +114,9 @@ export function ProfileMenu({ email, role }: { email: string; role: string }) {
           </div>
           <div className="h-px bg-gray-100 dark:bg-neutral-700 my-1.5" />
           <div className="px-3 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-neutral-500">Theme</div>
-          <div className="flex gap-1 px-2 pb-1">
+          <div role="group" aria-label="Theme" className="flex gap-1 px-2 pb-1">
             {THEMES.map((t) => (
-              <button key={t.value} type="button" onClick={() => chooseTheme(t.value)} aria-pressed={theme === t.value}
+              <button key={t.value} type="button" role="menuitemradio" aria-checked={theme === t.value} onClick={() => chooseTheme(t.value)}
                 className={`flex-1 flex flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-xs transition-colors ${theme === t.value ? "bg-blue-50 text-brand-navy dark:bg-blue-950/50 dark:text-blue-300" : "text-gray-600 hover:bg-gray-100 dark:text-neutral-300 dark:hover:bg-neutral-700"}`}>
                 {themeGlyph(t.value)}{t.label}
               </button>

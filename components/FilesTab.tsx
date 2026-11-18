@@ -6,6 +6,7 @@ import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { Modal } from "./Modal"
 import { API_BASE, apiFetch } from "@/lib/ui/api"
+import { useIsDark } from "@/lib/ui/use-is-dark"
 
 const EDITOR_LOADING = <p className="p-3 text-sm text-gray-500">กำลังโหลด editor…</p>
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false, loading: () => EDITOR_LOADING })
@@ -32,6 +33,7 @@ function size(n: number): string {
 type Props = { midName: string; /** Switch the MID panel to the config tab (config.xml / wrapper-override.conf rows). */ onOpenConfig: () => void }
 
 export function FilesTab({ midName, onOpenConfig }: Props) {
+  const dark = useIsDark()
   const base = `/mids/${encodeURIComponent(midName)}/files`
   const [dir, setDir] = useState("")
   const [entries, setEntries] = useState<Entry[] | null>(null)
@@ -144,7 +146,7 @@ export function FilesTab({ midName, onOpenConfig }: Props) {
           </div>
         )}
         <div className="h-96 overflow-hidden rounded-lg border border-gray-300">
-          <MonacoEditor height="100%" language={lang(open.path)} path={`${midName}/${open.path}`} value={open.draft} loading={EDITOR_LOADING}
+          <MonacoEditor theme={dark ? "vs-dark" : "vs"} height="100%" language={lang(open.path)} path={`${midName}/${open.path}`} value={open.draft} loading={EDITOR_LOADING}
             onChange={(v) => { setSaved(false); setOpen((o) => (o ? { ...o, draft: v ?? "" } : o)) }} options={{ minimap: { enabled: false }, scrollBeyondLastLine: false, readOnly: open.readOnly }} />
         </div>
         {confirmClose && (

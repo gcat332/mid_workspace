@@ -1,5 +1,7 @@
-export const API_BASE = "/midhub/api"
-export const LOGIN_URL = "/midhub/login"
+/** next.config basePath; <img src> and raw fetch/links are not prefixed automatically. */
+export const BASE_PATH = "/midhub"
+export const API_BASE = `${BASE_PATH}/api`
+export const LOGIN_URL = `${BASE_PATH}/login`
 
 /** fetch wrapper for the app's own API: a 401 (session expired) sends the user straight to the login page. */
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {

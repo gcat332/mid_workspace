@@ -12,6 +12,9 @@
   --foreground: #171717;
 }
 
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+
 .dark {
   /* Neutral (no blue tint) dark surface, matching the bg-neutral-900 body. */
   --background: #171717;
@@ -60,10 +63,10 @@
    text-white are deliberately left alone: bg-white gets an explicit dark: variant at call sites. */
 .dark {
   --color-gray-50:  #171717;
-  --color-gray-100: #262626;
+  --color-gray-100: #2f2f2f;
   --color-gray-200: #404040;
   --color-gray-300: #525252;
-  --color-gray-400: #8a8a8a;
+  --color-gray-400: #9a9a9a;
   --color-gray-500: #a3a3a3;
   --color-gray-600: #bdbdbd;
   --color-gray-700: #d4d4d4;
@@ -89,6 +92,8 @@
   --color-amber-900: #fef3c7;
   --color-green-100: #123524;
   --color-green-800: #86efac;
+  --color-emerald-600: #6ee7b7;
+  --color-emerald-700: #6ee7b7;
 }
 
 body {
@@ -117,3 +122,8 @@ body {
 .btn-primary:active:not(:disabled) { transform: translateY(0); }
 .btn-primary:disabled { opacity: 0.5; box-shadow: none; transform: none; cursor: default; }
 .btn-primary:focus-visible { outline: 2px solid var(--color-blue-400); outline-offset: 2px; }
+
+/* Native controls: explicit token colors so the closed select and its popup are readable in both themes. */
+select { background-color: var(--color-white); color: var(--color-gray-900); }
+.dark select { background-color: #404040; color: #ededed; }
+.dark select option { background-color: #262626; color: #ededed; }

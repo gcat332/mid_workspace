@@ -7,6 +7,7 @@ import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { apiFetch } from "@/lib/ui/api"
 import { MAX_HEAP_MB, MIN_HEAP_MB } from "@/lib/helper/protocol"
 import { inputCls } from "@/lib/ui/classes"
+import { useIsDark } from "@/lib/ui/use-is-dark"
 
 const EDITOR_LOADING = <p className="p-3 text-sm text-gray-500">กำลังโหลด editor…</p>
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false, loading: () => EDITOR_LOADING })
@@ -40,6 +41,7 @@ type Props = {
 }
 
 export function ConfigTab({ midName, canRestart, onRestart }: Props) {
+  const dark = useIsDark()
   const base = `/mids/${encodeURIComponent(midName)}/config`
   const [data, setData] = useState<Data | null>(null)
   const [mode, setMode] = useState<"form" | "raw">("form")
@@ -186,7 +188,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
           </div>
           {rawFile === "config.xml" && <p className="text-xs text-gray-500">ค่า password แสดงเป็น ******** — ถ้าไม่แก้ ระบบจะคงค่าเดิมในไฟล์ไว้</p>}
           <div className="h-96 overflow-hidden rounded-lg border border-gray-300">
-            <MonacoEditor height="100%" language={LANG[rawFile]} path={`${midName}/${rawFile}`} value={drafts[rawFile]}
+            <MonacoEditor theme={dark ? "vs-dark" : "vs"} height="100%" language={LANG[rawFile]} path={`${midName}/${rawFile}`} value={drafts[rawFile]}
               loading={EDITOR_LOADING}
               onChange={(v) => { setSaved(false); setDrafts((d) => ({ ...d, [rawFile]: v ?? "" })) }} options={{ minimap: { enabled: false }, scrollBeyondLastLine: false }} />
           </div>
@@ -214,7 +216,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
               {/* Keep the models alive across unmount (rollback clears `selected`): disposing them first makes Monaco
                   log "TextModel got disposed before DiffEditorWidget model got reset". Paths are keyed by immutable
                   content (backup id, current hash) because an existing model is reused as-is on the next mount. */}
-              <DiffEditor height="100%" language={LANG[selected.file]} original={selected.content}
+              <DiffEditor theme={dark ? "vs-dark" : "vs"} height="100%" language={LANG[selected.file]} original={selected.content}
                 modified={data.files[selected.file].content} loading={EDITOR_LOADING}
                 originalModelPath={`diff/${midName}/backup/${selected.id}`}
                 modifiedModelPath={`diff/${midName}/current/${data.files[selected.file].hash}/${selected.file}`}

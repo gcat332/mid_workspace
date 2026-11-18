@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 import { NavLinks } from "@/components/NavLinks"
 import { ProfileMenu } from "@/components/ProfileMenu"
+import { BASE_PATH } from "@/lib/ui/api"
 
 // Authenticated app chrome, modelled on AgentHub's: top header (MFEC logo + "BSM MIDHub" wordmark, profile
 // menu) and a section-tab row. Unlike AgentHub it stays visible on phones (MidHub is used on mobile).
@@ -12,9 +13,9 @@ export function AppChrome({ user, children }: { user: { email: string; role: str
       <header className="relative shrink-0 flex items-center gap-2 px-3 sm:px-5 py-1.5 bg-white border-b border-gray-200 shadow-sm dark:bg-neutral-800 dark:border-neutral-700">
         {/* Logo swaps by theme via CSS: black on light, white on dark. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/midhub/logo-mfec-black.png" alt="MFEC" className="h-6 sm:h-7 w-auto self-center -mt-1 dark:hidden" />
+        <img src={`${BASE_PATH}/logo-mfec-black.png`} alt="MFEC" className="h-6 sm:h-7 w-auto self-center -mt-1 dark:hidden" />
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/midhub/logo-mfec-white.png" alt="MFEC" className="h-6 sm:h-7 w-auto self-center -mt-1 hidden dark:block" />
+        <img src={`${BASE_PATH}/logo-mfec-white.png`} alt="MFEC" className="h-6 sm:h-7 w-auto self-center -mt-1 hidden dark:block" />
         <span className="self-center h-6 w-px bg-gray-200 dark:bg-neutral-700 mx-1 sm:mx-2" />
         {/* The BSM gradient is AgentHub's sanctioned brand-identity gradient. */}
         <span className="relative -top-px text-xl sm:text-[31px] leading-8 sm:leading-9 font-bold tracking-tight text-gray-900 dark:text-neutral-50">
