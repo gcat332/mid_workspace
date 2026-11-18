@@ -4,7 +4,7 @@ const links = [
   { href: "/admin/users", label: "ผู้ใช้" },
   { href: "/admin/idp", label: "IdP (SSO)" },
   { href: "/admin/ip-allowlist", label: "IP Allowlist" },
-  { href: "/admin/audit", label: "Audit" }, // page arrives in Task 15
+  { href: "/admin/audit", label: "Audit" },
 ]
 
 export function AdminNav() {
