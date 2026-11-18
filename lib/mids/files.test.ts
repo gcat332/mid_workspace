@@ -10,7 +10,7 @@ vi.mock("@/lib/db/client", () => ({
 }))
 vi.mock("@/lib/mids/status", () => ({ readServiceStatus: async () => ({ state: "inactive", pid: null, memoryBytes: null, since: null }), runSystemctl: async () => ({ code: 0, stdout: "" }) }))
 
-import { downloadInfo, listDir, mkdir, readText, remove, rename, upload, writeText } from "./files"
+import { hooks, listDir, openDownload, mkdir, readText, remove, rename, upload, writeText } from "./files"
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex")
 let root: string
@@ -91,7 +91,7 @@ describe("readText / writeText", () => {
     await rejects(writeText("m1", "agent/config.xml", "x", sha("<parameters/>")), "use_config_tab", 403)
     await rejects(writeText("m1", "agent/conf/wrapper-override.conf", "x", sha("a=1\n")), "use_config_tab", 403)
     await rejects(readText("m1", "agent/config.xml"), "use_config_tab", 403)
-    await rejects(downloadInfo("m1", "agent/config.xml"), "use_config_tab", 403)
+    await rejects(openDownload("m1", "agent/config.xml"), "use_config_tab", 403)
   })
 })
 
@@ -179,9 +179,123 @@ describe("remove", () => {
   })
 })
 
-describe("downloadInfo", () => {
-  it("returns the real file, rejects dirs", async () => {
-    expect(await downloadInfo("m1", "work/note.txt")).toMatchObject({ size: 5, filename: "note.txt" })
-    await rejects(downloadInfo("m1", "work"), "invalid_request", 400)
+async function slurp(h: Awaited<ReturnType<typeof openDownload>>): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const c of h.handle.createReadStream({ start: 0, end: h.size - 1 })) chunks.push(c as Buffer)
+  return Buffer.concat(chunks).toString()
+}
+
+describe("openDownload", () => {
+  it("returns a verified handle, rejects dirs", async () => {
+    const d = await openDownload("m1", "work/note.txt")
+    expect(d).toMatchObject({ size: 5, filename: "note.txt" })
+    expect(await slurp(d)).toBe("hello")
+    await rejects(openDownload("m1", "work"), "invalid_request", 400)
+  })
+  it("does not send bytes appended after the open (growing log)", async () => {
+    const d = await openDownload("m1", "work/note.txt")
+    fs.appendFileSync(path.join(m, "work/note.txt"), " more")
+    expect(await slurp(d)).toBe("hello")
+  })
+})
+
+describe("TOCTOU: swaps after the check are refused (fd-verified I/O)", () => {
+  afterEach(() => { hooks.beforeIo = undefined })
+  const outside = () => {
+    const o = path.join(root, "outside")
+    fs.mkdirSync(o, { recursive: true })
+    fs.writeFileSync(path.join(o, "secret.txt"), "top")
+    return o
+  }
+  it("readText: file swapped for a symlink", async () => {
+    const o = outside()
+    hooks.beforeIo = () => { fs.rmSync(path.join(m, "work/note.txt")); fs.symlinkSync(path.join(o, "secret.txt"), path.join(m, "work/note.txt")) }
+    await rejects(readText("m1", "work/note.txt"), "path_outside")
+  })
+  it("download: intermediate dir swapped for a symlink to outside", async () => {
+    const o = outside()
+    fs.mkdirSync(path.join(m, "work/a"))
+    fs.writeFileSync(path.join(m, "work/a/secret.txt"), "x")
+    hooks.beforeIo = () => { fs.renameSync(path.join(m, "work/a"), path.join(m, "work/a.old")); fs.symlinkSync(o, path.join(m, "work/a")) }
+    await rejects(openDownload("m1", "work/a/secret.txt"), "path_outside")
+  })
+  it("upload: dir component swapped for a symlink into agent/bin -> refused (path moved), nothing written", async () => {
+    fs.mkdirSync(path.join(m, "work/a/b"), { recursive: true })
+    fs.mkdirSync(path.join(m, "agent/bin/b"))
+    hooks.beforeIo = () => { fs.renameSync(path.join(m, "work/a"), path.join(m, "work/a.old")); fs.symlinkSync(path.join(m, "agent/bin"), path.join(m, "work/a")) }
+    await rejects(upload("m1", "work/a/b", "x.txt", Buffer.from("x")), "path_outside", 400)
+    expect(fs.existsSync(path.join(m, "agent/bin/b/x.txt"))).toBe(false)
+  })
+  it("mkdir / rename / remove: parent swapped for a symlink", async () => {
+    fs.mkdirSync(path.join(m, "work/a/b"), { recursive: true })
+    fs.mkdirSync(path.join(m, "agent/bin/b"))
+    fs.writeFileSync(path.join(m, "agent/bin/b/f"), "")
+    fs.writeFileSync(path.join(m, "work/a/b/f"), "")
+    const swap = () => { fs.renameSync(path.join(m, "work/a"), path.join(m, "work/a.old")); fs.symlinkSync(path.join(m, "agent/bin"), path.join(m, "work/a")) }
+    hooks.beforeIo = swap
+    await rejects(mkdir("m1", "work/a/b", "n"), "path_outside")
+    fs.rmSync(path.join(m, "work/a")); fs.renameSync(path.join(m, "work/a.old"), path.join(m, "work/a"))
+    hooks.beforeIo = swap
+    await rejects(rename("m1", "work/a/b/f", "g"), "path_outside")
+    fs.rmSync(path.join(m, "work/a")); fs.renameSync(path.join(m, "work/a.old"), path.join(m, "work/a"))
+    hooks.beforeIo = swap
+    await rejects(remove("m1", "work/a/b/f"), "path_outside")
+    expect(fs.existsSync(path.join(m, "agent/bin/b/f"))).toBe(true)
+    expect(fs.existsSync(path.join(m, "agent/bin/b/n"))).toBe(false)
+  })
+  it("writeText: file swapped for a symlink", async () => {
+    const o = outside()
+    hooks.beforeIo = () => { fs.rmSync(path.join(m, "work/note.txt")); fs.symlinkSync(path.join(o, "secret.txt"), path.join(m, "work/note.txt")) }
+    await rejects(writeText("m1", "work/note.txt", "evil", sha("hello")), "path_outside")
+    expect(fs.readFileSync(path.join(o, "secret.txt"), "utf8")).toBe("top")
+  })
+})
+
+describe("other hardening", () => {
+  it("upload/mkdir with dir a symlink to agent/bin -> read_only", async () => {
+    fs.symlinkSync(path.join(m, "agent/bin"), path.join(m, "work/bl"))
+    await rejects(upload("m1", "work/bl", "x", Buffer.from("x")), "read_only", 403)
+    await rejects(mkdir("m1", "work/bl", "x"), "read_only", 403)
+  })
+  it("recursive remove does not follow a symlink to an outside directory", async () => {
+    const o = path.join(root, "outside2")
+    fs.mkdirSync(o)
+    fs.writeFileSync(path.join(o, "keep"), "k")
+    fs.mkdirSync(path.join(m, "work/d/sub"), { recursive: true })
+    fs.symlinkSync(o, path.join(m, "work/d/sub/link"))
+    await remove("m1", "work/d")
+    expect(fs.existsSync(path.join(m, "work/d"))).toBe(false)
+    expect(fs.readFileSync(path.join(o, "keep"), "utf8")).toBe("k")
+  })
+  it("rename to `bin` when agent/bin is absent -> read_only", async () => {
+    fs.rmSync(path.join(m, "agent/bin"), { recursive: true })
+    await rejects(rename("m1", "agent/extlib", "bin"), "read_only", 403)
+  })
+  it("overwrite through a hardlink (nlink > 1) is refused, also via writeText", async () => {
+    fs.linkSync(path.join(m, "work/note.txt"), path.join(m, "work/hl"))
+    await rejects(upload("m1", "work", "hl", Buffer.from("x")), "conflict")
+    await rejects(writeText("m1", "work/hl", "x", sha("hello")), "conflict")
+    expect(fs.readFileSync(path.join(m, "work/note.txt"), "utf8")).toBe("hello")
+  })
+  it("a symlinked agent dir cannot dodge read-only", async () => {
+    fs.renameSync(path.join(m, "agent"), path.join(m, "work/realagent"))
+    fs.symlinkSync(path.join(m, "work/realagent"), path.join(m, "agent"))
+    await rejects(upload("m1", "agent/bin", "x", Buffer.from("x")), "read_only", 403)
+    await rejects(upload("m1", "work/realagent/bin", "x", Buffer.from("x")), "read_only", 403)
+  })
+  it("listing flags: locked/symlink/secret", async () => {
+    fs.symlinkSync(path.join(m, "work/note.txt"), path.join(m, "work/in"))
+    const w = await listDir("m1", "work")
+    expect(w.find((e) => e.name === "in")).toMatchObject({ symlink: true, locked: false, readOnly: true })
+    const a = await listDir("m1", "agent")
+    expect(a.find((e) => e.name === "config.xml")).toMatchObject({ locked: true, secret: true })
+    expect(a.find((e) => e.name === "bin")?.locked).toBe(true)
+    expect(a.find((e) => e.name === "conf")?.locked).toBe(true)
+    expect(a.find((e) => e.name === "extlib")?.locked).toBe(false)
+    expect((await listDir("m1", "")).find((e) => e.name === "agent")?.locked).toBe(true)
+  })
+  it("exactly 50 MB is accepted", async () => {
+    await upload("m1", "work", "big", Buffer.alloc(50 * 1024 * 1024))
+    expect(fs.statSync(path.join(m, "work/big")).size).toBe(52428800)
   })
 })

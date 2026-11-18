@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto"
 import fs from "node:fs"
+import type { FileHandle } from "node:fs/promises"
 import path from "node:path"
 import { CONFIG_XML, WRAPPER_OVERRIDE } from "./layout"
 import { MidError } from "./names"
 import { getMid } from "./registry"
 import { isReadOnlyPath, resolveMidPath } from "./paths"
+import { createFileIn, fdPath, lstatIn, mkdirIn, openDir, openFile, openFileIn, removeIn, renameIn, type Check } from "./safe-fs"
 
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 52,428,800
@@ -14,27 +16,70 @@ const TOO_BIG_TEXT = "ไฟล์ใหญ่เกิน 2 MB เปิดแ�
 const roErr = () => new MidError("read_only", 403, READ_ONLY_MSG)
 const cfgErr = () => new MidError("use_config_tab")
 
-export type FileEntry = { name: string; type: "file" | "dir"; size: number; mtime: string; readOnly: boolean }
+/** Test seam: runs after paths are resolved and checked, right before the first I/O. */
+export const hooks: { beforeIo?: () => void | Promise<void> } = {}
+const beforeIo = async () => { await hooks.beforeIo?.() }
+
+export type FileEntry = {
+  name: string; type: "file" | "dir"; size: number; mtime: string
+  /** Not editable (program dir, managed config file, symlink). */
+  readOnly: boolean
+  /** The entry is a symlink (rename/delete act on the link itself). */
+  symlink: boolean
+  /** Server always refuses rename/delete (program dir, config file, or a folder containing one). */
+  locked: boolean
+  /** Contents are never served here (config.xml: use the config tab). */
+  secret: boolean
+}
 
 const sha256 = (b: Buffer): string => createHash("sha256").update(b).digest("hex")
 const inside = (dir: string, p: string): boolean => p === dir || p.startsWith(dir + path.sep)
 
-/** Everything the guards need about one MID, resolved once per operation. */
-type Ctx = { name: string; root: string; roDirs: string[]; configFiles: string[] }
+type Ctx = { name: string; root: string; roDirs: string[]; configFiles: string[]; configXml: string[] }
 
 async function ctxFor(name: string): Promise<Ctx> {
   await getMid(name) // unknown/removed -> 404
   const root = await resolveMidPath(name, "")
-  const configFiles = new Set<string>()
-  for (const rel of [CONFIG_XML, WRAPPER_OVERRIDE]) {
-    // The file's own (possibly symlink-resolved) location and its location under the real parent.
-    configFiles.add(await resolveMidPath(name, rel))
-    configFiles.add(path.join(await resolveMidPath(name, path.posix.dirname(rel)), path.posix.basename(rel)))
+  const both = async (rel: string): Promise<string[]> => [
+    await resolveMidPath(name, rel),
+    path.join(await resolveMidPath(name, path.posix.dirname(rel)), path.posix.basename(rel)),
+  ]
+  const configXml = await both(CONFIG_XML)
+  const configFiles = [...configXml, ...(await both(WRAPPER_OVERRIDE))]
+  // Program dirs both lexically and through any symlinked `agent` / `bin` (resolved once).
+  const roDirs = new Set<string>()
+  for (const d of ["bin", "lib", "jre"]) {
+    roDirs.add(path.join(root, "agent", d))
+    roDirs.add(await resolveMidPath(name, `agent/${d}`))
   }
-  return { name, root, roDirs: ["bin", "lib", "jre"].map((d) => path.join(root, "agent", d)), configFiles: [...configFiles] }
+  return { name, root, roDirs: [...roDirs], configFiles, configXml }
 }
 
-/** Plain single path component: no separators, NUL, `.`/`..`, empty, or > 255 bytes. */
+const isRo = (c: Ctx, abs: string): boolean => isReadOnlyPath(c.name, abs) || c.roDirs.some((d) => inside(d, abs))
+
+function assertWritable(c: Ctx, abs: string): void {
+  if (isRo(c, abs)) throw roErr()
+  if (c.configFiles.includes(abs)) throw cfgErr()
+}
+/** Entry must not be the root nor contain a program dir / managed config file. */
+function isContainer(c: Ctx, abs: string): boolean {
+  return abs === c.root || c.roDirs.some((d) => inside(abs, d)) || c.configFiles.some((f) => inside(abs, f))
+}
+function assertNotContainer(c: Ctx, abs: string): void {
+  if (abs === c.root || c.roDirs.some((d) => inside(abs, d))) throw roErr()
+  if (c.configFiles.some((f) => inside(abs, f))) throw cfgErr()
+}
+
+/** Checks applied to the REAL location of every opened handle. */
+const readCheck = (c: Ctx): Check => (real) => {
+  if (!inside(c.root, real)) throw new MidError("path_outside")
+  if (c.configXml.includes(real)) throw cfgErr() // config.xml holds credentials the config tab masks
+}
+const writeCheck = (c: Ctx): Check => (real) => {
+  if (!inside(c.root, real)) throw new MidError("path_outside")
+  assertWritable(c, real)
+}
+
 function plainName(n: unknown): string {
   if (typeof n !== "string" || n === "" || n === "." || n === ".." || /[\\/\0]/.test(n) || Buffer.byteLength(n) > 255) {
     throw new MidError("invalid_request")
@@ -42,19 +87,27 @@ function plainName(n: unknown): string {
   return n
 }
 
-/** Refuse a write that lands on/in a program folder or on a managed config file. */
-function assertWritable(c: Ctx, abs: string): void {
-  if (isReadOnlyPath(c.name, abs)) throw roErr()
-  if (c.configFiles.includes(abs)) throw cfgErr()
+/** Maps fs errors to MidErrors (anything unexpected is rethrown as is). */
+function translate(e: unknown): never {
+  const code = (e as NodeJS.ErrnoException)?.code
+  switch (code) {
+    case "ENOENT": throw new MidError("not_found")
+    case "ELOOP": case "ENOTDIR": throw new MidError("path_outside")
+    case "EACCES": case "EPERM": throw new MidError("no_permission")
+    case "EEXIST": case "EISDIR": case "ENOTEMPTY": throw new MidError("conflict")
+    case "ENOSPC": throw new MidError("disk_full")
+    default: throw e
+  }
+}
+async function mapped<T>(f: () => Promise<T>): Promise<T> {
+  try {
+    return await f()
+  } catch (e) {
+    return translate(e)
+  }
 }
 
-/** Extra rule for remove/rename: the entry must not be the root or contain a program dir / managed config file. */
-function assertNotContainer(c: Ctx, abs: string): void {
-  if (abs === c.root || c.roDirs.some((d) => inside(abs, d))) throw roErr()
-  if (c.configFiles.some((f) => inside(abs, f))) throw cfgErr()
-}
-
-async function regularFile(abs: string): Promise<fs.Stats> {
+async function statDirOf(abs: string): Promise<void> {
   let st: fs.Stats
   try {
     st = await fs.promises.stat(abs)
@@ -62,178 +115,221 @@ async function regularFile(abs: string): Promise<fs.Stats> {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") throw new MidError("not_found")
     throw e
   }
-  if (!st.isFile()) throw new MidError("invalid_request")
-  return st
+  if (!st.isDirectory()) throw new MidError("invalid_request")
 }
 
-async function lstatOrNull(p: string): Promise<fs.Stats | null> {
-  try {
-    return await fs.promises.lstat(p)
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null
-    throw e
+async function readAll(h: FileHandle, limit: number): Promise<Buffer> {
+  const buf = Buffer.alloc(limit)
+  let n = 0
+  while (n < limit) {
+    const { bytesRead } = await h.read(buf, n, limit - n, n)
+    if (bytesRead === 0) break
+    n += bytesRead
   }
+  return buf.subarray(0, n)
 }
 
-/** Split a MID-relative path into the real parent directory and the entry's own name. */
 async function entryOf(c: Ctx, rel: string): Promise<{ parent: string; base: string; abs: string }> {
   const trimmed = typeof rel === "string" ? rel.replace(/\/+$/, "") : rel
   if (typeof trimmed !== "string" || trimmed === "" || trimmed === ".") throw roErr() // the MID root itself
   const base = path.posix.basename(trimmed)
   plainName(base)
-  const parent = await resolveMidPath(c.name, path.posix.dirname(trimmed) === "." ? "" : path.posix.dirname(trimmed))
+  const parentRel = path.posix.dirname(trimmed)
+  const parent = await resolveMidPath(c.name, parentRel === "." ? "" : parentRel)
   return { parent, base, abs: path.join(parent, base) }
 }
 
-export async function listDir(name: string, rel: string): Promise<FileEntry[]> {
-  const c = await ctxFor(name)
-  const dir = await resolveMidPath(name, rel)
-  let names: string[]
-  try {
-    names = await fs.promises.readdir(dir)
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code
-    if (code === "ENOENT") throw new MidError("not_found")
-    if (code === "ENOTDIR") throw new MidError("invalid_request")
-    throw e
-  }
-  const out: FileEntry[] = []
-  for (const n of names) {
-    const abs = path.join(dir, n)
+export function listDir(name: string, rel: string): Promise<FileEntry[]> {
+  return mapped(async () => {
+    const c = await ctxFor(name)
+    const dir = await resolveMidPath(name, rel)
+    await statDirOf(dir)
+    await beforeIo()
+    const d = await openDir(dir, readCheck(c))
+    const out: FileEntry[] = []
     try {
-      const l = await fs.promises.lstat(abs)
-      let st = l
-      let readOnly = isReadOnlyPath(name, abs) || c.configFiles.includes(abs)
-      if (l.isSymbolicLink()) {
-        // Shown only when the link stays inside this MID; never editable through the link.
-        await resolveMidPath(name, path.posix.join(rel.replace(/\\/g, "/"), n))
-        st = await fs.promises.stat(abs)
-        readOnly = true
+      for (const n of await fs.promises.readdir(fdPath(d))) {
+        const abs = path.join(dir, n)
+        try {
+          const l = await fs.promises.lstat(fdPath(d, n))
+          let st = l
+          const symlink = l.isSymbolicLink()
+          let readOnly = isRo(c, abs) || c.configFiles.includes(abs)
+          if (symlink) {
+            // Shown only when the link stays inside this MID; never editable through the link.
+            const target = await resolveMidPath(name, path.posix.join(rel.replace(/\\/g, "/"), n))
+            st = await fs.promises.stat(target)
+            readOnly = true
+          }
+          const type = st.isDirectory() ? "dir" : st.isFile() ? "file" : null
+          if (!type) continue
+          out.push({
+            name: n, type, size: type === "dir" ? 0 : st.size, mtime: st.mtime.toISOString(), readOnly, symlink,
+            locked: !symlink && (readOnly || isContainer(c, abs)),
+            secret: c.configXml.includes(abs),
+          })
+        } catch (e) {
+          if (e instanceof MidError && e.code === "path_outside") continue
+          if ((e as NodeJS.ErrnoException).code === "ENOENT") continue // vanished or dangling
+          throw e
+        }
       }
-      const type = st.isDirectory() ? "dir" : st.isFile() ? "file" : null
-      if (type) out.push({ name: n, type, size: type === "dir" ? 0 : st.size, mtime: st.mtime.toISOString(), readOnly })
-    } catch (e) {
-      if (e instanceof MidError && e.code === "path_outside") continue
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") continue // vanished or dangling
-      throw e
-    }
-  }
-  return out.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : 1))
-}
-
-export async function readText(name: string, rel: string): Promise<{ content: string; hash: string }> {
-  const c = await ctxFor(name)
-  const abs = await resolveMidPath(name, rel)
-  // config.xml holds credentials that the config tab masks; do not hand them out raw here.
-  if (c.configFiles.includes(abs) && abs.endsWith(path.sep + "config.xml")) throw cfgErr()
-  const st = await regularFile(abs)
-  if (st.size > MAX_TEXT_BYTES) throw new MidError("too_large", 413, TOO_BIG_TEXT)
-  const buf = await fs.promises.readFile(abs)
-  if (buf.subarray(0, 8192).includes(0)) throw new MidError("not_text")
-  return { content: buf.toString("utf8"), hash: sha256(buf) }
-}
-
-export async function writeText(name: string, rel: string, content: string, baseHash: string): Promise<{ hash: string }> {
-  const c = await ctxFor(name)
-  const abs = await resolveMidPath(name, rel)
-  assertWritable(c, abs)
-  const data = Buffer.from(content, "utf8")
-  if (data.length > MAX_TEXT_BYTES) throw new MidError("too_large", 413, TOO_BIG_TEXT)
-  await regularFile(abs)
-  // In place (r+ then truncate) so owner, group and mode of the file are preserved.
-  const fh = await fs.promises.open(abs, "r+")
-  try {
-    const cur = await fh.readFile()
-    if (sha256(cur) !== baseHash) throw new MidError("stale")
-    await fh.truncate(0)
-    await fh.write(data, 0, data.length, 0)
-  } finally {
-    await fh.close()
-  }
-  return { hash: sha256(data) }
-}
-
-export async function upload(name: string, dirRel: string, filename: string, data: Buffer): Promise<{ size: number }> {
-  const c = await ctxFor(name)
-  plainName(filename)
-  if (data.length > MAX_UPLOAD_BYTES) throw new MidError("too_large")
-  const dir = await resolveMidPath(name, dirRel)
-  const dst = await fs.promises.stat(dir).catch(() => null)
-  if (!dst) throw new MidError("not_found")
-  if (!dst.isDirectory()) throw new MidError("invalid_request")
-  const abs = path.join(dir, filename)
-  assertWritable(c, dir)
-  assertWritable(c, abs)
-  const existing = await lstatOrNull(abs)
-  if (existing && !existing.isFile()) throw new MidError("conflict") // dir or symlink: never write through/over
-  if (existing) {
-    const fh = await fs.promises.open(abs, "r+") // replace in place, keep owner/group
-    try {
-      await fh.truncate(0)
-      await fh.write(data, 0, data.length, 0)
     } finally {
-      await fh.close()
+      await d.close()
     }
-  } else {
-    const fh = await fs.promises.open(abs, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o664)
-    try {
-      await fh.chmod(0o664) // umask may have stripped group write
-      await fh.write(data, 0, data.length, 0)
-    } finally {
-      await fh.close()
-    }
-  }
-  return { size: data.length }
+    return out.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : 1))
+  })
 }
 
-export async function mkdir(name: string, parentRel: string, dirName: string): Promise<void> {
-  const c = await ctxFor(name)
-  plainName(dirName)
-  const parent = await resolveMidPath(name, parentRel)
-  const st = await fs.promises.stat(parent).catch(() => null)
-  if (!st) throw new MidError("not_found")
-  if (!st.isDirectory()) throw new MidError("invalid_request")
-  const abs = path.join(parent, dirName)
-  assertWritable(c, parent)
-  assertWritable(c, abs)
-  if (await lstatOrNull(abs)) throw new MidError("conflict")
-  await fs.promises.mkdir(abs, { mode: 0o775 })
-  await fs.promises.chmod(abs, 0o775)
+export function readText(name: string, rel: string): Promise<{ content: string; hash: string }> {
+  return mapped(async () => {
+    const c = await ctxFor(name)
+    const abs = await resolveMidPath(name, rel)
+    readCheck(c)(abs)
+    await beforeIo()
+    const { h, st } = await openFile(abs, "r", readCheck(c))
+    try {
+      if (st.size > MAX_TEXT_BYTES) throw new MidError("too_large", 413, TOO_BIG_TEXT)
+      const buf = await readAll(h, MAX_TEXT_BYTES + 1)
+      if (buf.length > MAX_TEXT_BYTES) throw new MidError("too_large", 413, TOO_BIG_TEXT)
+      if (buf.subarray(0, 8192).includes(0)) throw new MidError("not_text")
+      return { content: buf.toString("utf8"), hash: sha256(buf) }
+    } finally {
+      await h.close()
+    }
+  })
+}
+
+export function writeText(name: string, rel: string, content: string, baseHash: string): Promise<{ hash: string }> {
+  return mapped(async () => {
+    const c = await ctxFor(name)
+    const abs = await resolveMidPath(name, rel)
+    assertWritable(c, abs)
+    const data = Buffer.from(content, "utf8")
+    if (data.length > MAX_TEXT_BYTES) throw new MidError("too_large", 413, TOO_BIG_TEXT)
+    await beforeIo()
+    // In place so owner, group and mode are preserved; truncation happens only after all checks.
+    const { h, st } = await openFile(abs, "rw", writeCheck(c))
+    try {
+      if (st.size > MAX_TEXT_BYTES) throw new MidError("too_large", 413, TOO_BIG_TEXT)
+      const cur = await readAll(h, st.size)
+      if (sha256(cur) !== baseHash) throw new MidError("stale")
+      await h.truncate(0)
+      await h.write(data, 0, data.length, 0)
+    } finally {
+      await h.close()
+    }
+    return { hash: sha256(data) }
+  })
+}
+
+export function upload(name: string, dirRel: string, filename: string, data: Buffer): Promise<{ size: number; path: string }> {
+  return mapped(async () => {
+    const c = await ctxFor(name)
+    plainName(filename)
+    if (data.length > MAX_UPLOAD_BYTES) throw new MidError("too_large")
+    const dir = await resolveMidPath(name, dirRel)
+    await statDirOf(dir)
+    assertWritable(c, dir)
+    assertWritable(c, path.join(dir, filename))
+    await beforeIo()
+    const wc = writeCheck(c)
+    const d = await openDir(dir, wc)
+    try {
+      let h: FileHandle
+      try {
+        h = (await openFileIn(d, dir, filename, wc)).h // replace in place, keep owner/group
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code
+        if (code === "ELOOP" || code === "EISDIR") throw new MidError("conflict") // symlink/dir: never write through/over
+        if (code !== "ENOENT") throw e
+        h = await createFileIn(d, dir, filename, wc)
+      }
+      try {
+        await h.truncate(0)
+        await h.write(data, 0, data.length, 0)
+      } finally {
+        await h.close()
+      }
+    } finally {
+      await d.close()
+    }
+    return { size: data.length, path: path.relative(c.root, path.join(dir, filename)) }
+  })
+}
+
+export function mkdir(name: string, parentRel: string, dirName: string): Promise<{ path: string }> {
+  return mapped(async () => {
+    const c = await ctxFor(name)
+    plainName(dirName)
+    const parent = await resolveMidPath(name, parentRel)
+    await statDirOf(parent)
+    assertWritable(c, parent)
+    assertWritable(c, path.join(parent, dirName))
+    await beforeIo()
+    const wc = writeCheck(c)
+    const d = await openDir(parent, wc)
+    try {
+      if (await lstatIn(d, dirName)) throw new MidError("conflict")
+      await mkdirIn(d, parent, dirName, wc)
+    } finally {
+      await d.close()
+    }
+    return { path: path.relative(c.root, path.join(parent, dirName)) }
+  })
 }
 
 /** Acts on the entry itself (never a symlink's target) and only within its own parent. */
-export async function rename(name: string, rel: string, newName: string): Promise<{ to: string }> {
-  const c = await ctxFor(name)
-  plainName(newName)
-  const e = await entryOf(c, rel)
-  assertWritable(c, e.abs)
-  assertNotContainer(c, e.abs)
-  const target = path.join(e.parent, newName)
-  assertWritable(c, target)
-  if (!(await lstatOrNull(e.abs))) throw new MidError("not_found")
-  if (await lstatOrNull(target)) throw new MidError("conflict")
-  await fs.promises.rename(e.abs, target)
-  const parentRel = path.posix.dirname(rel.replace(/\/+$/, ""))
-  return { to: path.posix.join(parentRel === "." ? "" : parentRel, newName) }
+export function rename(name: string, rel: string, newName: string): Promise<{ to: string }> {
+  return mapped(async () => {
+    const c = await ctxFor(name)
+    plainName(newName)
+    const e = await entryOf(c, rel)
+    assertWritable(c, e.abs)
+    assertNotContainer(c, e.abs)
+    assertWritable(c, path.join(e.parent, newName)) // e.g. renaming onto a program dir name
+    await beforeIo()
+    const d = await openDir(e.parent, writeCheck(c))
+    try {
+      if (!(await lstatIn(d, e.base))) throw new MidError("not_found")
+      if (await lstatIn(d, newName)) throw new MidError("conflict")
+      await renameIn(d, e.base, newName)
+    } finally {
+      await d.close()
+    }
+    return { to: path.relative(c.root, path.join(e.parent, newName)) }
+  })
 }
 
-/** Removing a symlink removes the link only; directories are removed recursively (links inside are not followed). */
-export async function remove(name: string, rel: string): Promise<void> {
-  const c = await ctxFor(name)
-  const e = await entryOf(c, rel)
-  assertWritable(c, e.abs)
-  assertNotContainer(c, e.abs)
-  const st = await lstatOrNull(e.abs)
-  if (!st) throw new MidError("not_found")
-  if (st.isDirectory()) await fs.promises.rm(e.abs, { recursive: true })
-  else await fs.promises.unlink(e.abs)
+/** Removing a symlink removes the link only; directories are walked fd-by-fd (links inside are unlinked, not followed). */
+export function remove(name: string, rel: string): Promise<{ path: string }> {
+  return mapped(async () => {
+    const c = await ctxFor(name)
+    const e = await entryOf(c, rel)
+    assertWritable(c, e.abs)
+    const st = await fs.promises.lstat(e.abs).catch(() => null)
+    if (!st) throw new MidError("not_found")
+    if (!st.isSymbolicLink()) assertNotContainer(c, e.abs)
+    await beforeIo()
+    const wc = writeCheck(c)
+    const d = await openDir(e.parent, wc)
+    try {
+      await removeIn(d, e.parent, e.base, wc)
+    } finally {
+      await d.close()
+    }
+    return { path: path.relative(c.root, e.abs) }
+  })
 }
 
-/** Validates a download target; the route streams `path`. */
-export async function downloadInfo(name: string, rel: string): Promise<{ path: string; size: number; filename: string }> {
-  const c = await ctxFor(name)
-  const abs = await resolveMidPath(name, rel)
-  if (c.configFiles.includes(abs) && abs.endsWith(path.sep + "config.xml")) throw cfgErr()
-  const st = await regularFile(abs)
-  return { path: abs, size: st.size, filename: path.basename(abs) }
+/** Verified, open handle for streaming; `size` is the byte count to send (later growth is not sent). Caller closes via the stream. */
+export function openDownload(name: string, rel: string): Promise<{ handle: FileHandle; size: number; filename: string }> {
+  return mapped(async () => {
+    const c = await ctxFor(name)
+    const abs = await resolveMidPath(name, rel)
+    readCheck(c)(abs)
+    await beforeIo()
+    const { h, st } = await openFile(abs, "r", readCheck(c))
+    return { handle: h, size: st.size, filename: path.basename(rel.replace(/\/+$/, "")) || path.basename(abs) }
+  })
 }

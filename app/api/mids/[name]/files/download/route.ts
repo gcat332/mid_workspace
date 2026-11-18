@@ -1,8 +1,7 @@
-import fs from "node:fs"
 import { Readable } from "node:stream"
 import { requireUser } from "@/lib/auth/helpers"
 import { handleRouteError } from "@/lib/http/route"
-import { downloadInfo } from "@/lib/mids/files"
+import { openDownload } from "@/lib/mids/files"
 
 type Ctx = { params: Promise<{ name: string }> }
 
@@ -10,13 +9,16 @@ export async function GET(req: Request, ctx: Ctx) {
   try {
     await requireUser()
     const { name } = await ctx.params
-    const info = await downloadInfo(name, new URL(req.url).searchParams.get("path") ?? "")
-    const stream = Readable.toWeb(fs.createReadStream(info.path)) as ReadableStream
-    return new Response(stream, {
+    // All checks and the open happen here, before any Response exists; the stream reads the verified fd only.
+    const { handle, size, filename } = await openDownload(name, new URL(req.url).searchParams.get("path") ?? "")
+    let body: ReadableStream | null = null
+    if (size === 0) await handle.close()
+    else body = Readable.toWeb(handle.createReadStream({ start: 0, end: size - 1, autoClose: true })) as ReadableStream
+    return new Response(body, {
       headers: {
         "Content-Type": "application/octet-stream",
-        "Content-Length": String(info.size),
-        "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(info.filename).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase())}`,
+        "Content-Length": String(size),
+        "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase())}`,
         "X-Content-Type-Options": "nosniff",
       },
     })

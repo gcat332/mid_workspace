@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   basePath: "/midhub",
   devIndicators: false,
   experimental: {
-    proxyClientMaxBodySize: "50mb",
+    proxyClientMaxBodySize: "51mb",
   },
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   async headers() {

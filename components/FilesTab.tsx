@@ -9,8 +9,8 @@ import { API_BASE, apiFetch } from "@/lib/ui/api"
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false })
 
-type Entry = { name: string; type: "file" | "dir"; size: number; mtime: string; readOnly: boolean }
-type Open = { path: string; content: string; hash: string; draft: string }
+type Entry = { name: string; type: "file" | "dir"; size: number; mtime: string; readOnly: boolean; symlink: boolean; locked: boolean; secret: boolean }
+type Open = { path: string; content: string; hash: string; draft: string; readOnly: boolean }
 
 const NETWORK: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" }
 const MAX_UPLOAD = 50 * 1024 * 1024
@@ -34,6 +34,7 @@ export function FilesTab({ midName }: { midName: string }) {
   const [renaming, setRenaming] = useState<Entry | null>(null)
   const [deleting, setDeleting] = useState<Entry | null>(null)
   const [newFolder, setNewFolder] = useState(false)
+  const [overwrite, setOverwrite] = useState<File | null>(null)
   const [nameDraft, setNameDraft] = useState("")
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -68,7 +69,7 @@ export function FilesTab({ midName }: { midName: string }) {
       const res = await apiFetch(`${base}?path=${encodeURIComponent(join(dir, e.name))}&content=1`)
       if (!res.ok) { setErr(await readApiError(res)); return }
       const j = (await res.json()) as { content: string; hash: string }
-      setOpen({ path: join(dir, e.name), content: j.content, hash: j.hash, draft: j.content })
+      setOpen({ path: join(dir, e.name), content: j.content, hash: j.hash, draft: j.content, readOnly: e.readOnly })
     } catch { setErr(NETWORK) }
   }
 
@@ -88,13 +89,17 @@ export function FilesTab({ midName }: { midName: string }) {
     if (!open) return
     const name = open.path.split("/").pop() ?? ""
     setOpen(null)
-    await openFile({ name, type: "file", size: 0, mtime: "", readOnly: false })
+    await openFile({ name, type: "file", size: 0, mtime: "", readOnly: open.readOnly, symlink: false, locked: false, secret: false })
   }
 
   function onPick(f: File | undefined) {
     if (fileInput.current) fileInput.current.value = ""
     if (!f) return
     if (f.size > MAX_UPLOAD) { setErr({ code: "too_large", message: "ไฟล์ใหญ่เกินกำหนด (สูงสุด 50 MB) ลดขนาดไฟล์แล้วลองใหม่" }); return }
+    if (entries?.some((x) => x.name === f.name && x.type === "file")) { setOverwrite(f); return }
+    sendUpload(f)
+  }
+  function sendUpload(f: File) {
     const fd = new FormData()
     fd.set("dir", dir)
     fd.set("file", f)
@@ -111,8 +116,10 @@ export function FilesTab({ midName }: { midName: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className={`${btn} border-gray-300`} onClick={() => { if (!dirty || window.confirm("มีการแก้ไขที่ยังไม่บันทึก ปิดโดยไม่บันทึกหรือไม่?")) { setOpen(null); setErr(null) } }}>← กลับ</button>
           <span className="font-mono text-sm text-gray-800">{open.path}</span>
-          <button type="button" disabled={busy || !dirty} onClick={() => void save()}
-            className={`${btn} ml-auto border-blue-600 bg-blue-600 text-white hover:bg-blue-700`}>{busy ? "กำลังบันทึก..." : "บันทึก"}</button>
+          {open.readOnly
+            ? <span className="ml-auto text-xs text-gray-500">🔒 อ่านอย่างเดียว</span>
+            : <button type="button" disabled={busy || !dirty} onClick={() => void save()}
+                className={`${btn} ml-auto border-blue-600 bg-blue-600 text-white hover:bg-blue-700`}>{busy ? "กำลังบันทึก..." : "บันทึก"}</button>}
         </div>
         {err && (
           <div className="space-y-2">
@@ -122,7 +129,7 @@ export function FilesTab({ midName }: { midName: string }) {
         )}
         <div className="h-96 overflow-hidden rounded-lg border border-gray-300">
           <MonacoEditor height="100%" language={lang(open.path)} path={`${midName}/${open.path}`} value={open.draft}
-            onChange={(v) => setOpen((o) => (o ? { ...o, draft: v ?? "" } : o))} options={{ minimap: { enabled: false }, scrollBeyondLastLine: false }} />
+            onChange={(v) => setOpen((o) => (o ? { ...o, draft: v ?? "" } : o))} options={{ minimap: { enabled: false }, scrollBeyondLastLine: false, readOnly: open.readOnly }} />
         </div>
       </div>
     )
@@ -174,10 +181,10 @@ export function FilesTab({ midName }: { midName: string }) {
                 <td className="px-2 text-gray-600">{e.type === "file" ? size(e.size) : ""}</td>
                 <td className="px-2 text-gray-600">{new Date(e.mtime).toLocaleString("th-TH")}</td>
                 <td className="space-x-2 pl-2 text-right whitespace-nowrap">
-                  {e.type === "file" && <button type="button" className="text-blue-600 hover:underline" onClick={() => void openFile(e)}>เปิด</button>}
-                  {e.type === "file" && <a className="text-blue-600 hover:underline" href={`${API_BASE}${base}/download?path=${encodeURIComponent(join(dir, e.name))}`}>ดาวน์โหลด</a>}
-                  {!e.readOnly && <button type="button" disabled={busy} className="text-blue-600 hover:underline" onClick={() => { setNameDraft(e.name); setRenaming(e) }}>เปลี่ยนชื่อ</button>}
-                  {!e.readOnly && <button type="button" disabled={busy} className="text-red-600 hover:underline" onClick={() => setDeleting(e)}>ลบ</button>}
+                  {e.type === "file" && !e.secret && <button type="button" className="text-blue-600 hover:underline" onClick={() => void openFile(e)}>เปิด</button>}
+                  {e.type === "file" && !e.secret && <a className="text-blue-600 hover:underline" href={`${API_BASE}${base}/download?path=${encodeURIComponent(join(dir, e.name))}`}>ดาวน์โหลด</a>}
+                  {!e.locked && <button type="button" disabled={busy} className="text-blue-600 hover:underline" onClick={() => { setNameDraft(e.name); setRenaming(e) }}>เปลี่ยนชื่อ</button>}
+                  {!e.locked && <button type="button" disabled={busy} className="text-red-600 hover:underline" onClick={() => setDeleting(e)}>ลบ</button>}
                 </td>
               </tr>
             ))}
@@ -207,6 +214,13 @@ export function FilesTab({ midName }: { midName: string }) {
             </div>
           </form>
         </Modal>
+      )}
+
+      {overwrite && (
+        <ConfirmDialog title={`เขียนทับ ${overwrite.name}?`} danger confirmLabel="เขียนทับ" onCancel={() => setOverwrite(null)}
+          onConfirm={() => { const f = overwrite; setOverwrite(null); sendUpload(f) }}>
+          มีไฟล์ชื่อนี้อยู่แล้ว ไฟล์เดิมจะถูกแทนที่ด้วยไฟล์ที่อัปโหลด กู้คืนไม่ได้
+        </ConfirmDialog>
       )}
 
       {deleting && (

@@ -18,7 +18,10 @@ const str = (v: unknown): string => {
   if (typeof v !== "string") throw bad()
   return v
 }
-const MULTIPART_OVERHEAD = 1024 * 1024
+/** Matches next.config.ts proxyClientMaxBodySize ("51mb"): 50 MB of file plus multipart framing. */
+export const MAX_BODY_BYTES = 51 * 1024 * 1024
+const MAX_CONCURRENT_UPLOADS = 2
+let uploading = 0
 
 export async function GET(req: Request, ctx: Ctx) {
   try {
@@ -41,7 +44,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     if (typeof b !== "object" || b === null) throw bad()
     const path = str(b.path)
     const r = await writeText(name, path, str(b.content), str(b.baseHash))
-    await recordAudit(user, "file.write", name, { path })
+    await recordAudit(user, "file.write", name, { path: path.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/") })
     return NextResponse.json(r)
   } catch (e) {
     return handleRouteError(e)
@@ -54,30 +57,38 @@ export async function POST(req: Request, ctx: Ctx) {
     const { name } = await ctx.params
     const type = req.headers.get("content-type") ?? ""
     if (type.startsWith("multipart/form-data")) {
-      const len = Number(req.headers.get("content-length") ?? "0")
-      if (len > MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD) throw new MidError("too_large")
-      const form = await req.formData().catch(() => null)
-      const file = form?.get("file")
-      if (!form || !(file instanceof File)) throw bad()
-      if (file.size > MAX_UPLOAD_BYTES) throw new MidError("too_large")
-      const dir = form.get("dir") ?? ""
-      const r = await upload(name, str(dir), file.name, Buffer.from(await file.arrayBuffer()))
-      await recordAudit(user, "file.upload", name, { path: `${dir}/${file.name}`.replace(/^\//, ""), size: r.size })
-      return NextResponse.json(r)
+      const lenHeader = req.headers.get("content-length")
+      if (lenHeader === null || !/^\d+$/.test(lenHeader)) throw new MidError("length_required")
+      if (Number(lenHeader) > MAX_BODY_BYTES) throw new MidError("too_large")
+      if (uploading >= MAX_CONCURRENT_UPLOADS) {
+        throw new MidError("busy", 429, "มีการอัปโหลดอยู่หลายรายการ กรุณารอสักครู่แล้วลองใหม่")
+      }
+      uploading++
+      try {
+        const form = await req.formData().catch(() => null)
+        const file = form?.get("file")
+        if (!form || !(file instanceof File)) throw bad()
+        if (file.size > MAX_UPLOAD_BYTES) throw new MidError("too_large")
+        const r = await upload(name, str(form.get("dir") ?? ""), file.name, Buffer.from(await file.arrayBuffer()))
+        await recordAudit(user, "file.upload", name, { path: r.path, size: r.size })
+        return NextResponse.json({ size: r.size })
+      } finally {
+        uploading--
+      }
     }
     const b = (await req.json().catch(() => null)) as Record<string, unknown> | null
     if (typeof b !== "object" || b === null) throw bad()
     if (b.op === "mkdir") {
       const parent = str(b.parent)
       const dn = str(b.name)
-      await mkdir(name, parent, dn)
-      await recordAudit(user, "file.mkdir", name, { path: `${parent}/${dn}`.replace(/^\//, "") })
+      const r = await mkdir(name, parent, dn)
+      await recordAudit(user, "file.mkdir", name, { path: r.path })
       return NextResponse.json({})
     }
     if (b.op === "rename") {
       const path = str(b.path)
       const r = await rename(name, path, str(b.newName))
-      await recordAudit(user, "file.rename", name, { path, to: r.to })
+      await recordAudit(user, "file.rename", name, { path: path.replace(/\/+$/, ""), to: r.to })
       return NextResponse.json(r)
     }
     throw bad()
@@ -91,8 +102,8 @@ export async function DELETE(req: Request, ctx: Ctx) {
     const user = await requireUser()
     const { name } = await ctx.params
     const path = new URL(req.url).searchParams.get("path") ?? ""
-    await remove(name, path)
-    await recordAudit(user, "file.delete", name, { path })
+    const r = await remove(name, path)
+    await recordAudit(user, "file.delete", name, { path: r.path })
     return NextResponse.json({})
   } catch (e) {
     return handleRouteError(e)
