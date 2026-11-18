@@ -83,16 +83,22 @@ model MidServer {
 
 model Job {
   id          String    @id @default(cuid())
-  midId       String
-  kind        String
+  // Nullable: a job can outlive/precede its MidServer row (install before the row exists, uninstall after removal).
+  midId       String?
+  midName     String
+  kind        String // install | clone | uninstall | cancel_install
   stage       String
-  status      String
+  status      String // queued | running | succeeded | failed | cancelled
+  attempt     Int       @default(0)
   params      String
   journalPath String
   error       String?
   createdBy   String
   startedAt   DateTime?
   finishedAt  DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@index([midName, status])
 }
 
 model ConfigBackup {

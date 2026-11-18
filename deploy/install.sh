@@ -40,6 +40,11 @@ as_app test -w "$APP_DIR/.next" || precheck_fail "$APP_USER cannot write $APP_DI
 as_app test -x /usr/bin/node || precheck_fail "$APP_USER cannot execute /usr/bin/node"
 as_app test -x "$APP_DIR/node_modules/.bin/prisma" || precheck_fail "$APP_USER cannot execute $APP_DIR/node_modules/.bin/prisma"
 
+# Phase 2 install/clone jobs shell out to these (absolute paths, execFile).
+for bin in /usr/bin/unzip /usr/bin/zipinfo /usr/bin/tar; do
+  [[ -x "$bin" ]] || { echo "Missing $bin - install it first (apt install unzip tar)" >&2; exit 1; }
+done
+
 changed=0
 getent group midhub >/dev/null || groupadd midhub
 id midsvc >/dev/null 2>&1 || useradd -r -g midhub -s /usr/sbin/nologin -d /nonexistent -M midsvc
@@ -48,7 +53,7 @@ id -nG "$APP_USER" | tr ' ' '\n' | grep -qx midhub || { usermod -aG midhub "$APP
 install -d -m 0755 -o root -g root "$ROOT_DIR"
 install -d -m 2775 -o midsvc -g midhub "$ROOT_DIR/mids"
 chown midsvc:midhub "$ROOT_DIR/mids"; chmod 2775 "$ROOT_DIR/mids"
-for d in packages archive db; do
+for d in packages archive db jobs; do
   install -d -m 0750 -o "$APP_USER" -g "$APP_USER" "$ROOT_DIR/$d"
   chown "$APP_USER:$APP_USER" "$ROOT_DIR/$d"; chmod 0750 "$ROOT_DIR/$d"
 done

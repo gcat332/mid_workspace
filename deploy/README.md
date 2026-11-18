@@ -45,8 +45,8 @@ host used in OIDC redirect URIs, so SSO works only when users reach MidHub via t
 
     sudo deploy/install.sh
 
-Aborts if `fs.protected_hardlinks != 1`, or the helper build / `.next` / `.env.local` is missing.
-Creates group `midhub`, system user `midsvc`, adds `bsmmidhub` to `midhub`, `/opt/midhub/{mids,packages,archive,db}`,
+Aborts if `fs.protected_hardlinks != 1`, `/usr/bin/unzip`, `/usr/bin/zipinfo` or `/usr/bin/tar` is missing (Phase 2 jobs need them), or the helper build / `.next` / `.env.local` is missing.
+Creates group `midhub`, system user `midsvc`, adds `bsmmidhub` to `midhub`, `/opt/midhub/{mids,packages,archive,db,jobs}` (`jobs` = install/clone/uninstall journals, bsmmidhub 0750),
 copies the helper build (`helper/dist`, regular `.js` files only) to `/usr/local/lib/midhub-helper` owned by
 root:root (dirs 0755, files 0644) - the root helper unit runs ONLY that copy, never the app-writable checkout -
 installs both units, `daemon-reload`, `enable --now`. If a unit file or the helper copy changed, or `bsmmidhub`
