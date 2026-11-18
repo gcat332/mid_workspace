@@ -59,6 +59,10 @@ export async function resolveMidPath(name: string, rel: string): Promise<string>
   return resolved
 }
 
+// PROVISIONAL: confirm in spike (docs/spike-mid-linux.md)
+/** Read-only program dirs under `<mid root>/agent`. Single source of truth (also used by files.ts). */
+export const PROGRAM_DIRS = ["bin", "lib", "jre"] as const
+
 /** `absPath` must be a path returned by resolveMidPath (real, link-free). */
 export function isReadOnlyPath(name: string, absPath: string): boolean {
   if (!path.isAbsolute(absPath)) throw new MidError("path_outside")
@@ -68,8 +72,7 @@ export function isReadOnlyPath(name: string, absPath: string): boolean {
   } catch {
     // root missing: fall back to the lexical root
   }
-  // PROVISIONAL: confirm in spike (docs/spike-mid-linux.md)
-  const dirs = ["bin", "lib", "jre"].map((d) => path.join(root, "agent", d))
+  const dirs = PROGRAM_DIRS.map((d) => path.join(root, "agent", d))
   const p = path.resolve(absPath)
   return dirs.some((d) => p === d || p.startsWith(d + path.sep))
 }

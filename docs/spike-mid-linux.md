@@ -9,7 +9,7 @@ in the listed place, then fill the Result column. (grep -rn PROVISIONAL to re-ch
 | config.xml path | lib/mids/layout.ts:2-3 | `agent/config.xml` | File exists at that path | `CONFIG_XML` | |
 | wrapper override path | lib/mids/layout.ts:4-5 | `agent/conf/wrapper-override.conf` | Exists / where heap (`wrapper.java.maxmemory`) is set | `WRAPPER_OVERRIDE` (+ heap handling) | |
 | LOG_FILES | lib/mids/layout.ts:6-7 | main `agent/logs/agent0.log.0`, wrapper `agent/logs/wrapper.log` | Names, rotation scheme, which one shows startup | `LOG_FILES` | |
-| Program dirs (read-only) | lib/mids/paths.ts:71; also lib/mids/files.ts:52 | `agent/bin`, `agent/lib`, `agent/jre` | Dir names; anything else that must be read-only | `dirs` in paths.ts, files.ts | |
+| Program dirs (read-only) | lib/mids/paths.ts (PROGRAM_DIRS, single source; files.ts imports it) | `agent/bin`, `agent/lib`, `agent/jre` | Dir names; anything else that must be read-only | `PROGRAM_DIRS` in paths.ts | |
 | config.xml parameter names | lib/mids/config-service.ts:21 (FORM_PARAMS) | url, mid.instance.username, mid.instance.password, name, mid.proxy.use_proxy, mid.proxy.host, mid.proxy.port, mid.proxy.username, mid.proxy.password | Each parameter name in a real config.xml; password rewritten encrypted after first start | `FORM_PARAMS` | |
 | CONNECTED_LOG_PATTERN (Phase 2) | not yet in code | n/a | Exact log line meaning "connected to instance" | new constant (Phase 2) | |
 | CARRY_OVER_FILES (Phase 2) | not yet in code | n/a | Files to preserve across auto-upgrade (config.xml, wrapper-override.conf, extlib/, keystore, ...) | new constant (Phase 2) | |

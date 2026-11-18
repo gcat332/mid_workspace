@@ -8,6 +8,11 @@ the repo root containing `deploy/`; override: `sudo APP_DIR=/path deploy/install
 
 ## 1. Build (as bsmmidhub, in APP_DIR)
 
+Deploy from a checkout OWNED BY bsmmidhub, e.g. as bsmmidhub:
+`git clone <repo> /home/bsmmidhub/midhub && cd /home/bsmmidhub/midhub` and build there. (The
+`mid_workspace` directory is a dev checkout owned by another user; `install.sh` refuses to install if
+bsmmidhub cannot read the repo, write `.next`, or execute node/prisma.)
+
     npm ci --legacy-peer-deps      # or plain `npm ci` if .npmrc carries legacy-peer-deps
     npm run build
     npm run helper:build           # produces helper/dist/helper/main.js
@@ -15,8 +20,12 @@ the repo root containing `deploy/`; override: `sudo APP_DIR=/path deploy/install
 
 ## 2. Create .env.local (APP_DIR/.env.local, mode 600)
 
+systemd's EnvironmentFile does NOT support inline comments: keep comments on their own lines.
+The SQLite DB lives outside the repo, in `/opt/midhub/db` (created by install.sh as bsmmidhub 0750;
+if you want to run `prisma migrate deploy` before install.sh, create it yourself first).
+
     cat > .env.local <<ENV
-    DATABASE_URL=file:/home/bsmmidhub/mid_workspace/data/midhub.db   # absolute path, writable by bsmmidhub
+    DATABASE_URL=file:/opt/midhub/db/midhub.db
     JWT_SECRET=$(openssl rand -base64 48)
     ADMIN_EMAIL=you@example.com
     ADMIN_PASSWORD=$(openssl rand -base64 18)
@@ -25,45 +34,54 @@ the repo root containing `deploy/`; override: `sudo APP_DIR=/path deploy/install
     MIDHUB_MAX_RUNNING=4
     PUBLIC_URL=https://10.4.150.142
     ENV
-    chmod 600 .env.local; mkdir -p data
+    chmod 600 .env.local
 
-`JWT_SECRET` must be >= 32 chars; `MIDHUB_VAULT_KEY` is base64 of exactly 32 bytes (losing it makes
-stored instance passwords unrecoverable - back it up). `PUBLIC_URL` (scheme+host, no path) is used for
-OIDC redirect URIs behind the proxy. See `.env.local.example`. Check `DATABASE_URL` against how
-`prisma.config.ts` / `lib/env.ts` resolve relative paths; an absolute path is safest.
+An absolute `file:` path resolves identically for the app and for `prisma migrate`. `JWT_SECRET` must
+be >= 32 chars; `MIDHUB_VAULT_KEY` is base64 of exactly 32 bytes (losing it makes stored instance
+passwords unrecoverable - back it up). `PUBLIC_URL` (a single value, scheme+host, no path) decides the
+host used in OIDC redirect URIs, so SSO works only when users reach MidHub via that hostname.
 
 ## 3. Install units (root)
 
     sudo deploy/install.sh
 
 Aborts if `fs.protected_hardlinks != 1`, or the helper build / `.next` / `.env.local` is missing.
-Creates group `midhub`, system user `midsvc`, adds `bsmmidhub` to `midhub`, `/opt/midhub/{mids,packages,archive}`,
-installs both units, `daemon-reload`, `enable --now`. If `bsmmidhub` was newly added to `midhub`,
-`sudo systemctl restart bsm-midhub`.
+Creates group `midhub`, system user `midsvc`, adds `bsmmidhub` to `midhub`, `/opt/midhub/{mids,packages,archive,db}`,
+installs both units, `daemon-reload`, `enable --now`. If a unit file changed or `bsmmidhub` was newly added to
+`midhub`, it runs `systemctl try-restart` on both services.
 
 ## 4. Caddy
 
-Edit `/etc/caddy/Caddyfile` by hand (back it up first). Add the `handle /midhub/*` block from
-`deploy/Caddyfile.midhub` to BOTH AgentHub site blocks, before AgentHub's own proxying. Because
-AgentHub's sites use site-level `reverse_proxy` and `request_body { max_size 50MB }`, and Caddy applies
-a site-level `request_body` before `handle`, wrap those in a trailing `handle { }`:
+Back up and edit `/etc/caddy/Caddyfile` by hand. Add the `@midhub path /midhub /midhub/*` + `handle @midhub` block from
+`deploy/Caddyfile.midhub` to BOTH AgentHub site blocks (`/midhub` itself is the canonical URL, so the
+matcher lists both). Because AgentHub's sites use a site-level `reverse_proxy`, the `handle` blocks take
+precedence for /midhub; AgentHub's own traffic is unchanged.
 
-    https://10.4.150.142 {
-        tls internal
-        handle /midhub/* {
-            request_body { max_size 51MB }
-            reverse_proxy 127.0.0.1:3100 {
-                header_up X-Forwarded-For {client_ip}
-                flush_interval -1
+Upload limit, two options:
+
+- (b) DEFAULT: leave AgentHub untouched. Its site-level `request_body { max_size 50MB }` runs before
+  `handle`, so the effective MidHub upload limit is slightly under 50 MB (Caddy returns 413 for larger
+  bodies). The UI says "ไม่เกิน 50 MB".
+- (a) OPTIONAL, to allow a full 50 MB file: wrap AgentHub's proxying in a trailing `handle { }`
+  (back up first, then `caddy validate`):
+
+        https://10.4.150.142 {
+            tls internal
+            @midhub path /midhub /midhub/*
+            handle @midhub {
+                request_body { max_size 51MB }
+                reverse_proxy 127.0.0.1:3100 {
+                    header_up X-Forwarded-For {client_ip}
+                    flush_interval -1
+                }
             }
+            handle {
+                reverse_proxy 127.0.0.1:3000 { header_up X-Forwarded-For {client_ip} }
+                request_body { max_size 50MB }
+            }
+            encode gzip
+            log
         }
-        handle {
-            reverse_proxy 127.0.0.1:3000 { header_up X-Forwarded-For {client_ip} }
-            request_body { max_size 50MB }
-        }
-        encode gzip
-        log
-    }
 
 Then:
 
@@ -81,13 +99,15 @@ Then:
 - Starting a 5th MID is refused
 - Config edit + rollback works
 - Upload into `agent/extlib` works; into `agent/bin` is refused
-- Log tab streams
+- Log tab streams. Also check SSE through Caddy (with `encode gzip` in the site, events must arrive
+  incrementally, not in one burst at the end):
+  `curl -sN -H "Cookie: midhub_session=<token>" https://<host>/midhub/<log stream URL for a running MID>`
+  (find the exact URL in the Network tab); lines should appear as the log grows.
 - `journalctl -u bsm-midhub -u bsm-midhub-helper -n 50` is clean
 
 ## 6. SSO (optional)
 
-Add the redirect URI (`<PUBLIC_URL>/midhub/api/auth/oidc/callback` - confirm the exact path in
-`lib/auth/oidc.ts`) in the IdP; configure it at `/midhub/admin/idp`; add a team member email under users;
+Add the redirect URI (`<PUBLIC_URL>/midhub/api/auth/oidc/callback`) in the IdP; configure it at `/midhub/admin/idp`; add a team member email under users;
 verify SSO login. An email not in the user table must get the message "ยังไม่ได้รับสิทธิ์".
 
 ## 7. Updating

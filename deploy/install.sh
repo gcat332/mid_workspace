@@ -27,29 +27,49 @@ fi
 [[ -d "$APP_DIR/.next" ]] || { echo "Missing $APP_DIR/.next - run: npm run build" >&2; exit 1; }
 [[ -f "$APP_DIR/.env.local" ]] || { echo "Missing $APP_DIR/.env.local - create it first (see deploy/README.md)" >&2; exit 1; }
 
+# The app user must be able to read the checkout, write .next (Next's cache) and run node/prisma.
+as_app() { runuser -u "$APP_USER" -- "$@"; }
+precheck_fail() {
+  echo "$1" >&2
+  echo "Fix: deploy a checkout owned by $APP_USER (e.g. git clone as $APP_USER) or: chown -R $APP_USER:$APP_USER $APP_DIR" >&2
+  exit 1
+}
+as_app test -r "$APP_DIR" -a -x "$APP_DIR" || precheck_fail "$APP_USER cannot read $APP_DIR"
+as_app test -w "$APP_DIR/.next" || precheck_fail "$APP_USER cannot write $APP_DIR/.next"
+as_app test -x /usr/bin/node || precheck_fail "$APP_USER cannot execute /usr/bin/node"
+as_app test -x "$APP_DIR/node_modules/.bin/prisma" || precheck_fail "$APP_USER cannot execute $APP_DIR/node_modules/.bin/prisma"
+
+changed=0
 getent group midhub >/dev/null || groupadd midhub
 id midsvc >/dev/null 2>&1 || useradd -r -g midhub -s /usr/sbin/nologin -d /nonexistent -M midsvc
-id -nG "$APP_USER" | tr ' ' '\n' | grep -qx midhub || usermod -aG midhub "$APP_USER"
+id -nG "$APP_USER" | tr ' ' '\n' | grep -qx midhub || { usermod -aG midhub "$APP_USER"; changed=1; }
 
 install -d -m 0755 -o root -g root "$ROOT_DIR"
 install -d -m 2775 -o midsvc -g midhub "$ROOT_DIR/mids"
 chown midsvc:midhub "$ROOT_DIR/mids"; chmod 2775 "$ROOT_DIR/mids"
-for d in packages archive; do
+for d in packages archive db; do
   install -d -m 0750 -o "$APP_USER" -g "$APP_USER" "$ROOT_DIR/$d"
   chown "$APP_USER:$APP_USER" "$ROOT_DIR/$d"; chmod 0750 "$ROOT_DIR/$d"
 done
 
 for unit in bsm-midhub.service bsm-midhub-helper.service; do
-  sed "s|@APP_DIR@|$APP_DIR|g" "$SCRIPT_DIR/$unit" > "/etc/systemd/system/$unit"
-  chmod 0644 "/etc/systemd/system/$unit"
+  tmp="$(mktemp)"
+  sed "s|@APP_DIR@|$APP_DIR|g" "$SCRIPT_DIR/$unit" > "$tmp"
+  cmp -s "$tmp" "/etc/systemd/system/$unit" || changed=1
+  install -m 0644 "$tmp" "/etc/systemd/system/$unit"; rm -f "$tmp"
 done
 systemctl daemon-reload
 systemctl enable --now bsm-midhub-helper.service bsm-midhub.service
+if [[ $changed -eq 1 ]]; then
+  # Units/groups changed: pick them up on already-running services (no-op if not running).
+  # Restarting the helper recreates the socket inode; the app reconnects per request, so this
+  # is safe. Running MIDs are separate units and are unaffected.
+  systemctl try-restart bsm-midhub-helper.service bsm-midhub.service
+fi
 
 cat <<MSG
 
 Installed. Units rendered with APP_DIR=$APP_DIR.
-NOTE: if $APP_USER was just added to group midhub, restart bsm-midhub so the group applies.
 
 Caddy (NOT modified by this script): paste deploy/Caddyfile.midhub into the AgentHub site
 block(s) in /etc/caddy/Caddyfile before the catch-all, then:

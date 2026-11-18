@@ -5,7 +5,7 @@ import path from "node:path"
 import { CONFIG_XML, LOG_FILES, WRAPPER_OVERRIDE } from "./layout"
 import { MidError } from "./names"
 import { getMid } from "./registry"
-import { isReadOnlyPath, resolveMidPath } from "./paths"
+import { isReadOnlyPath, PROGRAM_DIRS, resolveMidPath } from "./paths"
 import { createFileIn, fdPath, lstatIn, mkdirIn, openDir, openFile, openFileIn, removeIn, renameIn, type Check } from "./safe-fs"
 
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024
@@ -48,7 +48,7 @@ async function ctxFor(name: string): Promise<Ctx> {
   const configFiles = [...configXml, ...(await both(WRAPPER_OVERRIDE))]
   // Program dirs both lexically and through any symlinked `agent` / `bin` (resolved once).
   const roDirs = new Set<string>()
-  for (const d of ["bin", "lib", "jre"]) {
+  for (const d of PROGRAM_DIRS) {
     roDirs.add(path.join(root, "agent", d))
     roDirs.add(await resolveMidPath(name, `agent/${d}`))
   }
