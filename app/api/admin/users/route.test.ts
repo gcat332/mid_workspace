@@ -1,4 +1,4 @@
-import { it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 
 const row = { id: "u2", email: "m@x.com", role: "member", lockedAt: null, lastLoginAt: null, passwordHash: "SECRET" }
 const findMany = vi.fn(async ({ select }: { select?: Record<string, boolean> } = {}) => [pick(row, select)])
@@ -14,6 +14,8 @@ const count = vi.fn(async () => 2)
 const userModel = { findMany, findUnique, create, update, delete: del, count }
 const transaction = vi.fn(async (fn: (tx: { user: typeof userModel }) => unknown) => fn({ user: userModel }))
 vi.mock("@/lib/db/client", () => ({ prisma: { user: userModel, $transaction: transaction } }))
+const recordAudit = vi.hoisted(() => vi.fn(async () => {}))
+vi.mock("@/lib/audit", () => ({ recordAudit }))
 
 let role: "admin" | "member" | null = "admin"
 vi.mock("@/lib/auth/helpers", async (orig) => ({
@@ -27,7 +29,7 @@ vi.mock("@/lib/auth/helpers", async (orig) => ({
 
 beforeEach(() => {
   role = "admin"
-  for (const m of [create, update, del, findUnique, count, transaction]) m.mockClear()
+  for (const m of [create, update, del, findUnique, count, transaction, recordAudit]) m.mockClear()
   findUnique.mockResolvedValue(null); count.mockResolvedValue(2)
 })
 
@@ -82,7 +84,7 @@ it("POST validates email, role, password length", async () => {
   expect((await POST(json("POST", { email: "a@x.com", role: "root" }))).status).toBe(400)
   const res = await POST(json("POST", { email: "a@x.com", role: "member", password: "short" }))
   expect(res.status).toBe(400)
-  expect((await res.json()).error).toContain("8")
+  expect((await res.json()).message).toContain("8")
   expect(create).not.toHaveBeenCalled()
 })
 
@@ -118,9 +120,9 @@ it("admin cannot demote or delete themselves", async () => {
   const { PATCH, DELETE } = await import("./[id]/route")
   const msg = "ไม่สามารถลดสิทธิ์/ลบบัญชีตัวเองได้"
   const a = await PATCH(json("PATCH", { role: "member" }), ctx("u1"))
-  expect(a.status).toBe(400); expect((await a.json()).error).toBe(msg)
+  expect(a.status).toBe(400); expect((await a.json()).message).toBe(msg)
   const b = await DELETE(json("DELETE"), ctx("u1"))
-  expect(b.status).toBe(400); expect((await b.json()).error).toBe(msg)
+  expect(b.status).toBe(400); expect((await b.json()).message).toBe(msg)
   expect(update).not.toHaveBeenCalled(); expect(del).not.toHaveBeenCalled()
 })
 
@@ -195,4 +197,42 @@ it("unlock and password reset clear the in-memory login limiter for that email (
     expect((await PATCH(json("PATCH", body), ctx("u2"))).status).toBe(200)
     expect(hitLoginLimiter("10.0.0.1", "m@x.com").limited).toBe(false)
   }
+})
+
+describe("admin actions are audited without secrets (I2)", () => {
+  const me = expect.objectContaining({ userId: "u1", email: "a@x.com" })
+  const noSecrets = () => {
+    const all = JSON.stringify(recordAudit.mock.calls)
+    expect(all).not.toContain("longenough")
+    expect(all).not.toContain("newpassword")
+    expect(all).not.toMatch(/\$2[aby]\$/)
+    expect(all).not.toContain("passwordHash")
+  }
+  it("POST -> user.create", async () => {
+    const { POST } = await import("./route")
+    await POST(json("POST", { email: "New@x.com", role: "admin", password: "longenough" }))
+    await POST(json("POST", { email: "sso@x.com", role: "member" }))
+    expect(recordAudit).toHaveBeenNthCalledWith(1, me, "user.create", undefined, { targetEmail: "new@x.com", role: "admin", ssoOnly: false })
+    expect(recordAudit).toHaveBeenNthCalledWith(2, me, "user.create", undefined, { targetEmail: "sso@x.com", role: "member", ssoOnly: true })
+    noSecrets()
+  })
+  it("PATCH -> user.update with what changed", async () => {
+    const { PATCH } = await import("./[id]/route")
+    findUnique.mockResolvedValue({ id: "u2", role: "member", email: "m@x.com" })
+    await PATCH(json("PATCH", { role: "admin", unlock: true, password: "newpassword" }), ctx("u2"))
+    expect(recordAudit).toHaveBeenCalledWith(me, "user.update", undefined, { targetEmail: "m@x.com", role: "admin", unlock: true, passwordChanged: true })
+    noSecrets()
+  })
+  it("DELETE -> user.delete", async () => {
+    const { DELETE } = await import("./[id]/route")
+    findUnique.mockResolvedValue({ id: "u2", role: "member", email: "m@x.com" })
+    await DELETE(json("DELETE"), ctx("u2"))
+    expect(recordAudit).toHaveBeenCalledWith(me, "user.delete", undefined, { targetEmail: "m@x.com", role: "member" })
+  })
+  it("refused changes are not audited; errors use { code, message } (M3)", async () => {
+    const { PATCH } = await import("./[id]/route")
+    const res = await PATCH(json("PATCH", { role: "member" }), ctx("u1"))
+    expect(await res.json()).toMatchObject({ code: expect.any(String), message: expect.any(String) })
+    expect(recordAudit).not.toHaveBeenCalled()
+  })
 })

@@ -3,22 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/ui/api"
 import { ErrorNotice, readApiError, type ApiError } from "@/components/ErrorNotice"
+import { actionLabel, compactDetail, detailPairs } from "@/lib/ui/audit-format"
 
 type Item = { id: string; at: string; email: string; action: string; midName: string | null; detail: string }
-
-const ACTION_LABELS: Record<string, string> = {
-  "mid.import": "นำเข้า MID",
-  "mid.start": "เริ่ม MID",
-  "mid.stop": "หยุด MID",
-  "mid.restart": "รีสตาร์ท MID",
-  "config.save": "บันทึกคอนฟิก",
-  "config.rollback": "ย้อนคอนฟิก",
-  "file.write": "แก้ไขไฟล์",
-  "file.upload": "อัปโหลดไฟล์",
-  "file.rename": "เปลี่ยนชื่อไฟล์",
-  "file.delete": "ลบไฟล์",
-  "file.mkdir": "สร้างโฟลเดอร์",
-}
 
 const bangkok = new Intl.DateTimeFormat("sv-SE", {
   timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit",
@@ -27,29 +14,35 @@ const bangkok = new Intl.DateTimeFormat("sv-SE", {
 /** `YYYY-MM-DD HH:mm:ss` in Asia/Bangkok. */
 export const formatBangkok = (iso: string): string => bangkok.format(new Date(iso))
 
-/** Compact one-line JSON; falls back to the raw text when detail is not valid JSON. */
-export function compactDetail(detail: string): string {
-  try { return JSON.stringify(JSON.parse(detail)) } catch { return detail }
-}
-
-const PREVIEW = 80
 const input = "rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
 
+/** Readable "label: value" lines; the full JSON stays one click away. */
 function Detail({ detail }: { detail: string }) {
   const [open, setOpen] = useState(false)
-  const text = compactDetail(detail)
-  if (text === "{}" || text === "") return <span className="text-gray-400">-</span>
-  const long = text.length > PREVIEW
+  const pairs = detailPairs(detail)
+  if (pairs !== null && pairs.length === 0) return <span className="text-gray-400">-</span>
   return (
-    <span className="font-mono text-xs text-gray-700 break-all">
-      {open || !long ? text : `${text.slice(0, PREVIEW)}…`}
-      {long && (
-        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
-          className="ml-2 font-sans text-blue-600 hover:underline">
-          {open ? "ย่อ" : "ขยาย"}
-        </button>
+    <div className="text-xs text-gray-700">
+      {pairs ? (
+        <dl className="space-y-0.5">
+          {pairs.map(([k, v], i) => (
+            <div key={i} className="flex gap-1">
+              <dt className="shrink-0 text-gray-500">{k}:</dt>
+              <dd className="min-w-0 break-all text-gray-900">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : <span className="break-all font-mono">{detail}</span>}
+      {pairs && (
+        <>
+          <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+            className="mt-0.5 text-blue-600 hover:underline">
+            {open ? "ซ่อน JSON" : "ดู JSON เต็ม"}
+          </button>
+          {open && <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-gray-50 p-1.5 font-mono text-gray-700">{compactDetail(detail)}</pre>}
+        </>
       )}
-    </span>
+    </div>
   )
 }
 
@@ -120,9 +113,9 @@ export function AuditLog() {
             {items.map((r) => (
               <tr key={r.id} className="align-top">
                 <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-700">{formatBangkok(r.at)}</td>
-                <td className="px-3 py-2 text-gray-900">{r.email}</td>
+                <td className="px-3 py-2 whitespace-nowrap text-gray-900">{r.email}</td>
                 <td className="px-3 py-2 text-gray-900">
-                  {ACTION_LABELS[r.action] ?? <span className="font-mono text-xs">{r.action}</span>}
+                  {actionLabel(r.action) ?? <span className="font-mono text-xs">{r.action}</span>}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-gray-700">{r.midName ?? <span className="text-gray-400">-</span>}</td>
                 <td className="px-3 py-2"><Detail detail={r.detail} /></td>

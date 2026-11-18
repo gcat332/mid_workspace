@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
+import { apiFetch } from "@/lib/ui/api"
 
 interface IdpForm {
   provider: string
@@ -26,29 +28,35 @@ export function IdpConfigManager() {
   const [form, setForm] = useState<IdpForm>(EMPTY)
   const [origin, setOrigin] = useState("")
   const [saving, setSaving] = useState(false)
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [saved, setSaved] = useState(false)
+  const [err, setErr] = useState<ApiError | null>(null)
 
   useEffect(() => {
-    fetch("/midhub/api/admin/idp")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("load"))))
-      .then((c) => { setOrigin(window.location.origin); setForm({ ...EMPTY, ...c }) })
-      .catch(() => setMsg({ ok: false, text: "โหลดการตั้งค่า SSO ไม่สำเร็จ ตรวจสอบว่าเข้าสู่ระบบด้วยบัญชี Admin" }))
+    apiFetch("/admin/idp")
+      .then(async (r) => {
+        if (!r.ok) { setErr(await readApiError(r)); return }
+        setOrigin(window.location.origin)
+        setForm({ ...EMPTY, ...((await r.json()) as Partial<IdpForm>) })
+      })
+      .catch(() => setErr({ message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" }))
   }, [])
 
-  const set = <K extends keyof IdpForm>(k: K, v: IdpForm[K]) => { setForm((f) => ({ ...f, [k]: v })); setMsg(null) }
+  const set = <K extends keyof IdpForm>(k: K, v: IdpForm[K]) => { setForm((f) => ({ ...f, [k]: v })); setSaved(false) }
 
   const save = async () => {
-    setSaving(true)
+    setSaving(true); setErr(null); setSaved(false)
     try {
-      const res = await fetch("/midhub/api/admin/idp", {
+      const res = await apiFetch("/admin/idp", {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form),
       })
-      if (res.ok) { setMsg({ ok: true, text: "บันทึกแล้ว" }); if (form.clientSecret) set("clientSecret", "••••"); setMsg({ ok: true, text: "บันทึกแล้ว" }) }
-      else setMsg({ ok: false, text: "บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" })
+      if (!res.ok) { setErr(await readApiError(res)); return }
+      if (form.clientSecret) setForm((f) => ({ ...f, clientSecret: "••••" }))
+      setSaved(true)
     } catch {
-      setMsg({ ok: false, text: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" })
+      setErr({ message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" })
     } finally { setSaving(false) }
   }
+  const callback = `${origin}/midhub/api/auth/oidc/callback`
 
   return (
     <section>
@@ -78,10 +86,12 @@ export function IdpConfigManager() {
             <label htmlFor="idp-issuer" className={labelCls}>Issuer URL</label>
             <input id="idp-issuer" value={form.issuer} onChange={(e) => set("issuer", e.target.value)} className={input} />
           </div>
-          <div>
-            <label htmlFor="idp-tenant" className={labelCls}>Tenant ID</label>
-            <input id="idp-tenant" value={form.tenantId} onChange={(e) => set("tenantId", e.target.value)} className={input} />
-          </div>
+          {form.provider === "azure-ad" && (
+            <div>
+              <label htmlFor="idp-tenant" className={labelCls}>Tenant ID</label>
+              <input id="idp-tenant" value={form.tenantId} onChange={(e) => set("tenantId", e.target.value)} className={input} />
+            </div>
+          )}
           <div>
             <label htmlFor="idp-client-id" className={labelCls}>Client ID</label>
             <input id="idp-client-id" value={form.clientId} onChange={(e) => set("clientId", e.target.value)} className={input} />
@@ -95,9 +105,9 @@ export function IdpConfigManager() {
           <div>
             <label htmlFor="idp-redirect" className={labelCls}>Redirect URI</label>
             <input id="idp-redirect" value={form.redirectUri} onChange={(e) => set("redirectUri", e.target.value)}
-              placeholder={`${origin}/midhub/api/auth/oidc/callback`} className={input} />
-            <p className="mt-1 text-xs text-gray-500">
-              ลงทะเบียนที่ IdP: <code>{origin}/midhub/api/auth/oidc/callback</code>
+              placeholder={callback} className={input} />
+            <p className="mt-1 break-all text-xs text-gray-500">
+              ลงทะเบียนที่ IdP: <code>{callback}</code>
             </p>
           </div>
           <div className="sm:col-span-2">
@@ -105,8 +115,10 @@ export function IdpConfigManager() {
             <input id="idp-scopes" value={form.scopes} onChange={(e) => set("scopes", e.target.value)} className={input} />
           </div>
         </div>
+        <p className="text-xs text-gray-500">เปิดใช้งานได้เมื่อกรอก Issuer URL (https://), Client ID และ Client Secret ครบ</p>
+        {err && <ErrorNotice error={err} />}
         <div className="flex items-center justify-end gap-3">
-          {msg && <span role="status" className={`text-sm ${msg.ok ? "text-emerald-600" : "text-red-600"}`}>{msg.text}</span>}
+          {saved && <span role="status" className="text-sm text-emerald-600">บันทึกแล้ว</span>}
           <button onClick={() => void save()} disabled={saving}
             className="px-4 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
             {saving ? "กำลังบันทึก..." : "บันทึก"}

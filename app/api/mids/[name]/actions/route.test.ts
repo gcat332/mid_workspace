@@ -95,13 +95,14 @@ it("stop never checks memory; restart checks only when MID is not running/starti
   expect(callHelper).toHaveBeenCalledTimes(3)
 })
 
-it("helper errors pass through handleRouteError and are not audited", async () => {
+it("helper errors pass through handleRouteError and are audited as failures (M6)", async () => {
   const { POST } = await import("./route")
   callHelper.mockRejectedValueOnce(new MidError("quota_full"))
   const q = await POST(post({ action: "start" }), ctx())
   expect(q.status).toBe(409)
-  expect(await q.json()).toMatchObject({ code: "quota_full", message: "รันครบ 4 ตัวแล้ว ให้หยุดตัวอื่นก่อน" })
+  expect(await q.json()).toMatchObject({ code: "quota_full" })
+  expect(recordAudit).toHaveBeenLastCalledWith(expect.anything(), "mid.start", "m1", { ok: false, code: "quota_full" })
   callHelper.mockRejectedValueOnce(new MidError("helper_down"))
   expect((await POST(post({ action: "stop" }), ctx())).status).toBe(503)
-  expect(recordAudit).not.toHaveBeenCalled()
+  expect(recordAudit).toHaveBeenLastCalledWith(expect.anything(), "mid.stop", "m1", { ok: false, code: "helper_down" })
 })

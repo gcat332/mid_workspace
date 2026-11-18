@@ -1,98 +1,103 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { ConfirmDialog } from "./ConfirmDialog"
+import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
+import { apiFetch } from "@/lib/ui/api"
 import { wouldAllow, isLoopback } from "@/lib/net/cidr"
 
 type Entry = { id: string; cidr: string; note: string; createdAt: string }
+type Pending = { title: string; body: string; confirmLabel: string; run: () => Promise<void> }
 
-const API = "/midhub/api/admin/ip-allowlist"
 const input = "rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+const NET: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" }
 
 export function IpAllowlistManager() {
   const [entries, setEntries] = useState<Entry[]>([])
   const [myIp, setMyIp] = useState("")
   const [cidr, setCidr] = useState("")
   const [note, setNote] = useState("")
-  const [err, setErr] = useState("")
+  const [err, setErr] = useState<ApiError | null>(null)
+  const [pending, setPending] = useState<Pending | null>(null)
+  const [busy, setBusy] = useState(false)
 
   const [reload, setReload] = useState(0)
   useEffect(() => {
-    fetch(API)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("load"))))
-      .then((j: { entries: Entry[]; myIp: string }) => { setEntries(j.entries); setMyIp(j.myIp) })
-      .catch(() => setErr("โหลดรายการไม่สำเร็จ ตรวจสอบว่าเข้าสู่ระบบด้วยบัญชี Admin"))
+    apiFetch("/admin/ip-allowlist")
+      .then(async (r) => {
+        if (!r.ok) { setErr(await readApiError(r)); return }
+        const j = (await r.json()) as { entries: Entry[]; myIp: string }
+        setEntries(j.entries); setMyIp(j.myIp)
+      })
+      .catch(() => setErr(NET))
   }, [reload])
   const load = () => setReload((n) => n + 1)
 
-  // A change that leaves the list non-empty without the admin's own IP locks them out on the
-  // next request, so ask first.
-  const keepsMeIn = (next: string[]) =>
-    !myIp || isLoopback(myIp) || wouldAllow(myIp, next) ||
-    window.confirm(`หลังการเปลี่ยนแปลงนี้ IP ของคุณ (${myIp}) จะไม่อยู่ในรายการ และจะเข้าใช้งานไม่ได้ (403) ต้องแก้ที่เซิร์ฟเวอร์ ต้องการดำเนินการต่อหรือไม่`)
-
-  async function add() {
-    setErr("")
-    if (!keepsMeIn([...entries.map((e) => e.cidr), cidr.trim()])) return
+  async function call(path: string, init: RequestInit): Promise<boolean> {
+    setErr(null); setBusy(true)
     try {
-      const res = await fetch(API, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cidr, note }),
-      })
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string }
-        setErr(j.error ?? (res.status === 401 || res.status === 403
-          ? "ไม่มีสิทธิ์เพิ่มรายการ กรุณาเข้าสู่ระบบด้วยบัญชี Admin อีกครั้ง"
-          : "เพิ่มรายการไม่สำเร็จ เซิร์ฟเวอร์ขัดข้อง กรุณาลองใหม่อีกครั้ง"))
-        return
-      }
-      setCidr(""); setNote(""); load()
+      const res = await apiFetch(path, init)
+      if (!res.ok) { setErr(await readApiError(res)); return false }
+      load()
+      return true
     } catch {
-      setErr("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่")
+      setErr(NET)
+      return false
+    } finally {
+      setBusy(false)
     }
   }
 
-  async function remove(e: Entry) {
-    setErr("")
-    if (!window.confirm(`ลบ ${e.cidr} ออกจากรายการ?`)) return
-    if (!keepsMeIn(entries.filter((x) => x.id !== e.id).map((x) => x.cidr))) return
-    try {
-      const res = await fetch(`${API}?id=${encodeURIComponent(e.id)}`, { method: "DELETE" })
-      if (!res.ok) {
-        setErr(res.status === 401 || res.status === 403
-          ? "ไม่มีสิทธิ์ลบรายการ กรุณาเข้าสู่ระบบด้วยบัญชี Admin อีกครั้ง"
-          : "ลบรายการไม่สำเร็จ เซิร์ฟเวอร์ขัดข้อง กรุณาลองใหม่อีกครั้ง")
-        return
-      }
-      load()
-    } catch {
-      setErr("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่")
+  // A change that leaves the list non-empty without the admin's own IP locks them out on the next request.
+  const locksMeOut = (next: string[]) => !!myIp && !isLoopback(myIp) && !wouldAllow(myIp, next)
+  const lockoutText = `หลังการเปลี่ยนแปลงนี้ IP ของคุณ (${myIp}) จะไม่อยู่ในรายการ และจะเข้าใช้งานไม่ได้ (403) ต้องแก้ที่เซิร์ฟเวอร์`
+
+  async function doAdd() {
+    if (await call("/admin/ip-allowlist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cidr, note }) })) {
+      setCidr(""); setNote("")
     }
+  }
+  function add() {
+    setErr(null)
+    if (!locksMeOut([...entries.map((e) => e.cidr), cidr.trim()])) { void doAdd(); return }
+    setPending({ title: "IP ของคุณจะถูกบล็อก", body: `${lockoutText} ต้องการเพิ่ม ${cidr.trim()} ต่อหรือไม่?`, confirmLabel: "เพิ่มต่อ", run: doAdd })
+  }
+  function remove(e: Entry) {
+    setErr(null)
+    const lockout = locksMeOut(entries.filter((x) => x.id !== e.id).map((x) => x.cidr))
+    setPending({
+      title: `ลบ ${e.cidr} ออกจากรายการ?`,
+      body: lockout ? lockoutText : "IP ในช่วงนี้จะเข้าใช้งานไม่ได้อีก (ถ้ายังมีรายการอื่นเหลืออยู่)",
+      confirmLabel: "ลบ",
+      run: async () => { await call(`/admin/ip-allowlist?id=${encodeURIComponent(e.id)}`, { method: "DELETE" }) },
+    })
   }
 
   return (
     <section>
-      <h1 className="text-xl font-semibold text-gray-900 mb-2">IP Allowlist</h1>
-      <p className="text-sm text-gray-600 mb-4">
+      <h1 className="mb-2 text-xl font-semibold text-gray-900">IP Allowlist</h1>
+      <p className="mb-4 text-sm text-gray-600">
         ถ้ารายการว่าง อนุญาตทุก IP; เมื่อมีรายการ เฉพาะ IP/CIDR ในรายการเท่านั้นที่เข้าใช้งานได้ (รองรับ IPv4 และ IPv6)
       </p>
       {myIp && !isLoopback(myIp) && (
-        <p className="text-xs text-gray-600 mb-3">
+        <p className="mb-3 text-xs text-gray-600">
           IP ของคุณที่เซิร์ฟเวอร์เห็น: <span className="font-mono text-gray-900">{myIp}</span>{" "}
           ({wouldAllow(myIp, entries.map((e) => e.cidr)) ? "อนุญาต" : "ไม่อยู่ในรายการ"}){" "}
-          <button className="text-blue-600 hover:underline" onClick={() => setCidr(myIp)}>ใช้ IP นี้</button>
+          <button type="button" className="text-blue-600 hover:underline" onClick={() => setCidr(myIp)}>ใช้ IP นี้</button>
         </p>
       )}
-      <div className="flex flex-wrap gap-2 mb-3">
+      <form className="mb-3 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); add() }}>
         <input value={cidr} onChange={(e) => setCidr(e.target.value)} placeholder="1.2.3.4 หรือ 10.0.0.0/24 หรือ 2001:db8::/32"
-          aria-label="IP หรือ CIDR" className={`${input} flex-1 min-w-[200px]`} />
+          aria-label="IP หรือ CIDR" className={`${input} min-w-[200px] flex-1`} />
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="หมายเหตุ (ไม่บังคับ)"
-          aria-label="หมายเหตุ" className={`${input} flex-1 min-w-[140px]`} />
-        <button onClick={() => void add()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">เพิ่ม</button>
-      </div>
-      {err && <p className="text-sm text-red-600 mb-2">{err}</p>}
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+          aria-label="หมายเหตุ" className={`${input} min-w-[140px] flex-1`} />
+        <button type="submit" disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">เพิ่ม</button>
+      </form>
+      {err && <div className="mb-2"><ErrorNotice error={err} /></div>}
+      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-200 text-left text-gray-600">
-            <tr><th className="px-4 py-3">IP / CIDR</th><th className="px-4 py-3">หมายเหตุ</th><th className="px-4 py-3" /></tr>
+          <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600">
+            <tr><th className="px-4 py-3">IP / CIDR</th><th className="px-4 py-3">หมายเหตุ</th><th className="px-4 py-3"><span className="sr-only">จัดการ</span></th></tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {entries.map((e) => (
@@ -100,7 +105,7 @@ export function IpAllowlistManager() {
                 <td className="px-4 py-3 font-mono text-gray-900">{e.cidr}</td>
                 <td className="px-4 py-3 text-gray-500">{e.note || "—"}</td>
                 <td className="px-4 py-3 text-right">
-                  <button className="text-red-600 hover:underline" onClick={() => void remove(e)}>ลบ</button>
+                  <button type="button" className="text-red-600 hover:underline" onClick={() => remove(e)}>ลบ</button>
                 </td>
               </tr>
             ))}
@@ -110,6 +115,13 @@ export function IpAllowlistManager() {
           </tbody>
         </table>
       </div>
+      {pending && (
+        <ConfirmDialog title={pending.title} confirmLabel={pending.confirmLabel} danger busy={busy}
+          onCancel={() => setPending(null)}
+          onConfirm={() => void pending.run().then(() => setPending(null))}>
+          {pending.body}
+        </ConfirmDialog>
+      )}
     </section>
   )
 }

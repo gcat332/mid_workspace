@@ -50,8 +50,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ name: string }
       }
     }
 
-    await callHelper({ op: action, name: mid.name })
-    await recordAudit(user, `mid.${action}`, mid.name, confirmLowMemory === undefined ? {} : { confirmLowMemory })
+    const detail = confirmLowMemory === undefined ? {} : { confirmLowMemory }
+    try {
+      await callHelper({ op: action, name: mid.name })
+    } catch (e) {
+      // Failed attempts belong in the trail too (who tried to start what, and why it was refused).
+      await recordAudit(user, `mid.${action}`, mid.name, { ...detail, ok: false, code: (e as { code?: string }).code ?? "internal" })
+      throw e
+    }
+    await recordAudit(user, `mid.${action}`, mid.name, detail)
     return NextResponse.json({ ok: true })
   } catch (e) {
     return handleRouteError(e)

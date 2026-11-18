@@ -1,4 +1,4 @@
-import { requireAdmin, responseOrRethrow } from "@/lib/auth/helpers"
+import { requireAdmin } from "@/lib/auth/helpers"
 import { handleRouteError } from "@/lib/http/route"
 import { prisma } from "@/lib/db/client"
 import type { Prisma } from "@prisma/client"
@@ -24,8 +24,8 @@ function decodeCursor(raw: string): { at: Date; id: string } | null {
 }
 
 export async function GET(req: Request) {
-  try { await requireAdmin() } catch (e) { return responseOrRethrow(e) }
   try {
+    await requireAdmin()
     const q = new URL(req.url).searchParams
     const mid = (q.get("mid") ?? "").trim()
     const user = (q.get("user") ?? "").trim().toLowerCase()
