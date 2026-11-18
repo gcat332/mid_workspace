@@ -1,19 +1,20 @@
 import { spawn, type ChildProcess, type StdioOptions } from "node:child_process"
 import fs from "node:fs"
+import type { FileHandle } from "node:fs/promises"
 import path from "node:path"
 import { prisma } from "@/lib/db/client"
 import { callHelper } from "@/lib/helper/client"
 import { ARCHIVE_PATHS } from "@/lib/mids/layout"
 import { DEFAULT_MIDHUB_ROOT, MidError, midRoot, validateMidName } from "@/lib/mids/names"
 import { gcPackages } from "@/lib/mids/packages"
-import { fdPath, insideCheck, lstatIn, openDir, removeIn } from "@/lib/mids/safe-fs"
+import { fdPath, insideCheck, lstatIn, openDir, openDirIn, removeIn, translateFsError } from "@/lib/mids/safe-fs"
 import { registerKind, type JobCtx, type Stage } from "./engine"
 
 /** Injected in tests. */
 export const deps = { callHelper, gcPackages }
 
-export const limits = { archiveMaxBytes: 1024 ** 3 }
-const ARCHIVE_MAX_BYTES = () => limits.archiveMaxBytes
+export const limits = { archiveMaxBytes: 1024 ** 3, preWalkMaxBytes: 2 * 1024 ** 3, maxEntries: 20000, retryArchiveMs: 8 * 60_000 }
+const PARTIAL_RETENTION_MS = 24 * 3600_000
 export const ARCHIVE_RETENTION_MS = 30 * 24 * 3600_000
 const TAR = "/usr/bin/tar"
 const TAR_ENV: Record<string, string> = { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" }
@@ -23,7 +24,9 @@ const rootDir = () => process.env.MIDHUB_ROOT || DEFAULT_MIDHUB_ROOT
 const archiveDirPath = () => path.join(rootDir(), "archive")
 const enoent = (e: unknown) => (e as NodeJS.ErrnoException)?.code === "ENOENT"
 const abortErr = () => Object.assign(new Error("aborted"), { name: "AbortError" })
-const stamp = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)
+const p2 = (n: number) => String(n).padStart(2, "0")
+const stamp = (d: Date) =>
+  `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`
 
 /** Real path of mids/ (null when it does not exist). */
 async function midsReal(name: string): Promise<string | null> {
@@ -35,32 +38,70 @@ async function midsReal(name: string): Promise<string | null> {
   }
 }
 
+type Warn = (m: string) => void | Promise<void>
+const SKIP_BIG = "ข้ามการเก็บ archive: ข้อมูลใหญ่เกิน 2 GB หรือไฟล์เกิน 20000 — ลบต่อโดยไม่เก็บ archive"
+const SKIP_EMPTY = "ไม่มีไฟล์ให้เก็บ archive"
+const MAX_DEPTH = 64
+
+/** Logical size (st.size, sparse files count in full) and entry count of the selected entries; never follows symlinks. */
+async function preWalk(agentDir: FileHandle, entries: string[]): Promise<{ exceeded: boolean }> {
+  let size = 0
+  let count = 0
+  const over = () => size > limits.preWalkMaxBytes || count > limits.maxEntries
+  async function walk(dir: FileHandle, name: string, depth: number): Promise<void> {
+    const st = await fs.promises.lstat(fdPath(dir, name))
+    count++
+    if (st.isDirectory()) {
+      if (depth >= MAX_DEPTH) {
+        size = Infinity
+        return
+      }
+      const h = await openDirIn(dir, name)
+      try {
+        for (const n of await fs.promises.readdir(fdPath(h))) {
+          await walk(h, n, depth + 1)
+          if (over()) return
+        }
+      } finally {
+        await h.close()
+      }
+    } else if (st.isFile()) size += st.size
+  }
+  for (const e of entries) {
+    await walk(agentDir, e, 0)
+    if (over()) return { exceeded: true }
+  }
+  return { exceeded: over() }
+}
+
 /**
  * Archives only the mutable files (config, conf, extlib, security, properties, logs), never lib/jre/bin.
  * tar runs as the app user, pinned to the verified agent/ directory through an inherited fd, so a swapped
  * path cannot redirect it. Symlinks are stored as links (never dereferenced); FIFOs are stored, not opened.
  * Deviation from the brief: tar streams to stdout and we write the file ourselves to enforce the size cap.
+ * Returns the archive path, or null when archiving was skipped (nothing to archive, or too big; a warning is passed to onWarn).
  */
-export async function archiveMid(name: string, signal?: AbortSignal, onWarn?: (m: string) => void | Promise<void>): Promise<string> {
+export async function archiveMid(name: string, signal?: AbortSignal, onWarn?: Warn): Promise<string | null> {
   validateMidName(name)
   signal?.throwIfAborted()
+  try {
+    return await archiveInner(name, signal, onWarn)
+  } catch (e) {
+    if (e instanceof MidError || (e as Error)?.name === "AbortError") throw e
+    return translateFsError(e)
+  }
+}
+
+async function archiveInner(name: string, signal: AbortSignal | undefined, onWarn?: Warn): Promise<string | null> {
   const mids = await midsReal(name)
   if (!mids) throw new MidError("not_found")
   const midsDir = await openDir(mids, insideCheck(mids))
   try {
-    const midSt = await lstatIn(midsDir, name)
-    if (!midSt || !midSt.isDirectory()) throw new MidError("not_found")
-    const agentReal = path.join(mids, name, "agent")
-    const midDir = await openDir(path.join(mids, name), (r) => {
-      if (r !== path.join(mids, name)) throw new MidError("path_outside")
-    })
-    let agentDir
+    if (!(await lstatIn(midsDir, name))) throw new MidError("not_found")
+    const midDir = await openDirIn(midsDir, name).catch(notDir)
+    let agentDir: FileHandle
     try {
-      const st = await lstatIn(midDir, "agent")
-      if (!st || !st.isDirectory()) throw new MidError("not_found")
-      agentDir = await openDir(agentReal, (r) => {
-        if (r !== agentReal) throw new MidError("path_outside")
-      })
+      agentDir = await openDirIn(midDir, "agent").catch(notDir)
     } finally {
       await midDir.close()
     }
@@ -71,7 +112,14 @@ export async function archiveMid(name: string, signal?: AbortSignal, onWarn?: (m
         const st = await lstatIn(agentDir, sub)
         if (st && !st.isSymbolicLink()) entries.push(sub)
       }
-      if (!entries.length) throw new MidError("not_found")
+      if (!entries.length) {
+        await onWarn?.(SKIP_EMPTY)
+        return null
+      }
+      if ((await preWalk(agentDir, entries)).exceeded) {
+        await onWarn?.(SKIP_BIG)
+        return null
+      }
       return await runTar(name, agentDir.fd, entries, signal, onWarn)
     } finally {
       await agentDir.close()
@@ -81,7 +129,20 @@ export async function archiveMid(name: string, signal?: AbortSignal, onWarn?: (m
   }
 }
 
-async function runTar(name: string, agentFd: number, entries: string[], signal: AbortSignal | undefined, onWarn?: (m: string) => void | Promise<void>): Promise<string> {
+function notDir(e: unknown): never {
+  if (e instanceof MidError || (e as NodeJS.ErrnoException)?.code === "ENOENT") throw new MidError("not_found")
+  throw e
+}
+
+async function writeAll(h: FileHandle, chunk: Buffer): Promise<void> {
+  let off = 0
+  while (off < chunk.length) {
+    const { bytesWritten } = await h.write(chunk, off, chunk.length - off)
+    off += bytesWritten
+  }
+}
+
+async function runTar(name: string, agentFd: number, entries: string[], signal: AbortSignal | undefined, onWarn?: Warn): Promise<string> {
   await fs.promises.mkdir(archiveDirPath(), { recursive: true, mode: 0o750 })
   const archReal = await fs.promises.realpath(archiveDirPath())
   const arch = await openDir(archReal, (r) => {
@@ -94,8 +155,8 @@ async function runTar(name: string, agentFd: number, entries: string[], signal: 
     let ok = false
     try {
       await out.chmod(0o640)
-      // Names are prefixed with agent/ by --transform (r = regular member names only, so link targets stay untouched).
-      const args = ["--one-file-system", "--warning=no-file-changed", "--transform=flags=r;s,^,agent/,", "-czf", "-", "-C", "/proc/self/fd/3", "--", ...entries]
+      // Names are prefixed with agent/ by --transform (r = member names, h = hard-link targets; symlink targets stay untouched).
+      const args = ["--one-file-system", "--sparse", "--warning=no-file-changed", "--transform=flags=rh;s,^,agent/,", "-czf", "-", "-C", "/proc/self/fd/3", "--", ...entries]
       const stdio: StdioOptions = ["ignore", "pipe", "pipe", agentFd]
       const child: ChildProcess = spawn(TAR, args, { stdio, env: TAR_ENV as NodeJS.ProcessEnv, signal })
       let stderr = ""
@@ -113,11 +174,11 @@ async function runTar(name: string, agentFd: number, entries: string[], signal: 
       try {
         for await (const chunk of child.stdout! as AsyncIterable<Buffer>) {
           bytes += chunk.length
-          if (bytes > ARCHIVE_MAX_BYTES()) {
+          if (bytes > limits.archiveMaxBytes) {
             tooBig = true
             throw new Error("archive too large")
           }
-          await out.write(chunk)
+          await writeAll(out, chunk)
         }
       } catch (e) {
         child.kill("SIGKILL")
@@ -136,6 +197,7 @@ async function runTar(name: string, agentFd: number, entries: string[], signal: 
       if (signal?.aborted) throw abortErr()
       if (code === 1) await onWarn?.("tar แจ้งว่าบางไฟล์เปลี่ยนระหว่างสำรอง (ข้ามได้)")
       else if (code !== 0) throw new MidError("internal", undefined, undefined, `tar ล้มเหลว (exit ${code}): ${stderr.trim().slice(0, 500)}`)
+      await out.datasync()
       ok = true
     } finally {
       await out.close()
@@ -148,7 +210,7 @@ async function runTar(name: string, agentFd: number, entries: string[], signal: 
   }
 }
 
-/** Fd-anchored removal of mids/<name>; already gone is a no-op. Ownership must already be fixed (stage fixOwnership). */
+/** Fd-anchored removal of mids/<name>; already gone is a no-op. Ownership must already be fixed (the stage does that). */
 export async function deleteMidDir(name: string): Promise<void> {
   validateMidName(name)
   const mids = await midsReal(name)
@@ -163,8 +225,10 @@ export async function deleteMidDir(name: string): Promise<void> {
         if (e.code === "not_found") return
         throw e
       }
-      if (enoent(e)) return
-      throw new MidError("internal", undefined, undefined, "ลบโฟลเดอร์ MID ไม่สำเร็จ (สิทธิ์ไม่พอหรือไฟล์ถูกใช้งานอยู่) ลองสั่งใหม่อีกครั้ง")
+      const code = (e as NodeJS.ErrnoException)?.code
+      if (code === "ENOENT") return
+      if (code === "ENOSPC") throw new MidError("disk_full")
+      throw new MidError("internal", undefined, undefined, `ลบโฟลเดอร์ MID ไม่สำเร็จ (${code ?? "unknown"}: สิทธิ์ไม่พอหรือไฟล์ถูกใช้งานอยู่) ลองสั่งใหม่อีกครั้ง`)
     }
   } finally {
     await midsDir.close()
@@ -172,6 +236,16 @@ export async function deleteMidDir(name: string): Promise<void> {
 }
 
 const name = (ctx: JobCtx) => ctx.job.midName
+const CONFLICT_DETAIL = "MID นี้ถูกเปลี่ยนสถานะไปแล้ว งานนี้ใช้ไม่ได้"
+
+/** The row must be this job's own row and in the state its kind expects, else a stale retry could hit a re-installed MID. */
+async function gate(ctx: JobCtx, expected: readonly string[], allowRemoved = false): Promise<"ok" | "removed"> {
+  const row = await prisma.midServer.findUnique({ where: { name: name(ctx) } })
+  if (!row || !ctx.job.midId || row.id !== ctx.job.midId) throw new MidError("conflict", undefined, undefined, CONFLICT_DETAIL)
+  if (expected.includes(row.state)) return "ok"
+  if (allowRemoved && row.state === "removed") return "removed"
+  throw new MidError("conflict", undefined, undefined, CONFLICT_DETAIL)
+}
 
 /** Helper "not_found" (unit or directory never existed / already removed) is success for idempotency. */
 async function helperTolerant(ctx: JobCtx, op: "stop" | "removeUnit" | "fixOwnership"): Promise<void> {
@@ -184,46 +258,68 @@ async function helperTolerant(ctx: JobCtx, op: "stop" | "removeUnit" | "fixOwner
   }
 }
 
-const stop: Stage = { name: "stop", run: (ctx) => helperTolerant(ctx, "stop") }
-const removeUnit: Stage = { name: "removeUnit", run: (ctx) => helperTolerant(ctx, "removeUnit") }
-// Controller ruling: before archive (not inside deleteMidDir) so tar can read files the MID created 0600.
-const fixOwnership: Stage = { name: "fixOwnership", run: (ctx) => helperTolerant(ctx, "fixOwnership") }
-
-const archive: Stage = {
-  name: "archive",
-  async run(ctx) {
-    ctx.signal.throwIfAborted()
-    try {
-      const p = await archiveMid(name(ctx), ctx.signal, (m) => ctx.log(m, "warn"))
-      await ctx.log(`สำรองไฟล์ไว้ที่ ${p}`)
-    } catch (e) {
-      if (e instanceof MidError && e.code === "not_found") {
-        await ctx.log("ไม่พบโฟลเดอร์ MID ข้ามการสำรอง", "warn")
-        return
+function stagesFor(kind: "uninstall" | "cancel_install"): Stage[] {
+  const expected = kind === "uninstall" ? ["uninstalling"] : ["installing", "error"]
+  const helperStage = (op: "stop" | "removeUnit"): Stage => ({
+    name: op,
+    async run(ctx) {
+      await gate(ctx, expected)
+      await helperTolerant(ctx, op)
+    },
+  })
+  const archive: Stage = {
+    name: "archive",
+    timeoutMs: 10 * 60_000,
+    async run(ctx) {
+      await gate(ctx, expected)
+      // Archive is best-effort. On a retry (attempt >= 1) a failure or timeout is journalled and skipped; the first attempt fails loudly.
+      const retry = ctx.job.attempt >= 1
+      const signal = retry ? AbortSignal.any([ctx.signal, AbortSignal.timeout(limits.retryArchiveMs)]) : ctx.signal
+      try {
+        // Re-normalise ownership: a retry starting here must still be able to read everything.
+        await helperTolerant(ctx, "fixOwnership")
+        const p = await archiveMid(name(ctx), signal, (m) => ctx.log(m, "warn"))
+        if (p) await ctx.log(`สำรองไฟล์ไว้ที่ ${p}`)
+      } catch (e) {
+        ctx.signal.throwIfAborted()
+        if (e instanceof MidError && e.code === "not_found") {
+          await ctx.log("ไม่พบโฟลเดอร์ MID ข้ามการสำรอง", "warn")
+          return
+        }
+        if (!retry) throw e
+        const why = e instanceof MidError ? (e.detail ?? e.message) : (e as Error)?.name === "AbortError" ? "หมดเวลา" : "เกิดข้อผิดพลาด"
+        await ctx.log(`ข้ามการเก็บ archive หลังพยายามซ้ำไม่สำเร็จ (${why}) — ลบต่อโดยไม่เก็บ archive`, "warn")
       }
-      throw e
-    }
-  },
+    },
+  }
+  const deleteDir: Stage = {
+    name: "deleteDir",
+    async run(ctx) {
+      await gate(ctx, expected)
+      await helperTolerant(ctx, "fixOwnership")
+      ctx.signal.throwIfAborted()
+      await deleteMidDir(name(ctx))
+    },
+  }
+  const markRemoved: Stage = {
+    name: "markRemoved",
+    async run(ctx) {
+      ctx.signal.throwIfAborted()
+      if ((await gate(ctx, expected, true)) === "removed") return
+      const r = await prisma.midServer.updateMany({
+        where: { id: ctx.job.midId!, state: { in: expected } },
+        data: { state: "removed", removedAt: new Date() },
+      })
+      if (r.count === 0) throw new MidError("conflict", undefined, undefined, CONFLICT_DETAIL)
+    },
+  }
+  return kind === "uninstall"
+    ? [helperStage("stop"), helperStage("removeUnit"), archive, deleteDir, markRemoved]
+    : [helperStage("stop"), helperStage("removeUnit"), deleteDir, markRemoved]
 }
 
-const deleteDir: Stage = {
-  name: "deleteDir",
-  async run(ctx) {
-    ctx.signal.throwIfAborted()
-    await deleteMidDir(name(ctx))
-  },
-}
-
-const markRemoved: Stage = {
-  name: "markRemoved",
-  async run(ctx) {
-    ctx.signal.throwIfAborted()
-    await prisma.midServer.updateMany({ where: { name: name(ctx) }, data: { state: "removed", removedAt: new Date() } })
-  },
-}
-
-export const uninstallStages: Stage[] = [stop, removeUnit, fixOwnership, archive, deleteDir, markRemoved]
-export const cancelInstallStages: Stage[] = [stop, removeUnit, fixOwnership, deleteDir, markRemoved]
+export const uninstallStages: Stage[] = stagesFor("uninstall")
+export const cancelInstallStages: Stage[] = stagesFor("cancel_install")
 
 async function onSuccess(ctx: JobCtx): Promise<void> {
   try {
@@ -233,7 +329,10 @@ async function onSuccess(ctx: JobCtx): Promise<void> {
   }
 }
 
-/** Deletes archive/*.tar.gz older than 30 days (by mtime). Never follows symlinks; non-regular entries are skipped. */
+/**
+ * Deletes archive/*.tar.gz older than 30 days (by mtime) and stale .*.partial leftovers older than 1 day.
+ * Never follows symlinks; non-regular entries are skipped. Returns only files actually unlinked.
+ */
 export async function sweepArchives(now: Date = new Date()): Promise<string[]> {
   let real: string
   try {
@@ -248,13 +347,18 @@ export async function sweepArchives(now: Date = new Date()): Promise<string[]> {
   const deleted: string[] = []
   try {
     for (const n of await fs.promises.readdir(fdPath(dir))) {
-      if (!n.endsWith(".tar.gz")) continue
+      const partial = n.startsWith(".") && n.endsWith(".partial")
+      if (!partial && !n.endsWith(".tar.gz")) continue
       const p = fdPath(dir, n)
       const st = await fs.promises.lstat(p).catch(() => null)
       if (!st || !st.isFile()) continue
-      if (now.getTime() - st.mtimeMs <= ARCHIVE_RETENTION_MS) continue
-      await fs.promises.unlink(p).catch(() => undefined)
-      deleted.push(path.join(real, n))
+      if (now.getTime() - st.mtimeMs <= (partial ? PARTIAL_RETENTION_MS : ARCHIVE_RETENTION_MS)) continue
+      try {
+        await fs.promises.unlink(p)
+        deleted.push(path.join(real, n))
+      } catch (e) {
+        console.error("[archive] sweep could not delete", n, (e as NodeJS.ErrnoException)?.code)
+      }
     }
   } finally {
     await dir.close()

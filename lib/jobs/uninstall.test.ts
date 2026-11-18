@@ -1,6 +1,7 @@
 import { it, expect, beforeAll, afterAll, beforeEach, describe } from "vitest"
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, symlinkSync, utimesSync, readdirSync, statSync, readFileSync } from "node:fs"
+import { randomBytes } from "node:crypto"
+import { mkdtempSync, rmSync, truncateSync, mkdirSync as mk2, openSync, closeSync, linkSync, writeSync, existsSync, mkdirSync, writeFileSync, symlinkSync, utimesSync, readdirSync, statSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -19,7 +20,7 @@ let eng: typeof import("./engine")
 let un: typeof import("./uninstall")
 let prisma: typeof import("@/lib/db/client").prisma
 let calls: string[] = []
-let failOn: { op: string; times: number; err?: () => Error } | null = null
+let failOn: { op: string; times: number; skip?: number; err?: () => Error } | null = null
 const outside = join(dir, "outside")
 const tarList = (f: string) => execFileSync("/usr/bin/tar", ["-tzvf", f], { encoding: "utf8" })
 const archives = () => (existsSync(join(root, "archive")) ? readdirSync(join(root, "archive")) : [])
@@ -32,7 +33,10 @@ beforeAll(async () => {
   Object.assign(un.deps, {
     callHelper: async (req: { op: string }) => {
       calls.push(req.op)
-      if (failOn && failOn.op === req.op && failOn.times-- > 0) throw failOn.err?.() ?? new Error("boom")
+      if (failOn && failOn.op === req.op) {
+        if ((failOn.skip ?? 0) > 0) failOn.skip!--
+        else if (failOn.times-- > 0) throw failOn.err?.() ?? new Error("boom")
+      }
       return { ok: true as const }
     },
     gcPackages: async () => (calls.push("gc"), []),
@@ -60,7 +64,7 @@ beforeEach(async () => {
   await prisma.midServer.deleteMany()
 })
 
-async function mkMid(name: string, state = "installed", tree = true) {
+async function mkMid(name: string, state = "uninstalling", tree = true) {
   await prisma.midServer.create({ data: { name, dir: `/x/${name}`, serviceName: `midhub-mid-${name}.service`, state, createdBy: "admin1" } })
   if (!tree) return
   const a = join(root, "mids", name, "agent")
@@ -87,7 +91,7 @@ describe("uninstall", () => {
     await mkMid("u1")
     const job = await run("uninstall", "u1")
     expect(job.status).toBe("succeeded")
-    expect(calls).toEqual(["stop", "removeUnit", "fixOwnership", "gc"])
+    expect(calls).toEqual(["stop", "removeUnit", "fixOwnership", "fixOwnership", "gc"])
     expect(existsSync(join(root, "mids", "u1"))).toBe(false)
     expect(existsSync(join(outside, "precious.txt"))).toBe(true)
     const row = await prisma.midServer.findUniqueOrThrow({ where: { name: "u1" } })
@@ -121,23 +125,62 @@ describe("uninstall", () => {
     expect(existsSync(join(outside, "precious.txt"))).toBe(true)
   })
 
-  it("resumes after a crash at deleteDir (retry completes, no second failure)", async () => {
+  it("retry after a helper failure in the archive stage completes", async () => {
     await mkMid("u3")
-    const real = un.deps.callHelper
     failOn = { op: "fixOwnership", times: 1 }
     const job = await run("uninstall", "u3")
-    expect(job).toMatchObject({ status: "failed", stage: "fixOwnership" })
+    expect(job).toMatchObject({ status: "failed", stage: "archive" })
     failOn = null
     await eng.retryJob(admin, job.id)
     await eng.__idleForTests()
     const after = await prisma.job.findUniqueOrThrow({ where: { id: job.id } })
     expect(after.status).toBe("succeeded")
     expect(existsSync(join(root, "mids", "u3"))).toBe(false)
-    expect(un.deps.callHelper).toBe(real)
+    expect(archives()).toHaveLength(1)
   })
 
-  it("deleteDir is a no-op when already gone; rerunning markRemoved path works", async () => {
-    await mkMid("u4", "installed", false)
+  it("retry at deleteDir over a partially removed tree completes", async () => {
+    await mkMid("u3b")
+    failOn = { op: "fixOwnership", times: 1, skip: 1 } // 2nd call = deleteDir stage
+    const job = await run("uninstall", "u3b")
+    expect(job).toMatchObject({ status: "failed", stage: "deleteDir" })
+    const a = join(root, "mids", "u3b", "agent")
+    rmSync(join(a, "lib"), { recursive: true })
+    rmSync(join(a, "jre"), { recursive: true })
+    failOn = null
+    calls = []
+    await eng.retryJob(admin, job.id)
+    await eng.__idleForTests()
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("succeeded")
+    expect(existsSync(join(root, "mids", "u3b"))).toBe(false)
+    expect(calls).toEqual(["fixOwnership", "gc"])
+    expect(existsSync(join(outside, "precious.txt"))).toBe(true)
+  })
+
+  it("stale retry against a re-installed MID throws conflict and leaves the tree", async () => {
+    await mkMid("u3c")
+    failOn = { op: "fixOwnership", times: 1, skip: 1 }
+    const job = await run("uninstall", "u3c")
+    expect(job).toMatchObject({ status: "failed", stage: "deleteDir" })
+    await prisma.midServer.update({ where: { name: "u3c" }, data: { state: "installed" } })
+    failOn = null
+    await eng.retryJob(admin, job.id)
+    await eng.__idleForTests()
+    const after = await prisma.job.findUniqueOrThrow({ where: { id: job.id } })
+    expect(after.status).toBe("failed")
+    expect(readFileSync(after.journalPath, "utf8")).toContain("conflict")
+    expect(existsSync(join(root, "mids", "u3c", "agent", "config.xml"))).toBe(true)
+    expect((await prisma.midServer.findUniqueOrThrow({ where: { name: "u3c" } })).state).toBe("installed")
+    // a different row (same name re-created) is also rejected
+    await prisma.midServer.delete({ where: { name: "u3c" } })
+    await mkMid("u3c", "uninstalling", false)
+    await eng.retryJob(admin, job.id).catch(() => undefined)
+    await eng.__idleForTests()
+    expect(existsSync(join(root, "mids", "u3c", "agent", "config.xml"))).toBe(true)
+  })
+
+  it("deleteDir is a no-op when the dir is already gone; the job still completes", async () => {
+    await mkMid("u4", "uninstalling", false)
     await un.deleteMidDir("u4")
     const job = await run("uninstall", "u4")
     expect(job.status).toBe("succeeded")
@@ -146,7 +189,7 @@ describe("uninstall", () => {
   })
 
   it("not_found from helper (unit/dir never existed) does not fail stages", async () => {
-    await mkMid("u5", "installed", false)
+    await mkMid("u5", "uninstalling", false)
     const { MidError } = await import("@/lib/mids/names")
     failOn = { op: "stop", times: 9, err: () => new MidError("not_found") }
     const job = await run("uninstall", "u5")
@@ -188,6 +231,99 @@ describe("uninstall", () => {
   })
 })
 
+describe("best-effort archive and hardening", () => {
+  it("sparse 4 GiB file is skipped quickly with a warning; uninstall continues", async () => {
+    await mkMid("sp")
+    const f = join(root, "mids", "sp", "agent", "logs", "huge.log")
+    writeFileSync(f, "")
+    truncateSync(f, 4 * 1024 ** 3)
+    const t0 = Date.now()
+    const job = await run("uninstall", "sp")
+    expect(Date.now() - t0).toBeLessThan(10_000)
+    expect(job.status).toBe("succeeded")
+    expect(readFileSync(job.journalPath, "utf8")).toContain("ข้ามการเก็บ archive: ข้อมูลใหญ่เกิน 2 GB")
+    expect(archives()).toHaveLength(0)
+    expect(existsSync(join(root, "mids", "sp"))).toBe(false)
+  })
+
+  it("too many entries is skipped", async () => {
+    await mkMid("many")
+    const prev = un.limits.maxEntries
+    un.limits.maxEntries = 5
+    try {
+      const job = await run("uninstall", "many")
+      expect(job.status).toBe("succeeded")
+      expect(readFileSync(job.journalPath, "utf8")).toContain("ข้ามการเก็บ archive")
+    } finally {
+      un.limits.maxEntries = prev
+    }
+  })
+
+  it("tar failure fails the first attempt; the retry skips the archive with a warning", async () => {
+    await mkMid("rt")
+    writeFileSync(join(root, "mids", "rt", "agent", "logs", "noise.bin"), randomBytes(64 * 1024))
+    un.limits.archiveMaxBytes = 1024
+    let job
+    try {
+      job = await run("uninstall", "rt")
+      expect(job).toMatchObject({ status: "failed", stage: "archive" })
+      await eng.retryJob(admin, job.id)
+      await eng.__idleForTests()
+    } finally {
+      un.limits.archiveMaxBytes = 1024 ** 3
+    }
+    const after = await prisma.job.findUniqueOrThrow({ where: { id: job.id } })
+    expect(after.status).toBe("succeeded")
+    expect(readFileSync(after.journalPath, "utf8")).toContain("ข้ามการเก็บ archive หลังพยายามซ้ำ")
+    expect(archives()).toHaveLength(0)
+    expect(existsSync(join(root, "mids", "rt"))).toBe(false)
+  })
+
+  it("hard links restore after extracting the archive (link target renamed too)", async () => {
+    await mkMid("hl")
+    const c = join(root, "mids", "hl", "agent", "conf")
+    writeFileSync(join(c, "a.conf"), "same")
+    linkSync(join(c, "a.conf"), join(c, "b.conf"))
+    const p = await un.archiveMid("hl")
+    const ex = join(dir, "ex")
+    mkdirSync(ex)
+    execFileSync("/usr/bin/tar", ["-xzf", p!, "-C", ex, "agent/conf"])
+    expect(statSync(join(ex, "agent/conf/a.conf")).ino).toBe(statSync(join(ex, "agent/conf/b.conf")).ino)
+    rmSync(ex, { recursive: true })
+  })
+
+  it("aborting mid-stream kills tar and removes the .partial file", async () => {
+    await mkMid("am")
+    const f = join(root, "mids", "am", "agent", "logs", "rand.bin")
+    const fd = openSync(f, "w")
+    for (let i = 0; i < 40; i++) writeSync(fd, randomBytes(4 * 1024 * 1024))
+    closeSync(fd)
+    const ac = new AbortController()
+    setTimeout(() => ac.abort(), 150)
+    await expect(un.archiveMid("am", ac.signal)).rejects.toThrow()
+    expect(readdirSync(join(root, "archive"))).toEqual([])
+  })
+
+  it("deleteMidDir removes a ~2500-deep tree (beyond PATH_MAX)", async () => {
+    await mkMid("deep", "uninstalling", false)
+    const { openDirIn } = await import("@/lib/mids/safe-fs")
+    const fsp = await import("node:fs/promises")
+    const base = join(root, "mids", "deep")
+    mk2(base)
+    let h = await fsp.open(base, "r")
+    for (let i = 0; i < 2500; i++) {
+      await fsp.mkdir(`/proc/self/fd/${h.fd}/d`)
+      await fsp.writeFile(`/proc/self/fd/${h.fd}/f`, "x")
+      const n = await openDirIn(h, "d")
+      await h.close()
+      h = n
+    }
+    await h.close()
+    await un.deleteMidDir("deep")
+    expect(existsSync(base)).toBe(false)
+  }, 60_000)
+})
+
 describe("archiveMid errors", () => {
   it("missing dir -> not_found", async () => {
     await expect(un.archiveMid("nope")).rejects.toMatchObject({ code: "not_found" })
@@ -222,6 +358,16 @@ describe("sweepArchives", () => {
     expect(gone.map((p) => p.split("/").pop())).toEqual(["old.tar.gz"])
     expect(readdirSync(a).sort()).toEqual(["link.tar.gz", "new.tar.gz", "other.txt"])
     expect(readFileSync(join(outside, "v.tar.gz"), "utf8")).toBe("x")
+  })
+  it("removes stale .partial files (>1 day) and keeps fresh ones", async () => {
+    const a = join(root, "archive")
+    mkdirSync(a, { recursive: true })
+    writeFileSync(join(a, ".x-1.partial"), "x")
+    writeFileSync(join(a, ".y-2.partial"), "x")
+    const old = new Date(Date.now() - 2 * 86400_000)
+    utimesSync(join(a, ".x-1.partial"), old, old)
+    expect((await un.sweepArchives()).map((p) => p.split("/").pop())).toEqual([".x-1.partial"])
+    expect(readdirSync(a)).toEqual([".y-2.partial"])
   })
   it("no archive dir -> []", async () => {
     expect(await un.sweepArchives()).toEqual([])

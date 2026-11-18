@@ -160,22 +160,75 @@ export const lstatIn = async (dir: FileHandle, name: string): Promise<fs.Stats |
 export const renameIn = (dir: FileHandle, from: string, to: string): Promise<void> =>
   fs.promises.rename(fdPath(dir, from), fdPath(dir, to))
 
-/** Recursive delete anchored per directory; symlinks are unlinked, never followed. */
-async function rmTreeVerified(anchored: string, expected: string, check: Check): Promise<void> {
-  const d = await openVerified(anchored, C.O_RDONLY | C.O_DIRECTORY, undefined, expected, check)
+const O_DIR_NOFOLLOW = C.O_RDONLY | C.O_DIRECTORY | C.O_NOFOLLOW | C.O_NONBLOCK | C.O_NOCTTY
+const sameNode = (a: fs.Stats, b: fs.Stats) => a.dev === b.dev && a.ino === b.ino
+
+/** Opens subdirectory `name` of a verified handle (no symlink, no readlink): identity is checked via dev/ino against lstat. */
+export async function openDirIn(dir: FileHandle, name: string): Promise<FileHandle> {
+  const st = await fs.promises.lstat(fdPath(dir, name))
+  if (!st.isDirectory()) throw new MidError("path_outside")
+  const h = await fs.promises.open(fdPath(dir, name), O_DIR_NOFOLLOW)
   try {
-    for (const n of await fs.promises.readdir(fdPath(d))) {
-      const child = fdPath(d, n)
-      const st = await fs.promises.lstat(child)
-      if (st.isDirectory()) {
-        await rmTreeVerified(child, path.join(expected, n), check)
-        await fs.promises.rmdir(child)
-      } else {
-        await fs.promises.unlink(child)
+    const hs = await h.stat()
+    if (!hs.isDirectory() || !sameNode(hs, st)) throw new MidError("path_outside")
+    return h
+  } catch (e) {
+    await h.close()
+    throw e
+  }
+}
+
+/**
+ * Recursive delete of the contents of an anchored directory; symlinks are unlinked, never followed.
+ * Only the anchor is checked by d_path (readlink of /proc/self/fd/N). Every directory below it is opened relative to
+ * its parent fd with O_NOFOLLOW and identified by dev/ino against the lstat taken just before, so arbitrarily deep
+ * trees (beyond PATH_MAX) work. Only one fd is held at a time: after a directory is emptied we step back up through
+ * ".." and check that the parent is the node we came from.
+ */
+async function rmTreeVerified(anchored: string, expected: string, check: Check): Promise<void> {
+  let cur = await openVerified(anchored, C.O_RDONLY | C.O_DIRECTORY, undefined, expected, check)
+  const trail: { st: fs.Stats; name: string }[] = [{ st: await cur.stat(), name: "" }]
+  try {
+    for (;;) {
+      let descended = false
+      for (const n of await fs.promises.readdir(fdPath(cur))) {
+        const child = fdPath(cur, n)
+        const st = await fs.promises.lstat(child)
+        if (!st.isDirectory()) {
+          await fs.promises.unlink(child)
+          continue
+        }
+        const next = await fs.promises.open(child, O_DIR_NOFOLLOW)
+        try {
+          const nst = await next.stat()
+          if (!nst.isDirectory() || !sameNode(nst, st)) throw new MidError("path_outside")
+        } catch (e) {
+          await next.close()
+          throw e
+        }
+        await cur.close()
+        cur = next
+        trail.push({ st, name: n })
+        descended = true
+        break
       }
+      if (descended) continue
+      if (trail.length === 1) return
+      const done = trail.pop()!
+      const up = await fs.promises.open(fdPath(cur, ".."), O_DIR_NOFOLLOW)
+      try {
+        const ust = await up.stat()
+        if (!sameNode(ust, trail[trail.length - 1].st)) throw new MidError("path_outside")
+      } catch (e) {
+        await up.close()
+        throw e
+      }
+      await cur.close()
+      cur = up
+      await fs.promises.rmdir(fdPath(cur, done.name))
     }
   } finally {
-    await d.close()
+    await cur.close()
   }
 }
 
