@@ -3,9 +3,9 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { API_BASE, apiFetch } from "@/lib/ui/api"
+import { levelMatches, nextBackoff, shouldRetry } from "@/lib/ui/log-stream"
 
 const MAX_LINES = 5000
-const BACKOFF = [1000, 2000, 4000, 8000, 15000]
 const FILES = [{ id: "main", label: "agent (main)" }, { id: "wrapper", label: "wrapper" }] as const
 const LEVELS = [{ id: "", label: "ทั้งหมด" }, { id: "ERROR", label: "ERROR" }, { id: "WARN", label: "WARN" }] as const
 type Status = "connecting" | "live" | "missing"
@@ -14,7 +14,7 @@ type Line = { id: number; text: string }
 const NETWORK: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กำลังลองเชื่อมต่อใหม่" }
 const ctl = "rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-800 hover:bg-gray-50"
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-const tone = (t: string) => (t.includes("ERROR") ? "text-red-700" : t.includes("WARN") ? "text-amber-700" : "text-gray-800")
+const tone = (t: string) => (levelMatches(t, "ERROR") ? "text-red-700" : levelMatches(t, "WARN") ? "text-amber-700" : "text-gray-800")
 
 const Row = memo(function Row({ text, q }: { text: string; q: string }) {
   let body: React.ReactNode = text
@@ -33,7 +33,7 @@ export function LogTab({ midName }: { midName: string }) {
   const [lines, setLines] = useState<Line[]>([])
   const [status, setStatus] = useState<Status>("connecting")
   const [err, setErr] = useState<ApiError | null>(null)
-  const [frozen, setFrozen] = useState(0) // highest line id visible while paused
+  const [snapshot, setSnapshot] = useState<Line[]>([]) // the list as it was when paused
   const nextId = useRef(0)
   const box = useRef<HTMLDivElement>(null)
   const url = `/mids/${encodeURIComponent(midName)}/logs?file=${file}`
@@ -42,7 +42,8 @@ export function LogTab({ midName }: { midName: string }) {
     const ac = new AbortController()
     let attempt = 0
     let timer: ReturnType<typeof setTimeout> | undefined
-    const reset = () => { setLines([]); setStatus("connecting") }
+    // The server replays its window on every connect: keep the old lines until the first new batch, then replace them.
+    let replace = true
 
     function onFrame(frame: string) {
       let ev = "message"
@@ -51,30 +52,34 @@ export function LogTab({ midName }: { midName: string }) {
         if (l.startsWith("event:")) ev = l.slice(6).trim()
         else if (l.startsWith("data:")) data += l.slice(5).trim()
       }
-      if (!data) return // comment / ping
+      if (!data || ac.signal.aborted) return // comment / ping, or a late frame from a connection we already closed
       try {
         const j = JSON.parse(data) as { lines?: string[]; state?: Status; message?: string }
-        if (ev === "status" && j.state) setStatus(j.state)
+        if (ev === "status" && j.state) { attempt = 0; setStatus(j.state) }
         else if (ev === "error") setErr({ message: j.message ?? "อ่าน log ไม่สำเร็จ" })
         else if (j.lines) {
+          attempt = 0
           const add = j.lines.map((text) => ({ id: nextId.current++, text }))
+          const fresh = replace
+          replace = false
           setStatus("live")
-          setLines((prev) => { const n = prev.concat(add); return n.length > MAX_LINES ? n.slice(n.length - MAX_LINES) : n })
+          setLines((prev) => { const n = fresh ? add : prev.concat(add); return n.length > MAX_LINES ? n.slice(n.length - MAX_LINES) : n })
         }
       } catch { /* malformed frame: skip */ }
     }
 
     async function connect() {
       if (ac.signal.aborted) return
-      reset() // the server replays its window on every connect, so start clean to avoid duplicates
+      replace = true
       let retry = true
       try {
         const res = await apiFetch(url, { signal: ac.signal, headers: { Accept: "text/event-stream" } })
         if (!res.ok || !res.body) {
           const e = await readApiError(res)
-          if (res.status >= 400 && res.status < 500 && res.status !== 429) { setErr(e); retry = false } else setErr(e)
+          setErr(e)
+          retry = shouldRetry(res.status)
         } else {
-          setErr(null); attempt = 0
+          setErr(null)
           const rd = res.body.pipeThrough(new TextDecoderStream()).getReader()
           let buf = ""
           for (;;) {
@@ -91,7 +96,7 @@ export function LogTab({ midName }: { midName: string }) {
       }
       if (retry && !ac.signal.aborted) {
         setStatus("connecting")
-        timer = setTimeout(() => void connect(), BACKOFF[Math.min(attempt++, BACKOFF.length - 1)])
+        timer = setTimeout(() => void connect(), nextBackoff(attempt++))
       }
     }
     void connect()
@@ -100,15 +105,15 @@ export function LogTab({ midName }: { midName: string }) {
 
   const shown = useMemo(() => {
     const needle = q.toLowerCase()
-    return lines.filter((l) => (!paused || l.id <= frozen) && (!level || l.text.includes(level)) && (!needle || l.text.toLowerCase().includes(needle)))
-  }, [lines, level, q, paused, frozen])
+    return (paused ? snapshot : lines).filter((l) => levelMatches(l.text, level) && (!needle || l.text.toLowerCase().includes(needle)))
+  }, [lines, snapshot, level, q, paused])
 
   useEffect(() => {
     if (!paused && box.current) box.current.scrollTop = box.current.scrollHeight
   }, [shown, paused])
 
   function togglePause() {
-    if (!paused) setFrozen(nextId.current - 1)
+    if (!paused) setSnapshot(lines)
     setPaused((p) => !p)
   }
   function switchFile(f: (typeof FILES)[number]["id"]) {

@@ -146,3 +146,55 @@ describe("tailFile", () => {
     expect(got[1]).toBe("ok")
   })
 })
+
+describe("tailFile hardening", () => {
+  it("emits several bounded batches after a burst", async () => {
+    fs.writeFileSync(log, Array.from({ length: 2500 }, (_, i) => `l${i}`).join("\n") + "\n")
+    const sizes: number[] = []
+    const all: string[] = []
+    for await (const b of start({ fromBytesBack: 10_000_000 })) { sizes.push(b.length); all.push(...b); if (all.length >= 2500) break }
+    expect(all).toHaveLength(2500)
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(1000)
+    expect(sizes.length).toBeGreaterThanOrEqual(3)
+  })
+
+  it("detects truncate + regrowth past the old offset within one poll", async () => {
+    fs.writeFileSync(log, "aaaa\nbbbb\n")
+    const p = collect(start(), 5)
+    await sleep(60)
+    fs.truncateSync(log, 0)
+    fs.appendFileSync(log, "cccccc\ndddddd\neeeeeeee\n")
+    expect(await p).toEqual(["aaaa", "bbbb", "cccccc", "dddddd", "eeeeeeee"])
+  })
+
+  it("drops the fragment when the window ends inside a line with no newline", async () => {
+    fs.writeFileSync(log, "x".repeat(20000)) // no newline at all
+    ac = new AbortController()
+    const p = collect(start({ fromBytesBack: 5000 }), 1)
+    await sleep(60)
+    fs.appendFileSync(log, "tail-of-line\nnext\n")
+    expect(await p).toEqual(["next"])
+  })
+
+  it("closes the fresh handle when finishing the old file fails during rotation", async () => {
+    fs.writeFileSync(log, "a\n")
+    const before = fds()
+    let firstIno = 0
+    let failStat = false
+    const open = async () => {
+      const o = await openLog()
+      if (!firstIno) {
+        firstIno = o.st.ino
+        const real = o.h.stat.bind(o.h)
+        o.h.stat = ((...a: Parameters<typeof real>) => (failStat ? Promise.reject(new Error("boom")) : real(...a))) as typeof o.h.stat
+      } else if (o.st.ino !== firstIno) failStat = true
+      return o
+    }
+    const it = tailFile(open, { fromBytesBack: 1024, pollMs: 10, signal: ac.signal })
+    await it.next()
+    fs.renameSync(log, log + ".1")
+    fs.writeFileSync(log, "b\n")
+    await expect((async () => { for (;;) if ((await it.next()).done) return })()).rejects.toThrow("boom")
+    expect(fds()).toBe(before)
+  })
+})

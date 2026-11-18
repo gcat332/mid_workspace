@@ -14,6 +14,8 @@ const MAX_TAILS = 20
 const WINDOW_BYTES = 256 * 1024
 const POLL_MS = 1000
 const PING_MS = 15_000
+const STALL_MS = 10_000
+const MAX_QUEUED_BYTES = 1_000_000
 let active = 0
 
 export async function GET(req: Request, ctx: Ctx) {
@@ -28,28 +30,55 @@ export async function GET(req: Request, ctx: Ctx) {
     if (active >= MAX_TAILS) throw new MidError("busy_tails", 429, "มีคนเปิดดู log สดเต็มจำนวนแล้ว รอสักครู่แล้วลองใหม่")
     const open = await openLog(name, key)
     active++
+    // First verified open happens before any Response exists, so permanent errors (FIFO, path_outside, EACCES)
+    // are proper 4xx. A missing file is not an error: the stream reports it as a status and keeps waiting.
+    let pre: Awaited<ReturnType<typeof open>> | null = null
+    try {
+      pre = await open()
+    } catch (e) {
+      if (!(e instanceof MidError && e.code === "not_found")) { active--; throw e }
+    }
+    const openOnce: typeof open = async () => {
+      if (pre) { const p = pre; pre = null; return p }
+      return open()
+    }
     const ac = new AbortController()
     const stop = () => ac.abort()
     if (req.signal.aborted) stop()
     req.signal.addEventListener("abort", stop, { once: true })
     const enc = new TextEncoder()
     let ping: ReturnType<typeof setInterval> | undefined
+    let watch: ReturnType<typeof setInterval> | undefined
     let released = false
+    let stalledSince = 0
+    let controllerRef: ReadableStreamDefaultController<Uint8Array> | undefined
     const release = () => {
       if (released) return
       released = true
       active--
-      clearInterval(ping)
+      clearInterval(ping); clearInterval(watch)
       req.signal.removeEventListener("abort", stop)
+      void pre?.h.close().catch(() => {}) // never handed to the tail
+    }
+    /** Client not reading: drop it (it reconnects) rather than queue without bound. */
+    const checkStall = () => {
+      const ds = controllerRef?.desiredSize
+      if (ds == null) return
+      if (ds < -MAX_QUEUED_BYTES) { ac.abort(); return }
+      if (ds > 0) { stalledSince = 0; return }
+      stalledSince ||= Date.now()
+      if (Date.now() - stalledSince > STALL_MS) ac.abort()
     }
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        const send = (s: string) => { try { controller.enqueue(enc.encode(s)) } catch { /* closed */ } }
-        ping = setInterval(() => send(": ping\n\n"), PING_MS)
+        controllerRef = controller
+        const send = (s: string) => { try { controller.enqueue(enc.encode(s)); checkStall() } catch { /* closed */ } }
+        ping = setInterval(() => { if ((controller.desiredSize ?? 0) >= 0) send(": ping\n\n") }, PING_MS)
+        watch = setInterval(checkStall, 1000)
         send(": ok\n\n")
         void (async () => {
           try {
-            for await (const lines of tailFile(open, {
+            for await (const lines of tailFile(openOnce, {
               fromBytesBack: WINDOW_BYTES, pollMs: POLL_MS, signal: ac.signal,
               onStatus: (s) => send(`event: status\ndata: ${JSON.stringify({ state: s })}\n\n`),
             })) send(`data: ${JSON.stringify({ lines })}\n\n`)
@@ -63,7 +92,7 @@ export async function GET(req: Request, ctx: Ctx) {
         })()
       },
       cancel() { ac.abort(); release() },
-    })
+    }, new ByteLengthQueuingStrategy({ highWaterMark: 64 * 1024 }))
     return new Response(stream, {
       headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "X-Accel-Buffering": "no" },
     })
