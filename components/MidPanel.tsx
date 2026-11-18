@@ -5,12 +5,11 @@ import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { ConfigTab } from "./ConfigTab"
 import { FilesTab } from "./FilesTab"
+import { LogTab } from "./LogTab"
 import { OverviewTab } from "./OverviewTab"
-import { TabPlaceholder } from "./TabPlaceholder"
 import { apiFetch } from "@/lib/ui/api"
 import { statusView, type HostView, type MidView } from "@/lib/ui/status-view"
 
-// Tasks 13-14 replace the placeholders below with the real tab components.
 const TABS = [
   { id: "overview", label: "ภาพรวม" },
   { id: "config", label: "ตั้งค่า" },
@@ -119,7 +118,7 @@ export function MidPanel({ mid, host, onChanged }: Props) {
         {tab === "overview" && <OverviewTab mid={mid} />}
         {tab === "config" && <ConfigTab midName={mid.name} canRestart={isUp && !transitional} onRestart={() => void send("restart", false)} />}
         {tab === "files" && <FilesTab midName={mid.name} />}
-        {tab === "logs" && <TabPlaceholder title="Log" />}
+        {tab === "logs" && <LogTab midName={mid.name} />}
       </div>
 
       {pending && (

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import fs from "node:fs"
 import type { FileHandle } from "node:fs/promises"
 import path from "node:path"
-import { CONFIG_XML, WRAPPER_OVERRIDE } from "./layout"
+import { CONFIG_XML, LOG_FILES, WRAPPER_OVERRIDE } from "./layout"
 import { MidError } from "./names"
 import { getMid } from "./registry"
 import { isReadOnlyPath, resolveMidPath } from "./paths"
@@ -334,5 +334,21 @@ export function openDownload(name: string, rel: string): Promise<{ handle: FileH
     await beforeIo()
     const { h, st } = await openFile(abs, "r", readCheck(c))
     return { handle: h, size: st.size, filename: path.basename(rel.replace(/\/+$/, "")) || path.basename(abs) }
+  })
+}
+
+export type LogKey = keyof typeof LOG_FILES
+export const isLogKey = (k: unknown): k is LogKey => typeof k === "string" && Object.hasOwn(LOG_FILES, k)
+
+/**
+ * Opener for tailFile: every call re-resolves the log path and returns a freshly verified fd
+ * (O_NOFOLLOW + /proc/self/fd check), so rotation or a symlink swap is detected without ever reading by path.
+ */
+export async function openLog(name: string, key: LogKey): Promise<() => Promise<{ h: FileHandle; st: fs.Stats }>> {
+  const c = await mapped(() => ctxFor(name))
+  return () => mapped(async () => {
+    const abs = await resolveMidPath(name, LOG_FILES[key])
+    readCheck(c)(abs)
+    return openFile(abs, "r", readCheck(c))
   })
 }
