@@ -232,6 +232,22 @@ describe("install kinds", () => {
     expect(calls).toEqual([])
   })
 
+  it("precheck refuses a job from an older lifecycle (newer job exists for the name)", async () => {
+    await mkMid("m12")
+    freeBytes = 1
+    const j1 = await run("install", "m12", params({ proxy: undefined }))
+    expect(j1).toMatchObject({ status: "failed", stage: "precheck", error: expect.stringContaining("ดิสก์") })
+    await prisma.job.create({
+      data: { id: "newer-j", midName: "m12", kind: "install", stage: "precheck", status: "cancelled", params: "{}", journalPath: "x", createdBy: "t", createdAt: new Date(Date.now() + 5000) },
+    })
+    freeBytes = 10 * 1024 ** 3
+    await eng.retryJob(admin, j1.id)
+    await eng.__idleForTests()
+    const after = await prisma.job.findUniqueOrThrow({ where: { id: j1.id } })
+    expect(after).toMatchObject({ status: "failed", stage: "precheck", error: expect.stringContaining("ขัดแย้ง") })
+    expect(calls).toEqual([])
+  })
+
   it("logs 100% progress once", async () => {
     await mkMid("m11")
     const job = await run("install", "m11", params({ proxy: undefined }))

@@ -85,6 +85,9 @@ describe("POST /api/mids", () => {
     const audit = JSON.stringify(await prisma.auditLog.findMany())
     for (const s of [PW, PROXY_PW]) for (const hay of [text, job.params, audit]) expect(hay).not.toContain(s)
     expect(audit).toContain("job.create")
+    const { GET } = await import("./route")
+    const listBody = await (await GET()).text()
+    for (const s of [PW, PROXY_PW, "passwordEnc"]) expect(listBody).not.toContain(s)
   })
 
   it("clone kind when cloneFrom exists; unknown/self cloneFrom rejected", async () => {
@@ -107,7 +110,23 @@ describe("POST /api/mids", () => {
     const res = await post({ instanceId, name: "gone", heapMb: 2048 })
     expect(res.status).toBe(202)
     const row = await prisma.midServer.findUniqueOrThrow({ where: { name: "gone" } })
-    expect(row).toMatchObject({ id: old.id, state: "installing", heapMb: 2048, version: null, removedAt: null, createdBy: "m@x.com" })
+    expect(row).toMatchObject({ id: old.id, state: "installing", heapMb: 2048, version: null, removedAt: null, createdBy: "m@x.com", dir: join(dir, "root", "mids", "gone"), serviceName: "midhub-mid-gone.service" })
+    expect(row.createdAt).toEqual(old.createdAt)
+  })
+
+  it("revive cancels stale failed jobs; retry and cancel of the old job are refused", async () => {
+    await prisma.midServer.create({ data: { name: "rv", dir: "/x", serviceName: "s", state: "removed", removedAt: new Date(), createdBy: "old" } })
+    await prisma.job.create({ data: { id: "old-j", midName: "rv", kind: "install", stage: "park", status: "failed", params: "{}", journalPath: "x", createdBy: "u1" } })
+    const res = await post({ instanceId, name: "rv" })
+    expect(res.status).toBe(202)
+    expect(await prisma.job.findUniqueOrThrow({ where: { id: "old-j" } })).toMatchObject({ status: "cancelled" })
+    const { readJournal } = await import("@/lib/jobs/journal")
+    expect(JSON.stringify(await readJournal("old-j"))).toContain("ยกเลิกอัตโนมัติ: MID ถูกสร้างใหม่")
+    const retry = await import("../jobs/[id]/retry/route")
+    const cancel = await import("../jobs/[id]/cancel/route")
+    expect((await retry.POST(req("POST"), { params: Promise.resolve({ id: "old-j" }) })).status).toBe(409)
+    expect((await cancel.POST(req("POST"), { params: Promise.resolve({ id: "old-j" }) })).status).toBe(409)
+    expect((await prisma.midServer.findUniqueOrThrow({ where: { name: "rv" } })).state).toBe("installing")
   })
 
   it("rolls the row back when createJob fails (new and revived)", async () => {
@@ -132,11 +151,23 @@ describe("POST /api/mids", () => {
       { instanceId, name: "ok1", proxy: { host: "p", port: 0 } },
       { instanceId, name: "ok1", proxy: { host: "p", port: 1, password: "a\u0001b" } },
       { instanceId, name: "ok1", proxy: { host: "p", port: 1, user: "u".repeat(101) } },
+      { instanceId, name: "ok1", proxy: { host: "999.1.1.1", port: 1 } },
+      { instanceId, name: "ok1", proxy: { host: "1.2.3", port: 1 } },
+      { instanceId, name: "ok1", proxy: { host: "-bad.example", port: 1 } },
+      { instanceId, name: "ok1", proxy: { host: "p", port: 1, password: 5 } },
+      { instanceId, name: "ok1", proxy: { host: "p", port: 1, user: { a: 1 } } },
+      { instanceId, name: "ok1", proxy: { host: "p", port: 1, user: "a\u0001b" } },
       { instanceId, name: "ok1", buildstamp: "nope" },
       { instanceId: noCredId, name: "ok1", buildstamp: BS },
       { name: "ok1" },
     ]
     for (const b of bad) expect((await post(b)).status, JSON.stringify(b)).toBe(400)
+    expect(await prisma.midServer.count()).toBe(0)
+    for (const [i, host] of ["10.0.0.1", "proxy.corp.example", "px"].entries()) {
+      expect((await post({ instanceId, name: `okhost${i}`, proxy: { host, port: 8080 } })).status, host).toBe(202)
+    }
+    await prisma.job.deleteMany()
+    await prisma.midServer.deleteMany()
     expect((await post({ instanceId: "missing", name: "ok1" })).status).toBeGreaterThanOrEqual(400)
     expect(await prisma.midServer.count()).toBe(0)
   })
@@ -161,7 +192,9 @@ describe("DELETE /api/mids/[name]", () => {
   it("admin: wrong confirmName 400; ok 202 sets uninstalling with midId; busy states conflict", async () => {
     role = "admin"
     const row = await mk("d1", "installed")
-    expect((await del("d1", { confirmName: "x" })).status).toBe(400)
+    const mism = await del("d1", { confirmName: "x" })
+    expect(mism.status).toBe(400)
+    expect((await mism.json()).code).toBe("confirm_mismatch")
     expect((await del("d1", {})).status).toBe(400)
     const res = await del("d1", { confirmName: "d1" })
     expect(res.status).toBe(202)
@@ -231,4 +264,38 @@ it("POST /api/jobs/[id]/retry and cancel call the engine and audit", async () =>
   expect((await cancel.POST(req("POST"), { params: Promise.resolve({ id: "nope" }) })).status).toBe(404)
   const actions = (await prisma.auditLog.findMany()).map((a) => a.action)
   expect(actions).toContain("job.retry")
+})
+
+describe("retry/cancel permissions and audit", () => {
+  const failedJob = (id: string, createdBy: string, kind = "install") =>
+    prisma.job.create({ data: { id, midName: `pm-${id}`, kind, stage: "park", status: "failed", params: "{}", journalPath: "x", createdBy } })
+  const ctxOf = (id: string) => ({ params: Promise.resolve({ id }) })
+
+  it("member cannot retry or cancel another user's job (403)", async () => {
+    await failedJob("other1", "someone-else")
+    const retry = await import("../jobs/[id]/retry/route")
+    const cancel = await import("../jobs/[id]/cancel/route")
+    expect((await retry.POST(req("POST"), ctxOf("other1"))).status).toBe(403)
+    expect((await cancel.POST(req("POST"), ctxOf("other1"))).status).toBe(403)
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: "other1" } })).status).toBe("failed")
+  })
+
+  it("creator cancels a failed install: cleanup job queued, audit has cancelled/cleanup ids", async () => {
+    const { jobId } = await (await post({ instanceId, name: "cn1" })).json()
+    await new Promise((r) => setTimeout(r, 50))
+    eng.__abortForTests()
+    await eng.__idleForTests()
+    eng.__resetForTests()
+    const park = { name: "park", run: (ctx: { signal: AbortSignal }) => new Promise<void>((_r, rej) => ctx.signal.addEventListener("abort", () => rej(new Error("aborted")))) }
+    for (const k of ["install", "clone", "uninstall", "cancel_install"] as const) eng.registerKind(k, [park])
+    const cancel = await import("../jobs/[id]/cancel/route")
+    const res = await cancel.POST(req("POST"), ctxOf(jobId))
+    expect(res.status).toBe(202)
+    const { jobId: cleanup } = await res.json()
+    expect(cleanup).not.toBe(jobId)
+    expect(await prisma.job.findUniqueOrThrow({ where: { id: jobId } })).toMatchObject({ status: "cancelled" })
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: cleanup } })).kind).toBe("cancel_install")
+    const a = await prisma.auditLog.findFirstOrThrow({ where: { action: "job.cancel" } })
+    expect(JSON.parse(a.detail)).toEqual({ cancelledJobId: jobId, cancelledKind: "install", cleanupJobId: cleanup })
+  })
 })

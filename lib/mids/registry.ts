@@ -81,9 +81,10 @@ function normalizeUrl(raw: string | undefined): string | null {
   }
 }
 
+type JobSummary = NonNullable<MidSummary["job"]>
 type Row = { name: string; state: string; heapMb: number; version: string | null; instanceId: string | null }
 
-async function summarize(row: Row): Promise<MidSummary> {
+async function summarize(row: Row, knownJob?: JobSummary | null): Promise<MidSummary> {
   const [xml, inst, status, job] = await Promise.all([
     readMidFile(row.name, CONFIG_XML),
     row.instanceId ? prisma.instance.findUnique({ where: { id: row.instanceId } }) : null,
@@ -91,11 +92,13 @@ async function summarize(row: Row): Promise<MidSummary> {
       console.warn(`[registry] status of MID ${row.name} unavailable:`, (e as Error).message)
       return UNKNOWN
     }),
-    prisma.job.findFirst({
-      where: { midName: row.name },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { id: true, kind: true, stage: true, status: true },
-    }),
+    knownJob !== undefined
+      ? knownJob
+      : prisma.job.findFirst({
+          where: { midName: row.name },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          select: { id: true, kind: true, stage: true, status: true },
+        }),
   ])
   let params: Record<string, string> = {}
   if (xml !== null) {
@@ -119,7 +122,15 @@ async function summarize(row: Row): Promise<MidSummary> {
 
 export async function listMids(): Promise<MidSummary[]> {
   const rows = await prisma.midServer.findMany({ where: { state: { not: "removed" } }, orderBy: { name: "asc" } })
-  return Promise.all(rows.map(summarize))
+  // One query for the latest job of every listed MID (no N+1).
+  const jobs = await prisma.job.findMany({
+    where: { midName: { in: rows.map((r) => r.name) } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true, kind: true, stage: true, status: true, midName: true },
+  })
+  const latest = new Map<string, JobSummary>()
+  for (const { midName, ...j } of jobs) if (!latest.has(midName)) latest.set(midName, j)
+  return Promise.all(rows.map((r) => summarize(r, latest.get(r.name) ?? null)))
 }
 
 export async function getMid(name: string): Promise<MidSummary> {

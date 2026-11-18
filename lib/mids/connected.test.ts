@@ -4,7 +4,7 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/lib/db/client", () => ({
-  prisma: { job: { findFirst: async () => null }, midServer: { findUnique: async ({ where }: { where: { name: string } }) => ({ name: where.name, state: "installed" }) } },
+  prisma: { job: { findFirst: async () => null, findMany: async () => [] }, midServer: { findUnique: async ({ where }: { where: { name: string } }) => ({ name: where.name, state: "installed" }) } },
 }))
 vi.mock("@/lib/mids/status", () => ({ readServiceStatus: async () => ({ state: "inactive", pid: null, memoryBytes: null, since: null }), runSystemctl: async () => ({ code: 0, stdout: "" }) }))
 

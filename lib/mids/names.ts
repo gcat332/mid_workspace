@@ -43,6 +43,9 @@ const ERRORS = {
   disk_low: [507, "พื้นที่ดิสก์เหลือน้อยกว่า 2 GB ลบ MID ที่ไม่ใช้ก่อน"],
   zip_invalid: [400, "ไฟล์ MID ไม่ถูกต้องหรือไม่ปลอดภัย ลบ package แล้วดาวน์โหลดใหม่"],
   connect_timeout: [504, "MID เริ่มทำงานแล้วแต่ยังเชื่อมต่อ instance ไม่ได้ใน 5 นาที ดู Log แท็บเพื่อหาสาเหตุ (เช่น password ผิด หรือ proxy)"],
+  buildstamp_unknown: [400, "ระบุ build ของ instance ไม่ได้ ให้เลือก package ที่มีอยู่หรือกรอก buildstamp"],
+  confirm_mismatch: [400, "พิมพ์ชื่อ MID ให้ตรงเพื่อยืนยัน"],
+  stream_limit: [429, "เปิดดูความคืบหน้าพร้อมกันมากเกินไป ปิดหน้าต่างอื่นแล้วลองใหม่"],
   conflict: [409, "การดำเนินการนี้ขัดแย้งกับสถานะปัจจุบัน รีเฟรชหน้าแล้วลองใหม่"],
 } as const satisfies Record<string, readonly [number, string]>
 

@@ -8,10 +8,23 @@ import { MID_NAME_RE } from "@/lib/mids/name-regex"
 import { MidError, midRoot, unitName } from "@/lib/mids/names"
 import { encryptSecret } from "@/lib/vault"
 import { createJob, type JobKind, type JobRow } from "./engine"
+import { appendJournal } from "./journal"
 
+export const NAME_TAKEN = "มี MID ชื่อนี้อยู่แล้ว ใช้ชื่ออื่น"
+const AUTO_CANCEL_MSG = "ยกเลิกอัตโนมัติ: MID ถูกสร้างใหม่"
+const NOT_TEXT = "ต้องเป็นข้อความ"
 const bad = (msg: string) => new MidError("invalid_request", 400, msg)
 const SN_NAME_RE = /^[A-Za-z0-9._-]{1,80}$/
-const HOST_RE = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/
+// RFC 1123 hostname; an all-numeric dotted string must additionally be a valid IPv4 (checked in validHost).
+const HOSTNAME_RE = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/
+const IPV4_LIKE = /^[0-9.]+$/
+function validHost(h: string): boolean {
+  if (IPV4_LIKE.test(h)) {
+    const o = h.split(".")
+    return o.length === 4 && o.every((x) => /^\d{1,3}$/.test(x) && Number(x) <= 255)
+  }
+  return HOSTNAME_RE.test(h) && !/^\d+$/.test(h.split(".").pop() as string)
+}
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
 const isInt = (v: unknown, min: number, max: number): v is number => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max
 
@@ -31,11 +44,16 @@ export function parseProxy(v: unknown): ProxyIn | undefined {
   if (v === undefined || v === null) return undefined
   if (!isObj(v)) throw bad("ข้อมูล proxy ไม่ถูกต้อง")
   const { host, port, user, password } = v
-  if (typeof host !== "string" || !HOST_RE.test(host)) throw bad("proxy host ต้องเป็นชื่อโฮสต์หรือ IPv4 (ไม่ต้องใส่ http:// หรือ path)")
+  if (typeof host !== "string" || !validHost(host)) throw bad("proxy host ต้องเป็นชื่อโฮสต์หรือ IPv4 (ไม่ต้องใส่ http:// หรือ path)")
   if (!isInt(port, 1, 65535)) throw bad("proxy port ต้องเป็นเลข 1-65535")
-  if (user !== undefined && user !== "" && (typeof user !== "string" || user.length > 100)) throw bad("proxy user ยาวเกิน 100 ตัวอักษร")
-  if (password !== undefined && password !== "") {
-    if (typeof password !== "string" || password.length > 256) throw bad("proxy password ยาวเกิน 256 ตัวอักษร")
+  if (user !== undefined && user !== null && user !== "") {
+    if (typeof user !== "string") throw bad(`proxy user ${NOT_TEXT}`)
+    if (user.length > 100) throw bad("proxy user ยาวเกิน 100 ตัวอักษร")
+    if (findInvalidXmlChar(user) !== -1) throw bad("proxy user มีอักขระที่ไม่อนุญาต")
+  }
+  if (password !== undefined && password !== null && password !== "") {
+    if (typeof password !== "string") throw bad(`proxy password ${NOT_TEXT}`)
+    if (password.length > 256) throw bad("proxy password ยาวเกิน 256 ตัวอักษร")
     if (findInvalidXmlChar(password) !== -1) throw bad("proxy password มีอักขระที่ไม่อนุญาต")
   }
   return {
@@ -77,7 +95,7 @@ export async function startInstall(user: SessionPayload, input: CreateInput): Pr
   const inst = await getInstanceSecret(input.instanceId) // throws not_found/invalid_request (no credentials)
   const buildstamp = input.buildstamp ?? inst.buildstamp
   if (!buildstamp || !BUILDSTAMP_RE.test(buildstamp)) {
-    throw new MidError("buildstamp_unknown", 400, "ระบุ build ของ instance ไม่ได้ ให้เลือก package ที่มีอยู่หรือกรอก buildstamp")
+    throw new MidError("buildstamp_unknown")
   }
   if (input.cloneFrom) {
     const src = await prisma.midServer.findUnique({ where: { name: input.cloneFrom } })
@@ -98,26 +116,46 @@ export async function startInstall(user: SessionPayload, input: CreateInput): Pr
   const kind: JobKind = input.cloneFrom ? "clone" : "install"
   const name = input.name
 
+  const staleIds: string[] = []
   const prev: Prev = await prisma.$transaction(async (tx) => {
     const existing = await tx.midServer.findUnique({ where: { name } })
-    if (existing && existing.state !== "removed") throw new MidError("conflict", 409, "มี MID ชื่อนี้อยู่แล้ว ใช้ชื่ออื่น")
-    const data = { instanceId: input.instanceId, heapMb: input.heapMb, version: null, state: "installing", removedAt: null, createdBy: user.email }
+    if (existing && existing.state !== "removed") throw new MidError("conflict", 409, NAME_TAKEN)
+    // createdAt is deliberately kept: it records when MidHub first knew this name (history), not this lifecycle.
+    const data = { instanceId: input.instanceId, heapMb: input.heapMb, version: null, state: "installing", removedAt: null, createdBy: user.email, dir: midRoot(name), serviceName: unitName(name) }
     if (existing) {
       await tx.midServer.update({ where: { name }, data })
+      // Failed jobs of the previous lifecycle must not be retried/cancelled against the revived MID.
+      const stale = await tx.job.findMany({ where: { midName: name, status: "failed" }, select: { id: true } })
+      if (stale.length) {
+        await tx.job.updateMany({ where: { id: { in: stale.map((j) => j.id) }, status: "failed" }, data: { status: "cancelled", finishedAt: new Date() } })
+        staleIds.push(...stale.map((j) => j.id))
+      }
       const { id, instanceId, heapMb, version, state, removedAt, createdBy, dir, serviceName } = existing
       return { id, data: { instanceId, heapMb, version, state, removedAt, createdBy, dir, serviceName } }
     }
     await tx.midServer.create({ data: { name, ...data, dir: midRoot(name), serviceName: unitName(name) } })
     return null
   }).catch((e) => {
-    if ((e as { code?: string }).code === "P2002") throw new MidError("conflict", 409, "มี MID ชื่อนี้อยู่แล้ว ใช้ชื่ออื่น")
+    if ((e as { code?: string }).code === "P2002") throw new MidError("conflict", 409, NAME_TAKEN)
     throw e
   })
 
+  for (const id of staleIds) {
+    try {
+      await appendJournal(id, { type: "cancelled", by: "system", msg: AUTO_CANCEL_MSG })
+    } catch (e) {
+      console.error("[lifecycle] journal write failed", id, e)
+    }
+  }
   try {
     const job = await createJob(user, kind, name, params)
     return { job, kind }
   } catch (e) {
+    if (staleIds.length) {
+      await prisma.job
+        .updateMany({ where: { id: { in: staleIds }, status: "cancelled" }, data: { status: "failed", finishedAt: null } })
+        .catch((re) => console.error("[lifecycle] restore of stale jobs failed", name, re))
+    }
     await (prev
       ? prisma.midServer.update({ where: { name }, data: prev.data })
       : prisma.midServer.deleteMany({ where: { name, state: "installing" } })
@@ -138,7 +176,9 @@ export async function startUninstall(user: SessionPayload, name: string): Promis
   try {
     return await createJob(user, "uninstall", name, {})
   } catch (e) {
-    await prisma.midServer.updateMany({ where: { name, state: "uninstalling" }, data: { state: row.state } })
+    await prisma.midServer
+      .updateMany({ where: { name, state: "uninstalling" }, data: { state: row.state } })
+      .catch((re) => console.error("[lifecycle] restore of MID state failed", name, re))
     throw e
   }
 }

@@ -27,7 +27,7 @@ vi.mock("@/lib/db/client", () => {
   const prisma = {
     midServer: table(() => db.mids),
     instance: table(() => db.instances),
-    job: { findFirst: async () => null },
+    job: { findFirst: async () => null, findMany: async () => [] },
     $transaction: async (fn: (tx: unknown) => unknown) => fn(prisma),
   }
   return { prisma }

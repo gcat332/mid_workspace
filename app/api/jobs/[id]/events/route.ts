@@ -1,7 +1,7 @@
 import fs from "node:fs/promises"
 import { requireUser } from "@/lib/auth/helpers"
 import { prisma } from "@/lib/db/client"
-import { handleRouteError, jsonError } from "@/lib/http/route"
+import { handleRouteError } from "@/lib/http/route"
 import { journalPath } from "@/lib/jobs/journal"
 import { MidError } from "@/lib/mids/names"
 import { tailFile } from "@/lib/mids/log-tail"
@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic"
 export const sse = { maxStreams: 50, statusPollMs: 2000, pingMs: 15000, tailPollMs: 500, drainMs: 1200 }
 let active = 0
 
+const STREAM_ERROR = "อ่านความคืบหน้าของงานไม่สำเร็จ รีเฟรชหน้าแล้วลองใหม่"
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"])
 
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -19,7 +20,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     const { id } = await ctx.params
     const job = await prisma.job.findUnique({ where: { id }, select: { id: true } })
     if (!job) throw new MidError("job_not_found")
-    if (active >= sse.maxStreams) return jsonError("busy", "มีผู้ติดตามงานมากเกินไป รอสักครู่แล้วลองใหม่", 429)
+    if (active >= sse.maxStreams) throw new MidError("stream_limit")
     const file = journalPath(id)
     active++
 
@@ -35,7 +36,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       timers.forEach(clearInterval)
       timers = []
     }
-    req.signal.addEventListener("abort", release, { once: true })
+    if (req.signal.aborted) release()
+    else req.signal.addEventListener("abort", release, { once: true })
 
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -47,8 +49,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
             release()
           }
         }
-        const finish = (status: string) => {
-          send(`event: done\ndata: ${JSON.stringify({ status })}\n\n`)
+        const finish = (status: string, event = "done", message?: string) => {
+          send(`event: ${event}\ndata: ${JSON.stringify(message ? { status, message } : { status })}\n\n`)
           if (!released) {
             try {
               controller.close()
@@ -60,6 +62,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
         }
         timers.push(setInterval(() => send(": ping\n\n"), sse.pingMs))
         let terminal: string | null = null
+        let failures = 0
+        let lastLog = 0
         let drainTimer: ReturnType<typeof setTimeout> | undefined
         timers.push(
           setInterval(() => {
@@ -67,6 +71,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
             prisma.job
               .findUnique({ where: { id }, select: { status: true } })
               .then((j) => {
+                failures = 0
                 if (released || terminal) return
                 if (!j) return finish("missing")
                 if (TERMINAL.has(j.status)) {
@@ -75,7 +80,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
                   drainTimer = setTimeout(() => stop.abort(), sse.drainMs)
                 }
               })
-              .catch(() => undefined)
+              .catch((e) => {
+                failures++
+                if (Date.now() - lastLog > 30_000) {
+                  lastLog = Date.now()
+                  console.error("[events] job status poll failed", id, e)
+                }
+                if (failures >= 5) finish("error", "error", STREAM_ERROR)
+              })
           }, sse.statusPollMs),
         )
         void (async () => {
@@ -89,6 +101,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
             }
           } catch (e) {
             console.error("[events] tail failed", id, e)
+            if (drainTimer) clearTimeout(drainTimer)
+            finish("error", "error", STREAM_ERROR)
+            return
           } finally {
             if (drainTimer) clearTimeout(drainTimer)
           }

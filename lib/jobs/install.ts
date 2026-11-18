@@ -32,6 +32,9 @@ const precheck: Stage = {
     const p = P(ctx)
     ctx.signal.throwIfAborted()
     validateMidName(name(ctx))
+    // A row can be revived, so refuse a job from an older lifecycle: a newer job for this name exists.
+    const newer = await prisma.job.findFirst({ where: { midName: name(ctx), createdAt: { gt: ctx.job.createdAt } }, select: { id: true } })
+    if (newer) throw new MidError("conflict", undefined, undefined, "MID นี้ถูกสร้างใหม่หรือมีงานใหม่กว่าแล้ว งานนี้ใช้ไม่ได้")
     const row = await prisma.midServer.findUnique({ where: { name: name(ctx) } })
     if (!row || (row.state !== "installing" && row.state !== "error")) {
       throw new MidError("internal", undefined, undefined, "MID record ไม่อยู่ในสถานะติดตั้ง")

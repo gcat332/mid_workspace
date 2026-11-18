@@ -22,9 +22,23 @@ export async function register(): Promise<void> {
       console.error(`[boot] ${label} failed:`, err instanceof Error ? err.message : "unknown")
     }
   }
-  await step("registerInstallKinds", async () => (await import("@/lib/jobs/install")).registerInstallKinds())
-  await step("registerUninstallKinds", async () => (await import("@/lib/jobs/uninstall")).registerUninstallKinds())
-  await step("resumeJobs", async () => (await import("@/lib/jobs/engine")).resumeJobs())
+  let kindsOk = true
+  const kindStep = async (label: string, fn: () => unknown) => {
+    try {
+      await fn()
+    } catch (err) {
+      kindsOk = false
+      console.error(`[boot] ${label} failed:`, err instanceof Error ? err.message : "unknown")
+    }
+  }
+  await kindStep("registerInstallKinds", async () => (await import("@/lib/jobs/install")).registerInstallKinds())
+  await kindStep("registerUninstallKinds", async () => (await import("@/lib/jobs/uninstall")).registerUninstallKinds())
+  if (kindsOk) {
+    await step("resumeJobs", async () => (await import("@/lib/jobs/engine")).resumeJobs())
+    await step("reconcileOrphanedMids", async () => (await import("@/lib/jobs/reconcile")).reconcileOrphanedMids())
+  } else {
+    console.error("[boot] CRITICAL: job kinds not registered; skipping resumeJobs and reconcile, jobs will not run until restart")
+  }
   await step("gcPackages", async () => (await import("@/lib/mids/packages")).gcPackages())
   await step("sweepArchives", async () => (await import("@/lib/jobs/uninstall")).sweepArchives())
   await step("sweepArchives schedule", () => {
