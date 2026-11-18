@@ -187,32 +187,50 @@ export async function openDirIn(dir: FileHandle, name: string): Promise<FileHand
  */
 async function rmTreeVerified(anchored: string, expected: string, check: Check): Promise<void> {
   let cur = await openVerified(anchored, C.O_RDONLY | C.O_DIRECTORY, undefined, expected, check)
-  const trail: { st: fs.Stats; name: string }[] = [{ st: await cur.stat(), name: "" }]
+  type Frame = { st: fs.Stats; name: string; pending: string[] }
+  // One readdir per directory: files are unlinked right away, sub-directory names are kept and resumed after ascending.
+  const scan = async (h: FileHandle): Promise<string[]> => {
+    const dirs: string[] = []
+    for (const n of await fs.promises.readdir(fdPath(h))) {
+      const child = fdPath(h, n)
+      if ((await fs.promises.lstat(child)).isDirectory()) dirs.push(n)
+      else await fs.promises.unlink(child)
+    }
+    return dirs
+  }
+  const trail: Frame[] = []
   try {
+    trail.push({ st: await cur.stat(), name: "", pending: await scan(cur) })
     for (;;) {
-      let descended = false
-      for (const n of await fs.promises.readdir(fdPath(cur))) {
+      const top = trail[trail.length - 1]
+      const n = top.pending.pop()
+      if (n !== undefined) {
         const child = fdPath(cur, n)
         const st = await fs.promises.lstat(child)
         if (!st.isDirectory()) {
-          await fs.promises.unlink(child)
+          await fs.promises.unlink(child) // swapped for a non-directory since the scan
           continue
         }
         const next = await fs.promises.open(child, O_DIR_NOFOLLOW)
         try {
           const nst = await next.stat()
           if (!nst.isDirectory() || !sameNode(nst, st)) throw new MidError("path_outside")
+          const pending = await scan(next)
+          if (pending.length === 0) {
+            // Leaf: nothing to come back for, so remove it from the parent right away (no ".." round trip).
+            await next.close()
+            await fs.promises.rmdir(child)
+            continue
+          }
+          trail.push({ st, name: n, pending })
         } catch (e) {
-          await next.close()
+          await next.close().catch(() => undefined)
           throw e
         }
         await cur.close()
         cur = next
-        trail.push({ st, name: n })
-        descended = true
-        break
+        continue
       }
-      if (descended) continue
       if (trail.length === 1) return
       const done = trail.pop()!
       const up = await fs.promises.open(fdPath(cur, ".."), O_DIR_NOFOLLOW)

@@ -94,6 +94,7 @@ model Job {
   journalPath String
   error       String?
   createdBy   String
+  createdAt   DateTime  @default(now())
   startedAt   DateTime?
   finishedAt  DateTime?
   updatedAt   DateTime  @updatedAt

@@ -16,7 +16,8 @@ export const deps = { callHelper, gcPackages }
 export const limits = { archiveMaxBytes: 1024 ** 3, preWalkMaxBytes: 2 * 1024 ** 3, maxEntries: 20000, retryArchiveMs: 8 * 60_000 }
 const PARTIAL_RETENTION_MS = 24 * 3600_000
 export const ARCHIVE_RETENTION_MS = 30 * 24 * 3600_000
-const TAR = "/usr/bin/tar"
+/** Path is overridable in tests only. */
+export const tarBin = { path: "/usr/bin/tar" }
 const TAR_ENV: Record<string, string> = { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" }
 const C = fs.constants
 
@@ -88,6 +89,11 @@ export async function archiveMid(name: string, signal?: AbortSignal, onWarn?: Wa
     return await archiveInner(name, signal, onWarn)
   } catch (e) {
     if (e instanceof MidError || (e as Error)?.name === "AbortError") throw e
+    // Only the explicit midsDir/midDir/agentDir checks mean "folder missing"; any other ENOENT (spawn of tar, a file that
+    // vanished during the pre-walk) is a real failure and must follow the first-attempt-fails / retry-skips rule.
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") {
+      throw new MidError("internal", undefined, undefined, `สำรอง archive ไม่สำเร็จ: ไฟล์หรือโปรแกรมหายไประหว่างทำงาน (${(e as NodeJS.ErrnoException).syscall ?? "ENOENT"})`)
+    }
     return translateFsError(e)
   }
 }
@@ -158,7 +164,7 @@ async function runTar(name: string, agentFd: number, entries: string[], signal: 
       // Names are prefixed with agent/ by --transform (r = member names, h = hard-link targets; symlink targets stay untouched).
       const args = ["--one-file-system", "--sparse", "--warning=no-file-changed", "--transform=flags=rh;s,^,agent/,", "-czf", "-", "-C", "/proc/self/fd/3", "--", ...entries]
       const stdio: StdioOptions = ["ignore", "pipe", "pipe", agentFd]
-      const child: ChildProcess = spawn(TAR, args, { stdio, env: TAR_ENV as NodeJS.ProcessEnv, signal })
+      const child: ChildProcess = spawn(tarBin.path, args, { stdio, env: TAR_ENV as NodeJS.ProcessEnv, signal })
       let stderr = ""
       child.stderr!.setEncoding("utf8")
       child.stderr!.on("data", (c: string) => {
@@ -240,6 +246,9 @@ const CONFLICT_DETAIL = "MID นี้ถูกเปลี่ยนสถาน
 
 /** The row must be this job's own row and in the state its kind expects, else a stale retry could hit a re-installed MID. */
 async function gate(ctx: JobCtx, expected: readonly string[], allowRemoved = false): Promise<"ok" | "removed"> {
+  // A row id can be reused (revive / re-import), so also refuse when a newer job exists for this name: this job is from an older lifecycle.
+  const newer = await prisma.job.findFirst({ where: { midName: name(ctx), createdAt: { gt: ctx.job.createdAt } }, select: { id: true } })
+  if (newer) throw new MidError("conflict", undefined, undefined, CONFLICT_DETAIL)
   const row = await prisma.midServer.findUnique({ where: { name: name(ctx) } })
   if (!row || !ctx.job.midId || row.id !== ctx.job.midId) throw new MidError("conflict", undefined, undefined, CONFLICT_DETAIL)
   if (expected.includes(row.state)) return "ok"

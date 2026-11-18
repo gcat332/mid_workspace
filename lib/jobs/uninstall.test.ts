@@ -322,6 +322,51 @@ describe("best-effort archive and hardening", () => {
     await un.deleteMidDir("deep")
     expect(existsSync(base)).toBe(false)
   }, 60_000)
+  it("deleteMidDir removes 5000 sibling directories quickly (linear, not quadratic)", async () => {
+    await mkMid("wide", "uninstalling", false)
+    const base = join(root, "mids", "wide", "agent", "extlib")
+    mk2(base, { recursive: true })
+    for (let i = 0; i < 5000; i++) mk2(join(base, `d${i}`))
+    const t0 = Date.now()
+    await un.deleteMidDir("wide")
+    expect(Date.now() - t0).toBeLessThan(15_000) // linear ~4s alone, ~7s under suite load; the quadratic version needs ~35s
+    expect(existsSync(join(root, "mids", "wide"))).toBe(false)
+  }, 60_000)
+
+  it("an old failed cancel_install is rejected once a newer job for the same name exists", async () => {
+    await mkMid("nj", "installing")
+    failOn = { op: "fixOwnership", times: 1 }
+    const job = await run("cancel_install", "nj")
+    expect(job).toMatchObject({ status: "failed", stage: "deleteDir" })
+    await new Promise((r) => setTimeout(r, 10))
+    await prisma.job.create({
+      data: { midName: "nj", kind: "install", stage: "waitConnected", status: "failed", params: "{}", journalPath: join(dir, "x.journal"), createdBy: "admin1" },
+    })
+    failOn = null
+    await eng.retryJob(admin, job.id)
+    await eng.__idleForTests()
+    const after = await prisma.job.findUniqueOrThrow({ where: { id: job.id } })
+    expect(after.status).toBe("failed")
+    expect(readFileSync(after.journalPath, "utf8")).toContain("conflict")
+    expect(existsSync(join(root, "mids", "nj", "agent", "config.xml"))).toBe(true)
+  })
+
+  it("ENOENT from spawning tar is internal (not not_found), fails the first attempt, retry skips", async () => {
+    await mkMid("en")
+    un.tarBin.path = "/nonexistent/tar"
+    try {
+      await expect(un.archiveMid("en")).rejects.toMatchObject({ code: "internal" })
+      const job = await run("uninstall", "en")
+      expect(job).toMatchObject({ status: "failed", stage: "archive" })
+      await eng.retryJob(admin, job.id)
+      await eng.__idleForTests()
+      expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("succeeded")
+    } finally {
+      un.tarBin.path = "/usr/bin/tar"
+    }
+    expect(existsSync(join(root, "mids", "en"))).toBe(false)
+    expect(archives()).toHaveLength(0)
+  })
 })
 
 describe("archiveMid errors", () => {
