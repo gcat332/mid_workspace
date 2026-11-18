@@ -79,6 +79,8 @@ model MidServer {
   createdBy   String
   createdAt   DateTime  @default(now())
   removedAt   DateTime?
+  // Opt-in: BSM AgentHub's agent may edit this MID's files (integration spec 5.2). Reset on removal/revival.
+  agentAccess Boolean   @default(false)
 }
 
 model Job {

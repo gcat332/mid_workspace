@@ -196,7 +196,7 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
         ))}
       </div>
       <div role="tabpanel" id="tabpanel" aria-labelledby={`tab-${tab}`} className="pt-4">
-        {tab === "overview" && <OverviewTab mid={mid} jobShown={showJob} />}
+        {tab === "overview" && <OverviewTab mid={mid} jobShown={showJob} busyReason={busyReason} onChanged={onChanged} />}
         {tab === "config" && <ConfigTab midName={mid.name} busyReason={busyReason} canRestart={isUp && !transitional} onRestart={() => void send("restart", false)} />}
         {tab === "files" && <FilesTab midName={mid.name} busyReason={busyReason} onOpenConfig={() => selectTab("config")} />}
         {tab === "logs" && <LogTab midName={mid.name} />}

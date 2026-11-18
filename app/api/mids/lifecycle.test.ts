@@ -114,11 +114,11 @@ describe("POST /api/mids", () => {
   })
 
   it("revives a removed row", async () => {
-    const old = await prisma.midServer.create({ data: { name: "gone", dir: "/x", serviceName: "s", state: "removed", removedAt: new Date(), version: "1", heapMb: 512, createdBy: "old" } })
+    const old = await prisma.midServer.create({ data: { name: "gone", dir: "/x", serviceName: "s", state: "removed", removedAt: new Date(), version: "1", heapMb: 512, createdBy: "old", agentAccess: true } })
     const res = await post({ instanceId, name: "gone", heapMb: 2048 })
     expect(res.status).toBe(202)
     const row = await prisma.midServer.findUniqueOrThrow({ where: { name: "gone" } })
-    expect(row).toMatchObject({ id: old.id, state: "installing", heapMb: 2048, version: null, removedAt: null, createdBy: "m@x.com", dir: join(dir, "root", "mids", "gone"), serviceName: "midhub-mid-gone.service" })
+    expect(row).toMatchObject({ id: old.id, state: "installing", heapMb: 2048, version: null, removedAt: null, agentAccess: false, createdBy: "m@x.com", dir: join(dir, "root", "mids", "gone"), serviceName: "midhub-mid-gone.service" })
     expect(row.createdAt).toEqual(old.createdAt)
   })
 

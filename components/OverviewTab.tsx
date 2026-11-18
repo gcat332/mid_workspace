@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { AgentAccessSwitch } from "./AgentAccessSwitch"
 import { safeHttpUrl } from "@/lib/ui/api"
 import { instanceRecordUrl } from "@/lib/ui/record-link"
 import { jobKindLabel, jobStatusLabel } from "@/lib/ui/stages"
@@ -14,7 +15,16 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   )
 }
 
-export function OverviewTab({ mid, jobShown = false }: { mid: MidView; /** the panel already shows this job's progress */ jobShown?: boolean }) {
+type Props = {
+  mid: MidView
+  /** the panel already shows this job's progress */
+  jobShown?: boolean
+  /** why the AgentHub switch cannot change now (MidPanel's busyReason) */
+  busyReason?: string | null
+  onChanged?: () => void
+}
+
+export function OverviewTab({ mid, jobShown = false, busyReason = null, onChanged = () => {} }: Props) {
   const sv = statusView(mid)
   const pathname = usePathname()
   const url = safeHttpUrl(mid.instanceUrl)
@@ -31,6 +41,9 @@ export function OverviewTab({ mid, jobShown = false }: { mid: MidView; /** the p
       <Row label="Uptime">{running ? formatUptime(mid.status.since) : "-"}</Row>
       <Row label="RAM ที่ใช้">{formatBytes(mid.status.memoryBytes)}</Row>
       <Row label="Heap">{mid.heapMb} MB</Row>
+      <Row label="AgentHub">
+        <AgentAccessSwitch midName={mid.name} enabled={mid.agentAccess ?? false} disabledReason={busyReason} onChanged={onChanged} />
+      </Row>
       <Row label="Record ใน instance">
         {recordUrl
           ? <a href={recordUrl} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">เปิดดู MID Server ใน ServiceNow</a>

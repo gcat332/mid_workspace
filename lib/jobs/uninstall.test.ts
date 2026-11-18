@@ -89,6 +89,7 @@ const run = async (kind: "uninstall" | "cancel_install", name: string) => {
 describe("uninstall", () => {
   it("lean archive, symlink preserved, outside untouched, helper order, row removed", async () => {
     await mkMid("u1")
+    await prisma.midServer.update({ where: { name: "u1" }, data: { agentAccess: true } })
     const job = await run("uninstall", "u1")
     expect(job.status).toBe("succeeded")
     expect(calls).toEqual(["stop", "removeUnit", "fixOwnership", "fixOwnership", "gc"])
@@ -97,6 +98,7 @@ describe("uninstall", () => {
     const row = await prisma.midServer.findUniqueOrThrow({ where: { name: "u1" } })
     expect(row.state).toBe("removed")
     expect(row.removedAt).toBeTruthy()
+    expect(row.agentAccess).toBe(false)
     const files = archives()
     expect(files).toHaveLength(1)
     expect(files[0]).toMatch(/^u1-\d{8}-\d{6}\.tar\.gz$/)

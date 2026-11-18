@@ -121,7 +121,7 @@ export async function startInstall(user: SessionPayload, input: CreateInput): Pr
     const existing = await tx.midServer.findUnique({ where: { name } })
     if (existing && existing.state !== "removed") throw new MidError("conflict", 409, NAME_TAKEN)
     // createdAt is deliberately kept: it records when MidHub first knew this name (history), not this lifecycle.
-    const data = { instanceId: input.instanceId, heapMb: input.heapMb, version: null, state: "installing", removedAt: null, createdBy: user.email, dir: midRoot(name), serviceName: unitName(name) }
+    const data = { instanceId: input.instanceId, heapMb: input.heapMb, version: null, state: "installing", removedAt: null, agentAccess: false, createdBy: user.email, dir: midRoot(name), serviceName: unitName(name) }
     if (existing) {
       await tx.midServer.update({ where: { name }, data })
       // Failed jobs of the previous lifecycle must not be retried/cancelled against the revived MID.

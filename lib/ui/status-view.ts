@@ -10,6 +10,7 @@ export type MidView = {
   heapMb: number
   version: string | null
   state: string
+  agentAccess?: boolean
   /** Latest job of this MID (GET /api/mids). */
   job?: MidJobView | null
   status: {

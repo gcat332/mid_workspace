@@ -18,6 +18,7 @@ export type MidSummary = {
   heapMb: number
   version: string | null
   state: string
+  agentAccess: boolean
   status: ServiceStatus
   job: { id: string; kind: string; stage: string; status: string; createdAt: Date } | null
 }
@@ -82,7 +83,7 @@ function normalizeUrl(raw: string | undefined): string | null {
 }
 
 type JobSummary = NonNullable<MidSummary["job"]>
-type Row = { name: string; state: string; heapMb: number; version: string | null; instanceId: string | null }
+type Row = { name: string; state: string; heapMb: number; version: string | null; instanceId: string | null; agentAccess?: boolean }
 
 async function summarize(row: Row, knownJob?: JobSummary | null): Promise<MidSummary> {
   const [xml, inst, status, job] = await Promise.all([
@@ -115,6 +116,7 @@ async function summarize(row: Row, knownJob?: JobSummary | null): Promise<MidSum
     heapMb: row.heapMb,
     version: row.version,
     state: row.state,
+    agentAccess: row.agentAccess ?? false,
     status,
     job,
   }
@@ -182,7 +184,7 @@ export async function importMid(name: string, user: SessionPayload): Promise<Mid
           (await tx.instance.create({ data: { url, label: new URL(url).hostname, createdBy: user.email } }))
         instanceId = inst.id
       }
-      const data = { dir: midRoot(name), serviceName: unit, heapMb, state: "installed", instanceId, removedAt: null }
+      const data = { dir: midRoot(name), serviceName: unit, heapMb, state: "installed", instanceId, removedAt: null, agentAccess: false }
       return existing
         ? tx.midServer.update({ where: { name }, data: { ...data, createdBy: user.email } })
         : tx.midServer.create({ data: { name, ...data, createdBy: user.email } })

@@ -317,7 +317,7 @@ function stagesFor(kind: "uninstall" | "cancel_install"): Stage[] {
       if ((await gate(ctx, expected, true)) === "removed") return
       const r = await prisma.midServer.updateMany({
         where: { id: ctx.job.midId!, state: { in: expected } },
-        data: { state: "removed", removedAt: new Date() },
+        data: { state: "removed", removedAt: new Date(), agentAccess: false },
       })
       if (r.count === 0) throw new MidError("conflict", undefined, undefined, CONFLICT_DETAIL)
     },

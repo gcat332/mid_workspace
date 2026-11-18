@@ -122,11 +122,13 @@ describe("importMid", () => {
   })
   it("revives a removed row", async () => {
     mkMid("m1", CFG("https://a.service-now.com/", "N"))
-    db.mids.push({ id: "old", name: "m1", state: "removed", removedAt: new Date(), heapMb: 512, createdBy: "z", dir: "", serviceName: "" })
+    db.mids.push({ id: "old", name: "m1", state: "removed", removedAt: new Date(), heapMb: 512, createdBy: "z", dir: "", serviceName: "", agentAccess: true })
     const s = await importMid("m1", user)
     expect(db.mids).toHaveLength(1)
     expect(s.state).toBe("installed")
     expect(db.mids[0].removedAt).toBeNull()
+    expect(db.mids[0].agentAccess).toBe(false)
+    expect(s.agentAccess).toBe(false)
   })
 })
 

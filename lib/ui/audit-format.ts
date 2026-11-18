@@ -10,6 +10,7 @@ const ACTION_LABELS: Record<string, string> = {
   "job.create": "สร้างงานติดตั้ง MID",
   "job.retry": "ลองงานใหม่",
   "job.cancel": "ยกเลิกงาน",
+  "mid.agent_access": "อนุญาต/ยกเลิก AgentHub แก้ไฟล์",
   "mid.uninstall": "ถอนการติดตั้ง MID",
   "config.save": "บันทึกคอนฟิก",
   "config.rollback": "ย้อนคอนฟิก",
