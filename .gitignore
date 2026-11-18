@@ -2,12 +2,12 @@
 .DS_Store
 node_modules/
 .next/
-.env*.local
+.env*
+!.env.local.example
+/coverage
+*.pem
 *.db
 data/
-.superpowers/
-data/
-*.db
 # generated prisma client / build artifacts
 *.tsbuildinfo
 next-env.d.ts

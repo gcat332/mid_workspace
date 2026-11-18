@@ -1,0 +1,83 @@
+"use client"
+
+import { useEffect, useState, type FormEvent } from "react"
+
+export default function LoginPage() {
+  const [idp, setIdp] = useState<{ enabled: boolean; label: string }>({ enabled: false, label: "SSO" })
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [error, setError] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("error"),
+  )
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    // Built in Task 3; a failure or 404 simply means SSO is off.
+    fetch("/midhub/api/auth/idp")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => { if (s?.enabled) setIdp({ enabled: true, label: s.label ?? "SSO" }) })
+      .catch(() => {})
+  }, [])
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch("/midhub/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data.error ?? "เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
+        return
+      }
+      window.location.href = data.next ?? "/midhub"
+    } catch {
+      setError("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const input = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 p-8">
+        <h1 className="text-xl font-semibold text-gray-900 mb-6">เข้าสู่ระบบ MidHub</h1>
+
+        {error && <p role="alert" className="mb-4 text-sm text-red-600">{error}</p>}
+
+        <form onSubmit={onSubmit} className="space-y-4">
+          <label className="block text-sm text-gray-700">
+            อีเมล
+            <input type="email" required autoComplete="username" value={email}
+              onChange={(e) => setEmail(e.target.value)} className={`mt-1 ${input}`} />
+          </label>
+          <label className="block text-sm text-gray-700">
+            รหัสผ่าน
+            <input type="password" required autoComplete="current-password" value={password}
+              onChange={(e) => setPassword(e.target.value)} className={`mt-1 ${input}`} />
+          </label>
+          <button type="submit" disabled={busy}
+            className="w-full py-2.5 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
+            {busy ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+          </button>
+        </form>
+
+        {idp.enabled && (
+          <>
+            <div className="my-5 text-center text-xs text-gray-400">หรือ</div>
+            <a href="/midhub/api/auth/oidc/start"
+              className="block w-full py-2.5 text-center text-sm font-semibold rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 transition-colors">
+              เข้าสู่ระบบด้วย SSO
+            </a>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
