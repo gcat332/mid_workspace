@@ -117,3 +117,20 @@ it("treats % and _ in the user filter literally", async () => {
   expect(r.map((x) => x.id)).toEqual(["w1"])
   expect((await walk("user=%25")).length).toBe(0)
 })
+
+it("user filter spanning >2 pages is disjoint and complete", async () => {
+  // "bob" matches 80 seeded rows (2 pages); add 40 more so it spans 3 pages with shared timestamps.
+  const { prisma } = await import("@/lib/db/client")
+  const at = new Date(Date.UTC(2025, 5, 1))
+  await prisma.auditLog.createMany({
+    data: Array.from({ length: 40 }, (_, i) => ({ id: `b${String(i).padStart(2, "0")}`, at, email: "bob@corp.com", action: "x", detail: "{}" })),
+  })
+  const p1 = await page("?user=BOB")
+  expect(p1.items).toHaveLength(50)
+  expect(p1.nextCursor).toBeTruthy()
+  const all = await walk("user=bob")
+  expect(all).toHaveLength(120)
+  expect(new Set(all.map((r) => r.id)).size).toBe(120)
+  expect(all.every((r) => r.email === "bob@corp.com")).toBe(true)
+  expect((await page("?user=nomatch")).nextCursor).toBeNull()
+})

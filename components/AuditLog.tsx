@@ -57,7 +57,8 @@ export function AuditLog() {
   const [mid, setMid] = useState("")
   const [user, setUser] = useState("")
   const [items, setItems] = useState<Item[]>([])
-  const [next, setNext] = useState<string | null>(null)
+  // The cursor is only valid with the filters it was issued for, so they travel together.
+  const [next, setNext] = useState<{ cursor: string; mid: string; user: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<ApiError | null>(null)
   const seq = useRef(0)
@@ -76,7 +77,7 @@ export function AuditLog() {
       const j = (await res.json()) as { items: Item[]; nextCursor: string | null }
       if (mySeq !== seq.current) return
       setItems((prev) => (cursor ? [...prev, ...j.items] : j.items))
-      setNext(j.nextCursor)
+      setNext(j.nextCursor ? { cursor: j.nextCursor, mid: m, user: u } : null)
     } catch {
       if (mySeq === seq.current) setError({ code: "network", message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" })
     } finally {
@@ -127,7 +128,7 @@ export function AuditLog() {
                 <td className="px-3 py-2"><Detail detail={r.detail} /></td>
               </tr>
             ))}
-            {!loading && !error && items.length === 0 && (
+            {!loading && !error && items.length === 0 && !next && (
               <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">ไม่พบรายการ</td></tr>
             )}
           </tbody>
@@ -136,7 +137,7 @@ export function AuditLog() {
       <div className="mt-4">
         {loading && <p className="text-sm text-gray-500" role="status">กำลังโหลด…</p>}
         {!loading && next && (
-          <button type="button" onClick={() => void load(mid, user, next)}
+          <button type="button" onClick={() => void load(next.mid, next.user, next.cursor)}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-800 hover:bg-gray-50">
             โหลดเพิ่ม
           </button>

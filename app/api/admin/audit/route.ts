@@ -1,14 +1,10 @@
 import { requireAdmin, responseOrRethrow } from "@/lib/auth/helpers"
 import { handleRouteError } from "@/lib/http/route"
 import { prisma } from "@/lib/db/client"
-import type { Prisma, AuditLog } from "@prisma/client"
-
-type Row = AuditLog
+import type { Prisma } from "@prisma/client"
 
 const PAGE_SIZE = 50
 const MAX_FILTER = 100
-const BATCH = 200
-const MAX_BATCHES = 50 // scan budget per request: 10k rows
 
 const bad = (message: string) => Response.json({ code: "invalid_request", message }, { status: 400 })
 
@@ -36,33 +32,28 @@ export async function GET(req: Request) {
     const cursorRaw = (q.get("cursor") ?? "").trim()
     if (mid.length > MAX_FILTER || user.length > MAX_FILTER) return bad(`ตัวกรองยาวเกิน ${MAX_FILTER} ตัวอักษร`)
 
-    let cursor = cursorRaw ? decodeCursor(cursorRaw) : null
+    const cursor = cursorRaw ? decodeCursor(cursorRaw) : null
     if (cursorRaw && !cursor) return bad("cursor ไม่ถูกต้อง ลองโหลดหน้าแรกใหม่")
 
-    // The user filter is applied here rather than as Prisma `contains`: that compiles to an unescaped
-    // LIKE, so `_` / `%` typed by the admin would act as wildcards. Scanning in batches keeps it literal.
-    const matches = (r: Row) => !user || r.email.toLowerCase().includes(user)
-    const take = user ? BATCH : PAGE_SIZE + 1
-    const items: Row[] = []
-    for (let batch = 0; batch < MAX_BATCHES; batch++) {
-      const and: Prisma.AuditLogWhereInput[] = []
-      if (mid) and.push({ midName: mid })
-      if (cursor) and.push({ OR: [{ at: { lt: cursor.at } }, { at: cursor.at, id: { lt: cursor.id } }] })
-      const rows = await prisma.auditLog.findMany({
-        where: and.length ? { AND: and } : undefined,
-        orderBy: [{ at: "desc" }, { id: "desc" }],
-        take,
-      })
-      for (const r of rows) {
-        if (!matches(r)) continue
-        if (items.length === PAGE_SIZE) return Response.json({ items, nextCursor: encodeCursor(items[PAGE_SIZE - 1]) })
-        items.push(r)
-      }
-      if (rows.length < take) return Response.json({ items, nextCursor: null })
-      cursor = rows[rows.length - 1]
+    // Prisma `contains` compiles to an unescaped LIKE (`_` / `%` would act as wildcards), so the user
+    // filter is resolved literally in JS over the distinct emails, then applied as an `in` list.
+    let emails: string[] | undefined
+    if (user) {
+      const distinct = await prisma.auditLog.findMany({ distinct: ["email"], select: { email: true } })
+      emails = distinct.map((d) => d.email).filter((e) => e.toLowerCase().includes(user))
+      if (emails.length === 0) return Response.json({ items: [], nextCursor: null })
     }
-    // Scan budget spent with a short page: hand back what we have and let the client continue from where we stopped.
-    return Response.json({ items, nextCursor: cursor ? encodeCursor(cursor) : null })
+    const and: Prisma.AuditLogWhereInput[] = []
+    if (mid) and.push({ midName: mid })
+    if (emails) and.push({ email: { in: emails } })
+    if (cursor) and.push({ OR: [{ at: { lt: cursor.at } }, { at: cursor.at, id: { lt: cursor.id } }] })
+    const rows = await prisma.auditLog.findMany({
+      where: and.length ? { AND: and } : undefined,
+      orderBy: [{ at: "desc" }, { id: "desc" }],
+      take: PAGE_SIZE + 1,
+    })
+    const items = rows.slice(0, PAGE_SIZE)
+    return Response.json({ items, nextCursor: rows.length > PAGE_SIZE ? encodeCursor(items[PAGE_SIZE - 1]) : null })
   } catch (e) {
     return handleRouteError(e)
   }
