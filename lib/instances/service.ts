@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db/client"
 import { decryptSecret, encryptSecret } from "@/lib/vault"
 import { MidError } from "@/lib/mids/names"
-import { buildstampFromGlideWar } from "@/lib/mids/buildstamp"
+import { BUILDSTAMP_RE, buildstampFromGlideWar } from "@/lib/mids/buildstamp"
 import type { SessionPayload } from "@/lib/auth/jwt"
 import { normalizeInstanceUrl } from "./url"
 
@@ -30,6 +30,38 @@ const view = (r: Row): InstanceView => ({
   id: r.id, label: r.label, url: r.url, midUser: r.midUser, hasPassword: !!r.midPasswordEnc,
   buildstamp: r.buildstamp, createdBy: r.createdBy, createdAt: r.createdAt.toISOString(),
 })
+
+const MAX_BODY = 64 * 1024
+const NOT_JSON = "instance ตอบกลับไม่ใช่ JSON (อาจ hibernate อยู่) — เปิด instance ในเบราว์เซอร์เพื่อปลุกแล้วลองใหม่"
+
+/** Reads at most MAX_BODY bytes of the body (streamed, then cancelled). */
+async function readCapped(res: Response): Promise<string> {
+  if (!res.body) return ""
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let n = 0
+  try {
+    while (n < MAX_BODY) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+      n += value.length
+    }
+  } finally {
+    await reader.cancel().catch(() => {})
+  }
+  return Buffer.concat(chunks).subarray(0, MAX_BODY).toString("utf8")
+}
+
+/** A real ServiceNow Table API answer: JSON content-type and an object with a `result` array. */
+async function readResult(res: Response): Promise<{ value?: unknown }[]> {
+  if (!(res.headers.get("content-type") ?? "").toLowerCase().includes("application/json")) throw unreachable(NOT_JSON)
+  let j: unknown
+  try { j = JSON.parse(await readCapped(res)) } catch { throw unreachable(NOT_JSON) }
+  const result = (j as { result?: unknown } | null)?.result
+  if (typeof j !== "object" || j === null || !Array.isArray(result)) throw unreachable(NOT_JSON)
+  return result as { value?: unknown }[]
+}
 
 const unreachable = (detail: string) => new MidError("instance_unreachable", undefined, undefined, detail)
 
@@ -61,17 +93,16 @@ export async function testConnection(
   if (res.status === 401) throw new MidError("instance_auth")
   if (res.status === 403) throw new MidError("instance_role")
   if (res.status !== 200) {
-    const excerpt = (await res.text().catch(() => "")).slice(0, EXCERPT)
+    const excerpt = (await readCapped(res).catch(() => "")).slice(0, EXCERPT)
     throw unreachable(`HTTP ${res.status}${excerpt ? `: ${excerpt}` : ""}`)
   }
-  await res.body?.cancel().catch(() => {})
+  await readResult(res)
 
   let buildstamp: string | null = null
   try {
     const r = await get("api/now/table/sys_properties?sysparm_query=name=glide.war&sysparm_fields=value&sysparm_limit=1")
     if (r.status === 200) {
-      const j = (await r.json()) as { result?: { value?: unknown }[] }
-      const v = j.result?.[0]?.value
+      const v = (await readResult(r))[0]?.value
       if (typeof v === "string") buildstamp = buildstampFromGlideWar(v)
     }
   } catch { /* best effort */ }
@@ -83,8 +114,9 @@ export async function listInstances(): Promise<InstanceView[]> {
   return rows.map(view)
 }
 
-const need = (v: unknown, what: string): string => {
+const need = (v: unknown, what: string, max = 100): string => {
   if (typeof v !== "string" || !v.trim()) throw new MidError("invalid_request", 400, undefined, `ต้องระบุ ${what}`)
+  if (v.length > max) throw new MidError("invalid_request", 400, undefined, `${what} ยาวเกิน ${max} ตัวอักษร`)
   return v
 }
 
@@ -94,10 +126,10 @@ export async function createInstance(
 ): Promise<InstanceView> {
   const url = normalizeInstanceUrl(input.url)
   const midUser = need(input.midUser, "MID user").trim()
-  const password = need(input.password, "password")
+  const password = need(input.password, "password", 256)
   if (await prisma.instance.findUnique({ where: { url } })) throw dup()
   const t = await testConnection({ url, midUser, password })
-  const label = input.label?.trim() || new URL(url).hostname
+  const label = input.label?.trim() ? need(input.label, "ชื่อ").trim() : new URL(url).hostname
   try {
     const row = await prisma.instance.create({
       data: { label, url, midUser, midPasswordEnc: encryptSecret(password), buildstamp: t.buildstamp, createdBy: user.email },
@@ -125,26 +157,32 @@ export async function updateInstance(
   const pwChanged = patch.password !== undefined
   if (userChanged || pwChanged) {
     const midUser = userChanged ? need(patch.midUser, "MID user").trim() : cur.midUser
-    const password = pwChanged ? need(patch.password, "password") : cur.midPasswordEnc ? decryptSecret(cur.midPasswordEnc) : null
+    const password = pwChanged ? need(patch.password, "password", 256) : cur.midPasswordEnc ? decryptSecret(cur.midPasswordEnc) : null
     if (!midUser || !password) throw new MidError("invalid_request", 400, undefined, "ต้องระบุทั้ง MID user และ password")
     const t = await testConnection({ url: cur.url, midUser, password })
     data.midUser = midUser
     if (pwChanged) data.midPasswordEnc = encryptSecret(password)
     if (t.buildstamp) data.buildstamp = t.buildstamp
   }
-  if (patch.buildstamp !== undefined) data.buildstamp = patch.buildstamp
+  if (patch.buildstamp !== undefined) {
+    if (patch.buildstamp !== null && !BUILDSTAMP_RE.test(patch.buildstamp)) throw new MidError("invalid_buildstamp")
+    data.buildstamp = patch.buildstamp
+  }
   if (Object.keys(data).length === 0) throw new MidError("invalid_request", 400, undefined, "ไม่มีข้อมูลที่ต้องแก้ไข")
   const row = await prisma.instance.update({ where: { id }, data })
   return view(row)
 }
 
 export async function deleteInstance(_user: SessionPayload, id: string): Promise<InstanceView> {
-  const cur = await prisma.instance.findUnique({ where: { id } })
-  if (!cur) throw missing()
-  const used = await prisma.midServer.count({ where: { instanceId: id, removedAt: null } })
-  if (used > 0) throw new MidError("conflict", 409, "ยังมี MID ที่ใช้ instance นี้อยู่")
-  await prisma.instance.delete({ where: { id } })
-  return view(cur)
+  return prisma.$transaction(async (tx) => {
+    const cur = await tx.instance.findUnique({ where: { id } })
+    if (!cur) throw missing()
+    if ((await tx.midServer.count({ where: { instanceId: id, removedAt: null } })) > 0) {
+      throw new MidError("conflict", 409, "ยังมี MID ที่ใช้ instance นี้อยู่")
+    }
+    await tx.instance.delete({ where: { id } })
+    return view(cur)
+  })
 }
 
 /** Server-only (install job): decrypted credentials. Never return this from a route. */
@@ -154,5 +192,5 @@ export async function getInstanceSecret(id: string): Promise<{ url: string; midU
   if (!r.midUser || !r.midPasswordEnc) {
     throw new MidError("invalid_request", 400, "instance นี้ยังไม่ได้ตั้ง MID user/password ไปตั้งที่หน้า Admin > Instances")
   }
-  return { url: r.url, midUser: r.midUser, password: decryptSecret(r.midPasswordEnc), buildstamp: r.buildstamp }
+  return { url: normalizeInstanceUrl(r.url), midUser: r.midUser, password: decryptSecret(r.midPasswordEnc), buildstamp: r.buildstamp }
 }

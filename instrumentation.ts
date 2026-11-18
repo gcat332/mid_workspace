@@ -9,4 +9,10 @@ export async function register(): Promise<void> {
   } catch (err) {
     console.error("[seed] admin seed failed:", err instanceof Error ? err.message : "unknown")
   }
+  try {
+    const { normalizeInstanceRows } = await import("@/lib/instances/normalize-rows")
+    await normalizeInstanceRows()
+  } catch (err) {
+    console.error("[instances] url normalisation failed:", err instanceof Error ? err.message : "unknown")
+  }
 }

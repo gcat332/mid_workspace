@@ -94,18 +94,25 @@ describe("importMid", () => {
   it("creates the MidServer and Instance, audits, returns a summary", async () => {
     mkMid("m1", CFG("https://A.service-now.com/", "SN-MID-1"), "wrapper.java.maxmemory=2048\n")
     const s = await importMid("m1", user)
-    expect(s).toMatchObject({ name: "m1", midName: "SN-MID-1", instanceUrl: "https://a.service-now.com", heapMb: 2048, state: "installed", status })
+    expect(s).toMatchObject({ name: "m1", midName: "SN-MID-1", instanceUrl: "https://a.service-now.com/", heapMb: 2048, state: "installed", status })
     expect(db.mids[0]).toMatchObject({ dir: path.join(root, "mids", "m1"), serviceName: "midhub-mid-m1.service", createdBy: "a@x.com" })
     expect(db.instances).toHaveLength(1)
-    expect(db.instances[0]).toMatchObject({ url: "https://a.service-now.com", label: "a.service-now.com", createdBy: "a@x.com" })
+    expect(db.instances[0]).toMatchObject({ url: "https://a.service-now.com/", label: "a.service-now.com", createdBy: "a@x.com" })
     expect(audit).toHaveBeenCalledWith(user, "mid.import", "m1", expect.any(Object))
   })
   it("defaults heap to 1024 and links an existing Instance by normalized url", async () => {
-    db.instances.push({ id: "inst", url: "https://a.service-now.com", label: "x" })
+    db.instances.push({ id: "inst", url: "https://a.service-now.com/", label: "x" })
     mkMid("m1", CFG("https://a.service-now.com/", "N"))
     await importMid("m1", user)
     expect(db.mids[0]).toMatchObject({ heapMb: 1024, instanceId: "inst" })
     expect(db.instances).toHaveLength(1)
+  })
+  it("does not link or create an Instance for a non-ServiceNow url", async () => {
+    mkMid("m1", CFG("https://evil.example.com/", "N"))
+    const s = await importMid("m1", user)
+    expect(db.instances).toHaveLength(0)
+    expect(db.mids[0].instanceId).toBeNull()
+    expect(s.instanceUrl).toBe("https://evil.example.com")
   })
   it("importing twice is a 409 conflict", async () => {
     mkMid("m1", CFG("https://a.service-now.com/", "N"))

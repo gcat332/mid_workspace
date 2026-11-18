@@ -52,7 +52,8 @@ export function InstancesManager() {
   }
 
   const formReady = url.trim() !== "" && midUser.trim() !== "" && password !== ""
-  const reason = formReady ? undefined : "กรอก URL, MID user และ password ให้ครบก่อน"
+  const reason = busy ? "กำลังดำเนินการ (ทดสอบการเชื่อมต่ออาจใช้เวลาถึง 15 วินาที) กรุณารอ..."
+    : formReady ? undefined : "กรอก URL, MID user และ password ให้ครบก่อน"
 
   async function test() {
     const res = await call("/instances/test", jsonInit("POST", { url, midUser, password, label }))
@@ -73,6 +74,7 @@ export function InstancesManager() {
   async function saveEdit() {
     if (!editing) return
     const body: Record<string, string> = {}
+    if (!eLabel.trim()) { setErr({ message: "ชื่อเรียกต้องไม่ว่าง" }); return }
     if (eLabel.trim() && eLabel !== editing.label) body.label = eLabel
     if (eUser.trim() && eUser !== (editing.midUser ?? "")) body.midUser = eUser
     if (ePass) body.password = ePass
@@ -143,6 +145,7 @@ export function InstancesManager() {
           </div>
           <div className="flex gap-2 sm:col-span-3">
             <button type="submit" disabled={busy} className="btn-primary px-4 py-2 text-sm font-medium">บันทึก (ทดสอบก่อนบันทึก)</button>
+            {busy && <span className="self-center text-xs text-gray-500">กำลังทดสอบการเชื่อมต่อ อาจใช้เวลาถึง 15 วินาที กรุณารอ...</span>}
             <button type="button" onClick={() => setEditing(null)} className={ghostBtnCls}>ยกเลิก</button>
           </div>
         </form>

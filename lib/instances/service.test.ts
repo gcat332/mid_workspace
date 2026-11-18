@@ -31,7 +31,7 @@ describe("normalizeInstanceUrl", () => {
 })
 
 const res = (status: number, body: unknown = {}, headers: Record<string, string> = {}) =>
-  new Response(JSON.stringify(body), { status, headers })
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } })
 const input = { url: "https://X.service-now.com", midUser: "mid", password: "pä:ss" }
 
 describe("testConnection", () => {
@@ -58,9 +58,9 @@ describe("testConnection", () => {
   })
 
   it("buildstamp null when the glide.war call is 403 or throws", async () => {
-    const f = vi.fn().mockResolvedValueOnce(res(200)).mockResolvedValueOnce(res(403))
+    const f = vi.fn().mockResolvedValueOnce(res(200, { result: [] })).mockResolvedValueOnce(res(403))
     expect(await testConnection(input, f as unknown as typeof fetch)).toEqual({ ok: true, buildstamp: null })
-    const g = vi.fn().mockResolvedValueOnce(res(200)).mockRejectedValueOnce(new Error("boom"))
+    const g = vi.fn().mockResolvedValueOnce(res(200, { result: [] })).mockRejectedValueOnce(new Error("boom"))
     expect(await testConnection(input, g as unknown as typeof fetch)).toEqual({ ok: true, buildstamp: null })
   })
 
@@ -73,6 +73,23 @@ describe("testConnection", () => {
     await expect(run(async () => { throw new TypeError("fetch failed") })).rejects.toMatchObject({ code: "instance_unreachable" })
     const timeout = Object.assign(new Error("t"), { name: "TimeoutError" })
     await expect(run(async () => { throw timeout })).rejects.toMatchObject({ code: "instance_unreachable" })
+  })
+
+  it("a 200 HTML body (hibernating instance) is instance_unreachable, not ok", async () => {
+    const html = new Response("<html>Instance Hibernating</html>", { status: 200, headers: { "content-type": "text/html" } })
+    await expect(testConnection(input, (async () => html) as unknown as typeof fetch)).rejects.toMatchObject({
+      code: "instance_unreachable", detail: expect.stringContaining("ไม่ใช่ JSON"),
+    })
+    const noResult = res(200, { foo: 1 })
+    await expect(testConnection(input, (async () => noResult) as unknown as typeof fetch)).rejects.toMatchObject({ code: "instance_unreachable" })
+  })
+
+  it("caps the body it reads at 64 KB", async () => {
+    let pulled = 0
+    const body = new ReadableStream<Uint8Array>({ pull(c) { pulled += 16384; c.enqueue(new Uint8Array(16384).fill(97)) } })
+    const big = new Response(body, { status: 500 })
+    await testConnection(input, (async () => big) as unknown as typeof fetch).catch(() => {})
+    expect(pulled).toBeLessThanOrEqual(64 * 1024 + 16384 * 2)
   })
 
   it("never leaks the password or Authorization into errors; excerpt capped at 300", async () => {

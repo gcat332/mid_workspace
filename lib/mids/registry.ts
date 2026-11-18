@@ -1,3 +1,4 @@
+import { normalizeInstanceUrl } from "@/lib/instances/url"
 import { prisma } from "@/lib/db/client"
 import { recordAudit } from "@/lib/audit"
 import { callHelper } from "@/lib/helper/client"
@@ -145,7 +146,13 @@ export async function importMid(name: string, user: SessionPayload): Promise<Mid
   }
 
   const params = readParams(xml)
-  const url = normalizeUrl(params.url)
+  // Canonical Instance url (trailing slash). Not a valid ServiceNow URL -> no Instance is linked or created.
+  let url: string | null = null
+  try {
+    url = normalizeInstanceUrl(params.url ?? "")
+  } catch {
+    console.warn(`[registry] MID ${name}: config.xml url is not a valid ServiceNow URL; no Instance linked`)
+  }
   const heapMb = readHeapMb((await readMidFile(name, WRAPPER_OVERRIDE)) ?? "") ?? 1024
   let row: Row
   try {
@@ -154,7 +161,7 @@ export async function importMid(name: string, user: SessionPayload): Promise<Mid
       if (url) {
         const inst =
           (await tx.instance.findUnique({ where: { url } })) ??
-          (await tx.instance.create({ data: { url, label: new URL(url).host, createdBy: user.email } }))
+          (await tx.instance.create({ data: { url, label: new URL(url).hostname, createdBy: user.email } }))
         instanceId = inst.id
       }
       const data = { dir: midRoot(name), serviceName: unit, heapMb, state: "installed", instanceId, removedAt: null }

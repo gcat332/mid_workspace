@@ -12,7 +12,8 @@ const instance = {
   delete: vi.fn(async () => ({})),
 }
 const midServer = { count: vi.fn(async () => 0) }
-vi.mock("@/lib/db/client", () => ({ prisma: { instance, midServer } }))
+const prismaMock = { instance, midServer, $transaction: async (fn: (tx: unknown) => unknown) => fn(prismaMock) }
+vi.mock("@/lib/db/client", () => ({ prisma: prismaMock }))
 const recordAudit = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock("@/lib/audit", () => ({ recordAudit }))
 
@@ -31,7 +32,7 @@ vi.mock("@/lib/auth/helpers", async (orig) => {
 })
 
 const fetchMock = vi.fn()
-const ok = () => new Response(JSON.stringify({ result: [] }), { status: 200 })
+const ok = () => new Response(JSON.stringify({ result: [] }), { status: 200, headers: { "content-type": "application/json" } })
 
 beforeEach(() => {
   role = "admin"
@@ -110,6 +111,24 @@ describe("instances API", () => {
     // user alone without any stored password -> 400
     rows.push({ id: "p2", label: "h", url: "https://o2.service-now.com/", midUser: null, midPasswordEnc: null, buildstamp: null, createdBy: "x", createdAt: new Date(0) })
     expect((await PATCH(json("PATCH", { midUser: "mid" }), ctx("p2"))).status).toBe(400)
+  })
+
+  it("PATCH rejects a bad buildstamp and over-long fields", async () => {
+    rows.push({ id: "b1", label: "h", url: "https://b.service-now.com/", midUser: null, midPasswordEnc: null, buildstamp: null, createdBy: "x", createdAt: new Date(0) })
+    const { PATCH } = await import("./[id]/route")
+    const bs = await PATCH(json("PATCH", { buildstamp: "nonsense" }), ctx("b1"))
+    expect(bs.status).toBe(400)
+    expect((await bs.json()).code).toBe("invalid_buildstamp")
+    expect((await PATCH(json("PATCH", { label: "x".repeat(101) }), ctx("b1"))).status).toBe(400)
+    expect((await PATCH(json("PATCH", { midUser: "x".repeat(101), password: "p" }), ctx("b1"))).status).toBe(400)
+    expect((await PATCH(json("PATCH", { midUser: "u", password: "p".repeat(257) }), ctx("b1"))).status).toBe(400)
+  })
+
+  it("getInstanceSecret returns the normalised url of a Phase 1 (no slash) row", async () => {
+    const { encryptSecret } = await import("@/lib/vault")
+    rows.push({ id: "g1", label: "h", url: "https://G.service-now.com", midUser: "mid", midPasswordEnc: encryptSecret("pw"), buildstamp: null, createdBy: "x", createdAt: new Date(0) })
+    const { getInstanceSecret } = await import("@/lib/instances/service")
+    expect(await getInstanceSecret("g1")).toMatchObject({ url: "https://g.service-now.com/", password: "pw" })
   })
 
   it("DELETE: 409 when a live MID uses it, else ok", async () => {
