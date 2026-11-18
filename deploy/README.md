@@ -167,3 +167,5 @@ helper itself when the copy changed. Restarting the helper does not stop running
 Heap changes rewrite the unit: saving a new RAM (heap) value in the config tab makes the helper regenerate
 `/etc/systemd/system/midhub-mid-<name>.service` from MidHub's template (`helper/unit-template.ts`). A unit you
 hand-edited on the host (e.g. during the spike) is overwritten - port such edits into the template first.
+
+Note: `/opt/midhub/mids` is `2770 midsvc:midhub` (no access for others; config.xml holds a plaintext password until the MID first starts). Hosts installed earlier need `sudo chmod 2770 /opt/midhub/mids`.

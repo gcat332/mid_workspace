@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { execFileSync } from "node:child_process"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { readParams, validateXml } from "./config-xml"
 import { readProp } from "./java-props"
@@ -106,10 +107,34 @@ describe("configureMid", () => {
     expect(fs.readFileSync(outside, "utf8")).toBe(TEMPLATE)
   })
 
-  it("never leaks the passwords in errors", async () => {
-    fs.writeFileSync(path.join(mid("new1"), "agent/config.xml"), "<parameters><parameter name='url' value='x'")
-    const e = await configureMid("new1", { ...INPUT, proxy: { host: "h", port: 1, password: "PROXYSECRET" } }).then(() => new Error("no throw"), (x: Error) => x)
-    expect(JSON.stringify([e.message, (e as { detail?: string }).detail])).not.toMatch(/PROXYSECRET|S3cr/)
+  it("second proxy run gives identical bytes", async () => {
+    const i = { ...INPUT, proxy: { host: "proxy.local", port: 3128, user: "pu", password: "pp" } }
+    await configureMid("new1", i)
+    const a = rd("new1", "agent/config.xml")
+    await configureMid("new1", i)
+    expect(rd("new1", "agent/config.xml")).toBe(a)
+  })
+
+  it("attacker values stay inside their attribute", async () => {
+    const evil = 'a"/><parameter name="x" value="y\n]]>--><!--\x01\x7f'
+    const r = await configureMid("new1", { ...INPUT, snName: evil, password: evil }).then(() => null, (e: Error) => e)
+    expect(r).toBeNull()
+    const p = readParams(rd("new1", "agent/config.xml"))
+    expect(p.name).toBe(evil)
+    expect(p.x).toBeUndefined()
+  })
+
+  it("invalid_xml error (registered, 400) carries only the line, never values", async () => {
+    const bad = '<parameters>\n<parameter name="url" value="x"/>\n<oops>\n</parameters>\n'
+    fs.writeFileSync(path.join(mid("new1"), "agent/config.xml"), bad)
+    const e = await configureMid("new1", { ...INPUT, password: "PWSECRET", proxy: { host: "h", port: 1, password: "PROXYSECRET" } }).then(
+      () => new Error("no throw"),
+      (x: Error) => x,
+    )
+    expect(e).toMatchObject({ code: "invalid_xml", status: 400 })
+    expect(e.message).toMatch(/บรรทัด \d+/)
+    expect(JSON.stringify([e.message, (e as { detail?: string }).detail])).not.toMatch(/PROXYSECRET|PWSECRET/)
+    expect(rd("new1", "agent/config.xml")).toBe(bad)
   })
 })
 
@@ -141,13 +166,86 @@ describe("cloneFiles", () => {
     expect(fs.existsSync(path.join(mid("new1"), "agent/security"))).toBe(false)
   })
 
-  it("does not follow a symlinked extlib dir in src", async () => {
+  it("skips (never follows) a symlinked extlib dir in src", async () => {
     fs.rmSync(path.join(mid("src1"), "agent/extlib"), { recursive: true })
     fs.mkdirSync(path.join(root, "elsewhere"))
     fs.writeFileSync(path.join(root, "elsewhere/x.jar"), "X")
     fs.symlinkSync(path.join(root, "elsewhere"), path.join(mid("src1"), "agent/extlib"))
-    await expect(cloneFiles("src1", "new1")).rejects.toMatchObject({ code: "path_outside" })
+    const r = await cloneFiles("src1", "new1")
+    expect(r.skipped).toEqual(["agent/extlib (symlink)"])
     expect(fs.existsSync(path.join(mid("new1"), "agent/extlib/x.jar"))).toBe(false)
+  })
+
+  it("skips a symlinked config.xml and wrapper-override.conf in src", async () => {
+    fs.writeFileSync(path.join(root, "o.txt"), "OUT")
+    for (const f of ["agent/config.xml", "agent/conf/wrapper-override.conf"]) {
+      fs.rmSync(path.join(mid("src1"), f))
+      fs.symlinkSync(path.join(root, "o.txt"), path.join(mid("src1"), f))
+    }
+    const r = await cloneFiles("src1", "new1")
+    expect(r.skipped).toEqual(expect.arrayContaining(["agent/config.xml (symlink)", "agent/conf/wrapper-override.conf (symlink)"]))
+    expect(rd("new1", "agent/config.xml")).toBe(TEMPLATE)
+    expect(rd("new1", "agent/conf/wrapper-override.conf")).toBe(WRAP)
+  })
+
+  it("clears encrypted/secure values and warns by name", async () => {
+    const xml = TEMPLATE.replace('<parameter name="mid.log.level" value="info"/>', '<parameter name="mid.log.level" value="info"/>\n  <parameter name="mid.proxy.password" value="ENCv2[abc]"/>\n  <parameter name="tok" encrypt="true" value="zzz"/>')
+    fs.writeFileSync(path.join(mid("src1"), "agent/config.xml"), xml)
+    const r = await cloneFiles("src1", "new1")
+    const p = readParams(rd("new1", "agent/config.xml"))
+    expect(p["mid.instance.password"]).toBe("")
+    expect(p["mid.proxy.password"]).toBe("")
+    expect(p.tok).toBe("")
+    expect(p["mid.custom.setting"]).toBe("keep-me")
+    expect(r.warnings).toHaveLength(1)
+    expect(r.warnings[0]).toMatch(/mid\.proxy\.password/)
+    expect(r.warnings[0]).not.toMatch(/YOUR_PASSWORD|ENCv2|zzz/)
+  })
+
+  it("skips hardlinks, FIFOs and nested symlinked dirs; sanitises names", async () => {
+    const ext = path.join(mid("src1"), "agent/extlib")
+    fs.linkSync(path.join(ext, "a.jar"), path.join(ext, "hard.jar"))
+    execFileSync("/usr/bin/mkfifo", [path.join(ext, "pipe")])
+    fs.mkdirSync(path.join(ext, "sub2"))
+    fs.symlinkSync(path.join(root, ".."), path.join(ext, "sub2/up"))
+    fs.symlinkSync("/etc", path.join(ext, "bad\x01name"))
+    const r = await cloneFiles("src1", "new1")
+    expect(r.skipped).toEqual(expect.arrayContaining([
+      "agent/extlib/a.jar (hardlink)", "agent/extlib/hard.jar (hardlink)", "agent/extlib/pipe (not a regular file)",
+      "agent/extlib/sub2/up (symlink)", "agent/extlib/bad?name (symlink)",
+    ]))
+    expect(fs.existsSync(path.join(mid("new1"), "agent/extlib/pipe"))).toBe(false)
+  })
+
+  it("caps skipped at 100 plus a summary line", async () => {
+    for (let i = 0; i < 130; i++) fs.symlinkSync("/etc", path.join(mid("src1"), `agent/extlib/l${i}`))
+    const r = await cloneFiles("src1", "new1")
+    expect(r.skipped).toHaveLength(101)
+    expect(r.skipped[100]).toMatch(/^…และอีก 31 รายการ$/)
+  })
+
+  it("rejects extlib nested deeper than 32", async () => {
+    let p = path.join(mid("src1"), "agent/extlib")
+    for (let i = 0; i < 35; i++) p = path.join(p, "d")
+    fs.mkdirSync(p, { recursive: true })
+    await expect(cloneFiles("src1", "new1")).rejects.toMatchObject({ code: "invalid_request" })
+  })
+
+  it("counts directories toward the entry cap", async () => {
+    for (let i = 0; i <= CLONE_MAX_FILES; i++) fs.mkdirSync(path.join(mid("src1"), `agent/extlib/d${i}`))
+    await expect(cloneFiles("src1", "new1")).rejects.toMatchObject({ code: "invalid_request" })
+  }, 60_000)
+
+  it("stops when aborted and leaves no temp files", async () => {
+    const ac = new AbortController()
+    ac.abort(new Error("stop"))
+    await expect(cloneFiles("src1", "new1", ac.signal)).rejects.toThrow("stop")
+    expect(fs.readdirSync(path.join(mid("new1"), "agent")).filter((n) => n.includes(".midhub-"))).toEqual([])
+  })
+
+  it("writes atomically: no temp files left behind", async () => {
+    await cloneFiles("src1", "new1")
+    for (const d of ["agent", "agent/conf", "agent/extlib"]) expect(fs.readdirSync(path.join(mid("new1"), d)).filter((n) => n.includes(".midhub-"))).toEqual([])
   })
 
   it("rejects when extlib exceeds the file-count cap", async () => {

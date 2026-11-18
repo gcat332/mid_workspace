@@ -177,3 +177,15 @@ export function setParams(xml: string, changes: Record<string, string>): string 
   for (const e of edits.sort((a, b) => b.start - a.start)) out = out.slice(0, e.start) + e.text + out.slice(e.end)
   return out
 }
+
+/** Live `<parameter>` elements with their decoded attributes (document order, duplicates included). */
+export function readParamAttrs(xml: string): Array<{ name: string; attrs: Record<string, string> }> {
+  const out: Array<{ name: string; attrs: Record<string, string> }> = []
+  for (const t of tokenize(xml)) {
+    if (t.kind !== "parameter") continue
+    const attrs: Record<string, string> = Object.create(null)
+    for (const a of t.attrs) attrs[decode(a.name)] = decode(a.raw)
+    if (attrs.name !== undefined) out.push({ name: attrs.name, attrs })
+  }
+  return out
+}

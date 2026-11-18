@@ -51,8 +51,9 @@ id midsvc >/dev/null 2>&1 || useradd -r -g midhub -s /usr/sbin/nologin -d /nonex
 id -nG "$APP_USER" | tr ' ' '\n' | grep -qx midhub || { usermod -aG midhub "$APP_USER"; changed=1; }
 
 install -d -m 0755 -o root -g root "$ROOT_DIR"
-install -d -m 2775 -o midsvc -g midhub "$ROOT_DIR/mids"
-chown midsvc:midhub "$ROOT_DIR/mids"; chmod 2775 "$ROOT_DIR/mids"
+# mids/ is 2770 (no access for others): config.xml carries a plaintext password until the MID first starts
+install -d -m 2770 -o midsvc -g midhub "$ROOT_DIR/mids"
+chown midsvc:midhub "$ROOT_DIR/mids"; chmod 2770 "$ROOT_DIR/mids"
 install -d -m 0700 -o "$APP_USER" -g "$APP_USER" "$ROOT_DIR/staging"  # private extraction area, same fs as mids
 chown "$APP_USER:$APP_USER" "$ROOT_DIR/staging"; chmod 0700 "$ROOT_DIR/staging"
 for d in packages archive db jobs; do

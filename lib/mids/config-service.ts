@@ -1,4 +1,3 @@
-import path from "node:path"
 import type { FileHandle } from "node:fs/promises"
 import { prisma } from "@/lib/db/client"
 import { recordAudit } from "@/lib/audit"
@@ -8,8 +7,8 @@ import { MAX_HEAP_MB, MIN_HEAP_MB } from "@/lib/helper/protocol"
 import { readAllParams, readParams, setParams, validateXml } from "./config-xml"
 import { CONFIG_XML, WRAPPER_OVERRIDE } from "./layout"
 import { MidError, validateMidName } from "./names"
-import { isReadOnlyPath, resolveMidPath } from "./paths"
-import { createFileIn, insideCheck, openDir, openFile, readAll, readFileVerified, translateFsError, type Check } from "./safe-fs"
+import { openFile, readAll, translateFsError } from "./safe-fs"
+import { createVerified, isEnoent, readOpt, target, type Target } from "./mid-files"
 import { readHeapMb, setHeapMb } from "./wrapper-conf"
 import { sha256 } from "@/lib/hash"
 
@@ -93,41 +92,15 @@ async function midRow(name: string) {
   return row
 }
 
-type Target = { abs: string; check: Check }
-
-/**
- * Resolved location of a managed config file plus the check every opened handle must pass: inside the MID root
- * and not in a program dir. openFile additionally pins the handle's real path to `abs`, so a file or directory
- * swapped by the MID process after this point (symlink to .env.local, the DB, app code ...) is refused.
- */
-async function targetOf(name: string, file: ConfigFile): Promise<Target> {
-  const root = await resolveMidPath(name, "")
-  const abs = await resolveMidPath(name, REL[file])
-  if (isReadOnlyPath(name, abs)) throw new MidError("read_only")
-  const inside = insideCheck(root)
-  return {
-    abs,
-    check: (real) => {
-      inside(real)
-      if (isReadOnlyPath(name, real)) throw new MidError("read_only")
-    },
-  }
-}
-
-const isEnoent = (e: unknown) => (e as NodeJS.ErrnoException)?.code === "ENOENT"
+const targetOf = (name: string, file: ConfigFile): Promise<Target> => target(name, REL[file])
 
 async function readDisk(name: string, file: ConfigFile): Promise<string> {
   const t = await targetOf(name, file)
   await hooks.beforeIo?.()
-  try {
-    return (await readFileVerified(t.abs, t.check, MAX_DISK_BYTES)).toString("utf8")
-  } catch (e) {
-    if (isEnoent(e)) {
-      if (file === "wrapper-override.conf") return "" // optional file: created on first save
-      throw new MidError("not_found")
-    }
-    return translateFsError(e)
-  }
+  const text = await readOpt(t, MAX_DISK_BYTES)
+  if (text !== null) return text
+  if (file === "wrapper-override.conf") return "" // optional file: created on first save
+  throw new MidError("not_found")
 }
 
 /** Opens the file read-write (or null when an optional wrapper file does not exist yet). */
@@ -142,21 +115,6 @@ async function openForWrite(t: Target, file: ConfigFile): Promise<FileHandle | n
   } catch (e) {
     if (isEnoent(e) && file === "wrapper-override.conf") return null
     if (isEnoent(e)) throw new MidError("not_found")
-    return translateFsError(e)
-  }
-}
-
-/** Creates the (missing) file inside its verified parent directory; fails if it appeared meanwhile. */
-async function createVerified(t: Target): Promise<FileHandle> {
-  const dir = path.dirname(t.abs)
-  try {
-    const d = await openDir(dir, t.check)
-    try {
-      return await createFileIn(d, dir, path.basename(t.abs), t.check)
-    } finally {
-      await d.close()
-    }
-  } catch (e) {
     return translateFsError(e)
   }
 }
