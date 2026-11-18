@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
-const SECRET = "s".repeat(40)
-const fakeEnv = vi.hoisted(() => ({ agentSecret: "s".repeat(40) as string | null }))
+const SECRET = "Zq7-distinct-secret-value-Zq7-" + "k".repeat(16)
+const fakeEnv = vi.hoisted(() => ({ agentSecret: "Zq7-distinct-secret-value-Zq7-" + "k".repeat(16) as string | null }))
 vi.mock("@/lib/env", () => ({ env: fakeEnv }))
 let dbUser: { id: string; email: string; role: string; lockedAt: Date | null } | null = null
 const findUnique = vi.fn(async (...args: unknown[]) => (void args, dbUser))
@@ -12,6 +12,7 @@ import { agentRoute } from "./http"
 
 const hdrs = (over: Record<string, string | null> = {}) => {
   const base: Record<string, string | null> = {
+    host: "127.0.0.1:3100",
     "x-midhub-agent-secret": SECRET,
     "x-midhub-actor-email": "Alice@X.com",
     "x-midhub-session-id": "task-1",
@@ -54,10 +55,43 @@ describe("authenticateAgent", () => {
       expect(await fail(req({ "x-forwarded-for": xff }))).toBeNull()
     }
   })
-  it("no secret value in any error", async () => {
-    for (const r of [req({ "x-forwarded-for": "1.2.3.4" }), req({ "x-midhub-agent-secret": "nope" })]) {
-      expect(JSON.stringify(await fail(r))).not.toContain(SECRET)
+  it("wrong secret wins over forwarding headers: 401, not 403", async () => {
+    expect(await fail(req({ "x-midhub-agent-secret": "bad", "x-forwarded-for": "1.2.3.4" }))).toMatchObject({ code: "agent_auth", status: 401 })
+  })
+  it("401 carries the exact catalogue text", async () => {
+    expect((await fail(req({ "x-midhub-agent-secret": "bad" })))!.message).toBe("AgentHub ยืนยันตัวตนกับ MidHub ไม่ผ่าน ตรวจ MIDHUB_AGENT_SECRET ทั้งสองฝั่ง")
+  })
+  it("requires a loopback Host (a request through Caddy keeps the public Host)", async () => {
+    for (const host of ["10.4.150.142", "dev-agenthub.mfec.co.th", "127.0.0.1.evil.com", "localhost.evil.com:3100", ""]) {
+      expect(await fail(req({ host }))).toMatchObject({ code: "agent_auth", status: 403 })
     }
+    expect(await fail(req({ host: null }))).toMatchObject({ code: "agent_auth", status: 403 })
+    for (const host of ["127.0.0.1:3100", "localhost:3100", "[::1]:3100", "127.0.0.1", "localhost", "LOCALHOST:3100"]) {
+      expect(await fail(req({ host }))).toBeNull()
+    }
+    expect(findUnique).toHaveBeenCalledTimes(6)
+  })
+  it("a spoofed loopback XFF with a public Host is still refused", async () => {
+    expect(await fail(req({ "x-forwarded-for": "127.0.0.1", host: "10.4.150.142" }))).toMatchObject({ code: "agent_auth", status: 403 })
+  })
+  it("no secret value in the serialized body of any error response", async () => {
+    dbUser = null
+    const cases = [
+      req({ "x-midhub-agent-secret": "bad" }),
+      req({ "x-forwarded-for": "1.2.3.4" }),
+      req({ host: "10.4.150.142" }),
+      req(), // agent_user (no such account)
+      req({ "x-midhub-session-id": null }),
+    ]
+    const statuses: number[] = []
+    for (const r of cases) {
+      const res = await agentRoute(async () => new Response("ok"))(r, {})
+      statuses.push(res.status)
+      const body = await res.text()
+      expect(body).not.toContain(SECRET)
+      expect(body).not.toContain("Zq7")
+    }
+    expect(statuses).toEqual([401, 403, 403, 403, 400])
   })
   it("unknown, missing-email or locked actor -> 403 agent_user", async () => {
     dbUser = null
@@ -67,7 +101,7 @@ describe("authenticateAgent", () => {
     dbUser = { id: "u1", email: "alice@x.com", role: "member", lockedAt: new Date() }
     const e = await fail(req())
     expect(e).toMatchObject({ code: "agent_user", status: 403 })
-    expect(e!.message).toContain("ยังไม่มีสิทธิ์ใช้ MidHub")
+    expect(e!.message).toBe("ผู้ใช้ alice@x.com ยังไม่มีสิทธิ์ใช้ MidHub ให้ Admin เพิ่มในหน้า Users")
   })
   it("an expired lock does not block", async () => {
     dbUser = { id: "u1", email: "alice@x.com", role: "member", lockedAt: new Date(Date.now() - 3600_000) }
@@ -98,8 +132,9 @@ describe("helpers", () => {
     expect(parseSessionInstances("")).toEqual([])
     expect(parseSessionInstances("http://a.service-now.com,https://evil.com")).toEqual([])
   })
-  it("cameDirectlyOverLoopback: no headers is fine", () => {
-    expect(cameDirectlyOverLoopback(new Headers())).toBe(true)
+  it("cameDirectlyOverLoopback: only a loopback Host and no forwarding headers", () => {
+    expect(cameDirectlyOverLoopback(new Headers({ host: "127.0.0.1:3100" }))).toBe(true)
+    expect(cameDirectlyOverLoopback(new Headers())).toBe(false)
   })
 })
 

@@ -74,6 +74,8 @@ MidHub  http://127.0.0.1:3100/midhub/api/agent/<path>  (ฝั่ง MidHub)
 | `X-MidHub-Session-Id` | `taskId` ของ AgentHub (ใช้ใน audit) |
 | `X-MidHub-Session-Instances` | ชุด instance ของ session คั่นด้วย `,` (ดู 5.1.1) หรือว่าง ถ้าไม่มี |
 
+ข้อกำหนดเพิ่ม: `X-MidHub-Session-Id` ต้องมีและไม่ว่าง (ไม่เช่นนั้น MidHub ตอบ 400 `agent_auth`) · AgentHub ต้องเรียก `http://127.0.0.1:3100/midhub` เพื่อให้ `Host` เป็น loopback (`127.x`/`[::1]`/`localhost` พอร์ตใดก็ได้) MidHub ตอบ 403 `agent_auth` ถ้า Host หรือ X-Forwarded-For/X-Real-IP/Forwarded ไม่ใช่ loopback (ชั้นป้องกันเสริม; ชั้นหลักคือ Caddy 404 `/midhub/api/agent/*`)
+
 #### 5.1.1 instance ของ session มาจากไหน [ผู้ใช้เลือกแบบ ก. ดูรวมทุกแหล่ง]
 
 AgentHub (ฝั่ง server) รวบรวมจากทุกแหล่งต่อไปนี้ แล้ว normalize เป็น `https://<x>.service-now.com/` ตัดค่าที่ไม่ใช่ `*.service-now.com` ทิ้ง และตัดซ้ำ:
