@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireAdmin } from "@/lib/auth/helpers"
+import { requireAdmin, responseOrRethrow } from "@/lib/auth/helpers"
 import { idpService, type IdpConfigData } from "@/lib/services/idp"
 
 const SECRET_PLACEHOLDER = "••••"
@@ -7,7 +7,7 @@ const SECRET_PLACEHOLDER = "••••"
 // Admin-only. GET never returns the stored secret (a placeholder when one is set);
 // PUT leaves it untouched when the placeholder or a blank value is submitted.
 export async function GET() {
-  try { await requireAdmin() } catch (res) { return res as Response }
+  try { await requireAdmin() } catch (e) { return responseOrRethrow(e) }
   const c = await idpService.get()
   return NextResponse.json({
     provider: c?.provider ?? "oidc",
@@ -23,7 +23,7 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  try { await requireAdmin() } catch (res) { return res as Response }
+  try { await requireAdmin() } catch (e) { return responseOrRethrow(e) }
   const b = (await req.json().catch(() => ({}))) as Partial<IdpConfigData>
   const data: Partial<IdpConfigData> = {
     provider: String(b.provider ?? "oidc"),

@@ -57,7 +57,8 @@ export async function GET(req: Request) {
 
     const claims = await verifyIdToken(tok.id_token, disc.jwks_uri, disc.issuer, c.clientId)
     const expectedNonce = jar.get("oidc_nonce")?.value
-    if (expectedNonce && claims.nonce !== expectedNonce) return fail("state", "nonce_mismatch")
+    // Fail closed: a missing nonce cookie must not skip the check.
+    if (!expectedNonce || claims.nonce !== expectedNonce) return fail("state", "nonce_mismatch")
 
     const email = emailFromClaims(claims)
     if (!email) return fail("no_email", "no_email")

@@ -70,6 +70,20 @@ it("refuses a bad state", async () => {
   expect(res.headers.get("location")).toBe("http://x/midhub/login?error=state")
 })
 
+it("refuses when the nonce cookie is missing (fail closed)", async () => {
+  delete jar.oidc_nonce
+  verifyIdToken.mockResolvedValue({ email: "bob@x.com" })
+  const res = await call()
+  expect(res.headers.get("location")).toBe("http://x/midhub/login?error=state")
+  expect(res.headers.get("set-cookie") ?? "").not.toContain("midhub_session=ey")
+})
+
+it("refuses a nonce mismatch", async () => {
+  verifyIdToken.mockResolvedValue({ nonce: "other", email: "bob@x.com" })
+  const res = await call()
+  expect(res.headers.get("location")).toBe("http://x/midhub/login?error=state")
+})
+
 it("never puts IdP-supplied text in the redirect", async () => {
   const res = await call("error=access_denied&error_description=%3Cscript%3E")
   expect(res.headers.get("location")).toBe("http://x/midhub/login?error=idp")
