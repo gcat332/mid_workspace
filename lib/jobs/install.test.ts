@@ -24,6 +24,9 @@ let prisma: typeof import("@/lib/db/client").prisma
 let calls: string[] = []
 let configured: unknown[] = []
 let failStart = 0
+let failStartAfter = 0
+let sinces: Date[] = []
+let connectFail: Error | null = null
 let freeBytes: number | null = 10 * 1024 ** 3
 let instanceId = ""
 
@@ -58,9 +61,14 @@ beforeAll(async () => {
     callHelper: async (req: { op: string; heapMb?: number }) => {
       calls.push(req.op + (req.heapMb ? `(${req.heapMb})` : ""))
       if (req.op === "start" && failStart-- > 0) throw new MidError("quota_full")
+      if (req.op === "start" && failStartAfter-- > 0) throw new Error("helper reply lost")
       return { ok: true as const }
     },
-    waitConnected: async () => void calls.push("waitConnected"),
+    waitConnected: async (_n: string, since: Date) => {
+      calls.push("waitConnected")
+      sinces.push(since)
+      if (connectFail) throw connectFail
+    },
     gcPackages: async () => (calls.push("gc"), []),
   })
 }, 60000)
@@ -78,10 +86,12 @@ beforeEach(async () => {
   calls = []
   configured = []
   failStart = 0
+  failStartAfter = 0
+  sinces = []
+  connectFail = null
   freeBytes = 10 * 1024 ** 3
   await prisma.job.deleteMany()
   await prisma.midServer.deleteMany()
-  await prisma.auditLog.deleteMany()
 })
 
 async function mkMid(name: string, state = "installing") {
@@ -114,10 +124,11 @@ describe("install kinds", () => {
     expect(mid).toMatchObject({ state: "installed", version: BS })
     const jr = readFileSync(job.journalPath, "utf8")
     expect(jr).toContain("cfg warn")
-    const audit = JSON.stringify(await prisma.auditLog.findMany())
+    // Audit rows are written by the Task 9 routes (their tests cover audit); the job engine writes none.
     for (const s of [INST_PW, PROXY_PW]) {
-      for (const hay of [jr, audit, JSON.stringify(job)]) expect(hay).not.toContain(s)
+      for (const hay of [jr, JSON.stringify(job)]) expect(hay).not.toContain(s)
     }
+    expect(sinces[0].toISOString()).toBe(JSON.parse(job.params).startedAt)
     expect(JSON.parse(job.params).startedAt).toBeTruthy()
   })
 
@@ -154,8 +165,9 @@ describe("install kinds", () => {
     await eng.__idleForTests()
     const after = await prisma.job.findUniqueOrThrow({ where: { id: job.id } })
     expect(after.status).toBe("succeeded")
-    expect(calls).toEqual(["start", "waitConnected", "gc"])
+    expect(calls).toEqual(["restart", "waitConnected", "gc"])
     expect(JSON.parse(after.params).startedAt > first).toBe(true)
+    expect(sinces[0].toISOString()).toBe(JSON.parse(after.params).startedAt)
     expect((await prisma.midServer.findUniqueOrThrow({ where: { name: "m4" } })).state).toBe("installed")
   })
 
@@ -175,5 +187,54 @@ describe("install kinds", () => {
     const job = await run("clone", "m6", params({ proxy: undefined, cloneFrom: "src2" }))
     expect(job).toMatchObject({ status: "failed", stage: "precheck" })
     expect(calls).toEqual([])
+  })
+
+  it("retry of start after the helper already started uses restart and a new since", async () => {
+    await mkMid("m7")
+    failStartAfter = 1
+    const job = await run("install", "m7", params({ proxy: undefined }))
+    expect(job).toMatchObject({ status: "failed", stage: "start" })
+    const first = JSON.parse(job.params).startedAt as string
+    expect(calls.at(-1)).toBe("start")
+    await new Promise((r) => setTimeout(r, 5))
+    await eng.retryJob(admin, job.id)
+    await eng.__idleForTests()
+    const after = await prisma.job.findUniqueOrThrow({ where: { id: job.id } })
+    expect(after.status).toBe("succeeded")
+    expect(calls.filter((c) => c === "start" || c === "restart")).toEqual(["start", "restart"])
+    const second = JSON.parse(after.params).startedAt as string
+    expect(second > first).toBe(true)
+    expect(sinces).toHaveLength(1)
+    expect(sinces[0].toISOString()).toBe(second)
+  })
+
+  it("connect_timeout journals the ERROR lines and keeps a short detail", async () => {
+    await mkMid("m8")
+    const { MidError } = await import("@/lib/mids/names")
+    connectFail = new MidError("connect_timeout", undefined, undefined, "ERROR first\nSEVERE second")
+    const job = await run("install", "m8", params({ proxy: undefined }))
+    expect(job).toMatchObject({ status: "failed", stage: "waitConnected" })
+    const entries = (await (await import("./journal")).readJournal(job.id)) as { type: string; level?: string; msg?: string; code?: string; detail?: string }[]
+    expect(entries.filter((e) => e.level === "error").map((e) => e.msg)).toEqual(["ERROR first", "SEVERE second"])
+    expect(entries.find((e) => e.type === "error")).toMatchObject({ code: "connect_timeout", detail: "ดูบรรทัด ERROR ใน log ของงานนี้" })
+  })
+
+  it("precheck requires an installing MidServer row and cloneFrom != midName", async () => {
+    const a = await run("install", "nomid", params({ proxy: undefined }))
+    expect(a).toMatchObject({ status: "failed", stage: "precheck" })
+    await mkMid("m9", "installed")
+    const b = await run("install", "m9", params({ proxy: undefined }))
+    expect(b).toMatchObject({ status: "failed", stage: "precheck" })
+    await mkMid("m10")
+    const c = await run("clone", "m10", params({ proxy: undefined, cloneFrom: "m10" }))
+    expect(c).toMatchObject({ status: "failed", stage: "precheck" })
+    expect(c.error).toBeTruthy()
+    expect(calls).toEqual([])
+  })
+
+  it("logs 100% progress once", async () => {
+    await mkMid("m11")
+    const job = await run("install", "m11", params({ proxy: undefined }))
+    expect((readFileSync(job.journalPath, "utf8").match(/package 100%/g) ?? []).length).toBe(1)
   })
 })

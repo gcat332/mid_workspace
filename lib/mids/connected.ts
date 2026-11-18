@@ -19,6 +19,10 @@ export function parseLineTime(line: string): number | null {
 
 const sanitize = (s: string) => s.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, ERR_LINE_CAP)
 
+/**
+ * Limitation: only the current agent0.log.0 is tailed (tailFile follows a rotation of that name, but lines already
+ * rotated into older files before the first poll are not read). A marker rotated out within the wait is missed.
+ */
 export async function waitConnected(
   name: string,
   since: Date,
