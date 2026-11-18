@@ -62,27 +62,44 @@ Back up and edit `/etc/caddy/Caddyfile` by hand. Add the `@midhub path /midhub /
 matcher lists both). Because AgentHub's sites use a site-level `reverse_proxy`, the `handle` blocks take
 precedence for /midhub; AgentHub's own traffic is unchanged.
 
+Body limits are enforced by Caddy before the app sees (and authenticates) a request: only the upload
+endpoint `^/midhub/api/mids/<name>/files$` may send up to 51 MiB; everything else under /midhub is capped at
+1 MiB (config files are edited as JSON, so a config file close to the app's 1 MB save limit can hit this cap
+first - real config.xml files are far smaller). Sizes are written in MiB on purpose: Caddy reads `MB` as
+10^6 bytes. The app itself accepts one upload at a time and runs with `MemoryMax=1G`.
+
 Upload limit, two options:
 
-- (b) DEFAULT: leave AgentHub untouched. Its site-level `request_body { max_size 50MB }` runs before
-  `handle`, so the effective MidHub upload limit is slightly under 50 MB (Caddy returns 413 for larger
+- (b) DEFAULT: leave AgentHub untouched. Its site-level `request_body { max_size 50MB }` (10^6 bytes) runs
+  before `handle`, so the effective MidHub upload limit is about 47.6 MiB (Caddy returns 413 for larger
   bodies). The UI says "ไม่เกิน 50 MB".
-- (a) OPTIONAL, to allow a full 50 MB file: wrap AgentHub's proxying in a trailing `handle { }`
+- (a) OPTIONAL, to allow a full 50 MiB file: wrap AgentHub's proxying in a trailing `handle { }`
   (back up first, then `caddy validate`):
 
         https://10.4.150.142 {
             tls internal
             @midhub path /midhub /midhub/*
             handle @midhub {
-                request_body { max_size 51MB }
+                @midhubUpload path_regexp ^/midhub/api/mids/[^/]+/files$
+                @midhubOther not path_regexp ^/midhub/api/mids/[^/]+/files$
+                request_body @midhubUpload {
+                    max_size 51MiB
+                }
+                request_body @midhubOther {
+                    max_size 1MiB
+                }
                 reverse_proxy 127.0.0.1:3100 {
                     header_up X-Forwarded-For {client_ip}
                     flush_interval -1
                 }
             }
             handle {
-                reverse_proxy 127.0.0.1:3000 { header_up X-Forwarded-For {client_ip} }
-                request_body { max_size 50MB }
+                reverse_proxy 127.0.0.1:3000 {
+                    header_up X-Forwarded-For {client_ip}
+                }
+                request_body {
+                    max_size 50MB
+                }
             }
             encode gzip
             log
@@ -106,8 +123,9 @@ Then:
 - Upload into `agent/extlib` works; into `agent/bin` is refused
 - Log tab streams. Also check SSE through Caddy (with `encode gzip` in the site, events must arrive
   incrementally, not in one burst at the end):
-  `curl -sN -H "Cookie: midhub_session=<token>" https://<host>/midhub/<log stream URL for a running MID>`
-  (find the exact URL in the Network tab); lines should appear as the log grows.
+  `curl -sN -H "Cookie: midhub_session=<token>" "https://<host>/midhub/api/mids/<name>/logs?file=main"`
+  (`file=wrapper` for the wrapper log; take `<token>` from the browser's `midhub_session` cookie); lines
+  should appear as the log grows.
 - `journalctl -u bsm-midhub -u bsm-midhub-helper -n 50` is clean
 
 ### Locked out?
@@ -143,3 +161,7 @@ helper itself when the copy changed. Restarting the helper does not stop running
 
 `deploy/midhub-mid.service.example` shows what the helper generates per MID (ExecStart PROVISIONAL, see
 `docs/spike-mid-linux.md`).
+
+Heap changes rewrite the unit: saving a new RAM (heap) value in the config tab makes the helper regenerate
+`/etc/systemd/system/midhub-mid-<name>.service` from MidHub's template (`helper/unit-template.ts`). A unit you
+hand-edited on the host (e.g. during the spike) is overwritten - port such edits into the template first.

@@ -2,16 +2,22 @@
 # Paste INSIDE AgentHub's existing site block(s) in /etc/caddy/Caddyfile (both the
 # https://10.4.150.142 and http://dev-agenthub.mfec.co.th sites), BEFORE any catch-all
 # handle / reverse_proxy to :3000, so /midhub/* is matched first.
-# Upload limit: AgentHub's site has a site-level `request_body { max_size 50MB }`, which Caddy
-# applies BEFORE `handle`. Default (option b): leave AgentHub untouched; the effective MidHub
-# upload limit is then slightly under 50 MB (Caddy answers 413 for bigger bodies; the UI says
-# "ไม่เกิน 50 MB"). Optional (option a): wrap AgentHub's reverse_proxy + request_body in a
-# trailing `handle { }` to allow a full 50 MB file. See deploy/README.md (back up + validate).
+# Body limits (Caddy enforces them BEFORE the app authenticates, so an anonymous client cannot make
+# the app buffer big bodies): only the file-upload endpoint may send up to 51 MiB (50 MiB file +
+# multipart framing, = app proxyClientMaxBodySize "51mb"); every other /midhub request: 1 MiB.
+# Units are MiB on purpose: Caddy reads "MB" as 10^6 bytes, which would clip a 50 MiB upload.
+# AgentHub's site has a site-level `request_body { max_size 50MB }` that runs BEFORE `handle`, so by
+# default (option b) the effective upload limit is slightly under 50 MB; option (a) in
+# deploy/README.md lifts that for a full 50 MB file.
 	@midhub path /midhub /midhub/*
 	handle @midhub {
-		# 50 MB uploads + multipart framing (app proxyClientMaxBodySize = 51mb)
-		request_body {
-			max_size 51MB
+		@midhubUpload path_regexp ^/midhub/api/mids/[^/]+/files$
+		@midhubOther not path_regexp ^/midhub/api/mids/[^/]+/files$
+		request_body @midhubUpload {
+			max_size 51MiB
+		}
+		request_body @midhubOther {
+			max_size 1MiB
 		}
 		reverse_proxy 127.0.0.1:3100 {
 			header_up X-Forwarded-For {client_ip}

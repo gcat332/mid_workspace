@@ -30,7 +30,8 @@ ProtectSystem=strict
 # Writable: only Next's build/cache dir and the MidHub data root (MIDs + SQLite DB in /opt/midhub/db).
 # The rest of the checkout (incl. helper sources/build) stays read-only for the running app.
 ReadWritePaths=@APP_DIR@/.next /opt/midhub
-MemoryMax=512M
+# 1G: one upload (<= 50 MiB, buffered whole; the app allows one at a time) + Next + Prisma headroom.
+MemoryMax=1G
 
 [Install]
 WantedBy=multi-user.target
