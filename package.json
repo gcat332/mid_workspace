@@ -11,6 +11,7 @@
     "helper:build": "tsc -p helper/tsconfig.json"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@prisma/adapter-better-sqlite3": "^7.10.1",
     "@prisma/client": "^7.10.1",
     "bcryptjs": "^3.0.3",

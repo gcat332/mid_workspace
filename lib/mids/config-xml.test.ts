@@ -127,3 +127,14 @@ describe("validateXml", () => {
     }
   })
 })
+
+describe("readParams prototype-named keys", () => {
+  it("keeps parameters named like Object.prototype members", () => {
+    const p = readParams(`<parameters><parameter name="constructor" value="1"/><parameter name="toString" value="2"/><parameter name="__proto__" value="3"/><parameter name="a" value="4"/></parameters>`)
+    expect(Object.hasOwn(p, "constructor") && p.constructor).toBe("1")
+    expect(p.toString).toBe("2")
+    expect(Object.getPrototypeOf(p)).toBeNull()
+    expect(Object.keys(p).sort()).toEqual(["__proto__", "a", "constructor", "toString"])
+    expect(p.a).toBe("4")
+  })
+})

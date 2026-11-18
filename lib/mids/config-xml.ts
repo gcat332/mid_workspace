@@ -87,13 +87,14 @@ const attr = (t: Tok, n: string): Attr | undefined => t.attrs.find((a) => a.name
 
 /** Reads `<parameter name value>` pairs (entities decoded, values untrimmed). With duplicate names the first wins. */
 export function readParams(xml: string): Record<string, string> {
-  const out: Record<string, string> = {}
+  // Null prototype + hasOwn so names like `constructor` / `toString` / `__proto__` are ordinary keys.
+  const out: Record<string, string> = Object.create(null)
   for (const t of tokenize(xml)) {
     if (t.kind !== "parameter") continue
     const n = attr(t, "name")
     if (!n) continue
     const name = decode(n.raw)
-    if (!(name in out)) out[name] = decode(attr(t, "value")?.raw ?? "")
+    if (!Object.hasOwn(out, name)) out[name] = decode(attr(t, "value")?.raw ?? "")
   }
   return out
 }
