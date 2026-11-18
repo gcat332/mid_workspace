@@ -1,0 +1,24 @@
+# EXAMPLE ONLY - rendered by helper/unit-template.ts renderUnit({name:"spike1", heapMb:1024,
+# midRoot:"/opt/midhub/mids/spike1"}). The real unit is written by the helper to
+# /etc/systemd/system/midhub-mid-<name>.service. ExecStart is PROVISIONAL until the Phase 0
+# spike (docs/spike-mid-linux.md) confirms how to launch the MID on this host.
+[Unit]
+Description=MidHub MID Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=midsvc
+Group=midhub
+WorkingDirectory=/opt/midhub/mids/spike1/agent
+# PROVISIONAL: confirm in spike (docs/spike-mid-linux.md)
+ExecStart=/opt/midhub/mids/spike1/agent/bin/mid.sh console
+MemoryMax=1536M
+Restart=on-failure
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+

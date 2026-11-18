@@ -1,0 +1,32 @@
+# MidHub privileged helper daemon (runs as root; the web app talks to it over a unix socket).
+# Template: install.sh replaces @APP_DIR@ with the repo checkout path.
+[Unit]
+Description=BSM MidHub root helper (MID unit/permission management)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Environment=NODE_ENV=production
+Environment=MIDHUB_ROOT=/opt/midhub
+Environment=MIDHUB_MAX_RUNNING=4
+Environment=MIDHUB_HELPER_SOCKET=/run/midhub/helper.sock
+Environment=MIDHUB_SOCKET_GROUP=bsmmidhub
+ExecStart=/usr/bin/node @APP_DIR@/helper/dist/helper/main.js
+# /run/midhub is 0755 so bsmmidhub can traverse to the socket; the socket file itself is
+# created 0660 root:bsmmidhub by the helper, which is what actually gates access.
+RuntimeDirectory=midhub
+RuntimeDirectoryMode=0755
+Restart=always
+RestartSec=3
+# Light hardening only. The helper must write /etc/systemd/system, run systemctl, chown,
+# and setpriv (to drop to midsvc), so ProtectSystem=strict / ProtectHome are NOT used.
+# NoNewPrivileges is safe: setpriv only drops privileges; nothing here needs to gain any.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectControlGroups=no
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+# MidHub web app (Next.js, basePath /midhub, port 3100).
+# Template: install.sh replaces @APP_DIR@ with the repo checkout path.
+[Unit]
+Description=BSM MidHub (ServiceNow MID Server manager)
+After=network.target bsm-midhub-helper.service
+Wants=bsm-midhub-helper.service
+
+[Service]
+Type=simple
+User=bsmmidhub
+Group=bsmmidhub
+WorkingDirectory=@APP_DIR@
+EnvironmentFile=@APP_DIR@/.env.local
+Environment=NODE_ENV=production
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3100
+Environment=TZ=Asia/Bangkok
+# Apply pending migrations (idempotent). Repo-local prisma binary, never npx.
+ExecStartPre=@APP_DIR@/node_modules/.bin/prisma migrate deploy
+ExecStart=/usr/bin/node @APP_DIR@/node_modules/next/dist/bin/next start
+Restart=on-failure
+RestartSec=5
+# Hardening. The app reads /proc/self/fd and /proc/meminfo and runs `systemctl show` /
+# `list-units`, so ProtectProc/ProcSubset are deliberately NOT set.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=@APP_DIR@ /opt/midhub
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
