@@ -31,7 +31,7 @@ vi.mock("@/lib/db/client", () => {
 })
 
 import { MidError } from "./names"
-import { deps, getMid, importMid, listMids } from "./registry"
+import { deps, getMid, hooks, importMid, listMids } from "./registry"
 
 const user = { userId: "u1", email: "a@x.com", role: "member" as const, authAt: 0 }
 const CFG = (url: string, name: string) =>
@@ -149,5 +149,32 @@ describe("listMids / getMid", () => {
     db.mids.push({ id: "3", name: "gone", state: "removed", heapMb: 1024, version: null, instanceId: null })
     await expect(getMid("nope")).rejects.toBeInstanceOf(MidError)
     await expect(getMid("gone")).rejects.toMatchObject({ code: "not_found" })
+  })
+})
+
+describe("TOCTOU: registry reads only through verified fds", () => {
+  afterEach(() => { hooks.beforeIo = undefined })
+  const swapToOutside = (n: string) => () => {
+    const o = path.join(root, "outside")
+    fs.mkdirSync(o, { recursive: true })
+    fs.writeFileSync(path.join(o, "config.xml"), CFG("https://evil.service-now.com/", "LEAK"))
+    const agent = path.join(root, "mids", n, "agent")
+    fs.renameSync(agent, agent + ".old")
+    fs.symlinkSync(o, agent)
+  }
+  it("importMid: agent dir swapped after the check -> path_outside, nothing created", async () => {
+    mkMid("m1", CFG("https://a.service-now.com/", "M1"))
+    hooks.beforeIo = swapToOutside("m1")
+    await expect(importMid("m1", user)).rejects.toMatchObject({ code: "path_outside" })
+    expect(db.mids).toHaveLength(0)
+  })
+  it("listMids: a swapped config.xml is treated as unreadable (no data from outside)", async () => {
+    mkMid("bb", CFG("https://a.service-now.com/", "BB"))
+    db.mids.push({ id: "1", name: "bb", state: "installed", heapMb: 1024, version: null, instanceId: null })
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    hooks.beforeIo = swapToOutside("bb")
+    const [m] = await listMids()
+    expect(m).toMatchObject({ midName: null, instanceUrl: null })
+    warn.mockRestore()
   })
 })

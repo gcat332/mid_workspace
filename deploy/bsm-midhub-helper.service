@@ -1,5 +1,7 @@
 # MidHub privileged helper daemon (runs as root; the web app talks to it over a unix socket).
-# Template: install.sh replaces @APP_DIR@ with the repo checkout path.
+# SECURITY: runs a ROOT-OWNED copy of the helper build (install.sh copies helper/dist to
+# /usr/local/lib/midhub-helper, root:root 0755/0644). Never point ExecStart into the app
+# checkout: the app user can write there, which would turn any app compromise into root.
 [Unit]
 Description=BSM MidHub root helper (MID unit/permission management)
 After=network.target
@@ -12,7 +14,7 @@ Environment=MIDHUB_ROOT=/opt/midhub
 Environment=MIDHUB_MAX_RUNNING=4
 Environment=MIDHUB_HELPER_SOCKET=/run/midhub/helper.sock
 Environment=MIDHUB_SOCKET_GROUP=bsmmidhub
-ExecStart=/usr/bin/node @APP_DIR@/helper/dist/helper/main.js
+ExecStart=/usr/bin/node /usr/local/lib/midhub-helper/helper/main.js
 # /run/midhub is 0755 so bsmmidhub can traverse to the socket; the socket file itself is
 # created 0660 root:bsmmidhub by the helper, which is what actually gates access.
 RuntimeDirectory=midhub

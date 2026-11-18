@@ -1,12 +1,12 @@
-import { createHash } from "node:crypto"
 import fs from "node:fs"
+import { sha256 } from "@/lib/hash"
 import type { FileHandle } from "node:fs/promises"
 import path from "node:path"
 import { CONFIG_XML, LOG_FILES, WRAPPER_OVERRIDE } from "./layout"
 import { MidError } from "./names"
 import { getMid } from "./registry"
 import { isReadOnlyPath, PROGRAM_DIRS, resolveMidPath } from "./paths"
-import { createFileIn, fdPath, lstatIn, mkdirIn, openDir, openFile, openFileIn, removeIn, renameIn, type Check } from "./safe-fs"
+import { createFileIn, fdPath, lstatIn, mapFsErrors, mkdirIn, openDir, openFile, openFileIn, readAll, removeIn, renameIn, type Check } from "./safe-fs"
 
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 52,428,800
@@ -32,7 +32,6 @@ export type FileEntry = {
   secret: boolean
 }
 
-const sha256 = (b: Buffer): string => createHash("sha256").update(b).digest("hex")
 const inside = (dir: string, p: string): boolean => p === dir || p.startsWith(dir + path.sep)
 
 type Ctx = { name: string; root: string; roDirs: string[]; configFiles: string[]; configXml: string[] }
@@ -87,26 +86,7 @@ function plainName(n: unknown): string {
   return n
 }
 
-/** Maps fs errors to MidErrors (anything unexpected is rethrown as is). */
-function translate(e: unknown): never {
-  const code = (e as NodeJS.ErrnoException)?.code
-  switch (code) {
-    case "ENOENT": throw new MidError("not_found")
-    case "ENXIO": throw new MidError("invalid_request") // FIFO/device opened non-blocking
-    case "ELOOP": case "ENOTDIR": throw new MidError("path_outside")
-    case "EACCES": case "EPERM": throw new MidError("no_permission")
-    case "EEXIST": case "EISDIR": case "ENOTEMPTY": throw new MidError("conflict")
-    case "ENOSPC": throw new MidError("disk_full")
-    default: throw e
-  }
-}
-async function mapped<T>(f: () => Promise<T>): Promise<T> {
-  try {
-    return await f()
-  } catch (e) {
-    return translate(e)
-  }
-}
+const mapped = mapFsErrors
 
 async function statDirOf(abs: string): Promise<void> {
   let st: fs.Stats
@@ -117,17 +97,6 @@ async function statDirOf(abs: string): Promise<void> {
     throw e
   }
   if (!st.isDirectory()) throw new MidError("invalid_request")
-}
-
-async function readAll(h: FileHandle, limit: number): Promise<Buffer> {
-  const buf = Buffer.alloc(limit)
-  let n = 0
-  while (n < limit) {
-    const { bytesRead } = await h.read(buf, n, limit - n, n)
-    if (bytesRead === 0) break
-    n += bytesRead
-  }
-  return buf.subarray(0, n)
 }
 
 async function entryOf(c: Ctx, rel: string): Promise<{ parent: string; base: string; abs: string }> {

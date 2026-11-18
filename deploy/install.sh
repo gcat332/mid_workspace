@@ -9,6 +9,7 @@ APP_DIR="${1:-${APP_DIR:-$(dirname "$SCRIPT_DIR")}}"
 APP_DIR="$(cd "$APP_DIR" && pwd)"
 APP_USER="${APP_USER:-bsmmidhub}"
 ROOT_DIR=/opt/midhub
+HELPER_LIB=/usr/local/lib/midhub-helper
 
 [[ $EUID -eq 0 ]] || { echo "Run as root (sudo)." >&2; exit 1; }
 case "$APP_DIR" in *[!A-Za-z0-9/._-]*) echo "APP_DIR contains unsupported characters: $APP_DIR" >&2; exit 1;; esac
@@ -52,6 +53,35 @@ for d in packages archive db; do
   chown "$APP_USER:$APP_USER" "$ROOT_DIR/$d"; chmod 0750 "$ROOT_DIR/$d"
 done
 
+# The root helper must never execute files the app user can modify (C1): copy the build into a
+# root-owned directory (dirs 0755, files 0644, root:root) and run it from there. Only regular
+# files/dirs are accepted (a symlink in the build could point back into app-writable space).
+install_helper() {
+  local src="$APP_DIR/helper/dist" tmp bad
+  bad="$(find "$src" ! -type f ! -type d -print -quit)"
+  [[ -z "$bad" ]] || { echo "Refusing: $src contains a non-regular file ($bad)" >&2; exit 1; }
+  install -d -m 0755 -o root -g root "$(dirname "$HELPER_LIB")"
+  tmp="$(mktemp -d "$(dirname "$HELPER_LIB")/.midhub-helper.XXXXXX")"
+  ( cd "$src" && find . -type d -print0 ) | while IFS= read -r -d '' d; do
+    install -d -m 0755 -o root -g root "$tmp/$d"
+  done
+  ( cd "$src" && find . -type f -name '*.js' -print0 ) | while IFS= read -r -d '' f; do
+    install -m 0644 -o root -g root "$src/$f" "$tmp/$f"
+  done
+  chmod 0755 "$tmp"; chown root:root "$tmp"
+  [[ -f "$tmp/helper/main.js" ]] || { rm -rf "$tmp"; echo "Helper copy is missing helper/main.js" >&2; exit 1; }
+  if [[ -d "$HELPER_LIB" ]] && diff -rq "$tmp" "$HELPER_LIB" >/dev/null 2>&1; then
+    rm -rf "$tmp"
+    return
+  fi
+  rm -rf "$HELPER_LIB.old"
+  [[ -e "$HELPER_LIB" ]] && mv "$HELPER_LIB" "$HELPER_LIB.old"
+  mv "$tmp" "$HELPER_LIB"
+  rm -rf "$HELPER_LIB.old"
+  changed=1
+}
+install_helper
+
 for unit in bsm-midhub.service bsm-midhub-helper.service; do
   tmp="$(mktemp)"
   sed "s|@APP_DIR@|$APP_DIR|g" "$SCRIPT_DIR/$unit" > "$tmp"
@@ -69,7 +99,7 @@ fi
 
 cat <<MSG
 
-Installed. Units rendered with APP_DIR=$APP_DIR.
+Installed. Units rendered with APP_DIR=$APP_DIR; helper copied to $HELPER_LIB (root-owned).
 
 Caddy (NOT modified by this script): paste deploy/Caddyfile.midhub into the AgentHub site
 block(s) in /etc/caddy/Caddyfile before the catch-all, then:

@@ -47,8 +47,13 @@ host used in OIDC redirect URIs, so SSO works only when users reach MidHub via t
 
 Aborts if `fs.protected_hardlinks != 1`, or the helper build / `.next` / `.env.local` is missing.
 Creates group `midhub`, system user `midsvc`, adds `bsmmidhub` to `midhub`, `/opt/midhub/{mids,packages,archive,db}`,
-installs both units, `daemon-reload`, `enable --now`. If a unit file changed or `bsmmidhub` was newly added to
-`midhub`, it runs `systemctl try-restart` on both services.
+copies the helper build (`helper/dist`, regular `.js` files only) to `/usr/local/lib/midhub-helper` owned by
+root:root (dirs 0755, files 0644) - the root helper unit runs ONLY that copy, never the app-writable checkout -
+installs both units, `daemon-reload`, `enable --now`. If a unit file or the helper copy changed, or `bsmmidhub`
+was newly added to `midhub`, it runs `systemctl try-restart` on both services.
+
+The web app unit can write only `APP_DIR/.next` and `/opt/midhub` (`ReadWritePaths`); the rest of the
+checkout is read-only to the running app.
 
 ## 4. Caddy
 
@@ -113,13 +118,17 @@ verify SSO login. An email not in the user table must get the message "ยัง
 ## 7. Updating
 
     git pull && npm ci --legacy-peer-deps && npm run build && npm run helper:build
-    sudo systemctl restart bsm-midhub bsm-midhub-helper
-Restarting the helper does not stop running MIDs (they are their own units).
+    sudo deploy/install.sh        # re-copies the helper build to /usr/local/lib/midhub-helper (root-owned)
+    sudo systemctl restart bsm-midhub
+Always re-run `install.sh` after `npm run helper:build`: restarting `bsm-midhub-helper` alone keeps running the
+old root-owned copy (on purpose - the helper never runs code from the app checkout). `install.sh` restarts the
+helper itself when the copy changed. Restarting the helper does not stop running MIDs (they are their own units).
 
 ## 8. Rollback / uninstall
 
     sudo systemctl disable --now bsm-midhub bsm-midhub-helper
     sudo rm /etc/systemd/system/bsm-midhub.service /etc/systemd/system/bsm-midhub-helper.service
+    sudo rm -rf /usr/local/lib/midhub-helper
     sudo systemctl daemon-reload
     # remove the handle /midhub/* block from /etc/caddy/Caddyfile (restore backup), validate, reload caddy
     # MID units: sudo systemctl disable --now 'midhub-mid-*' ; rm /etc/systemd/system/midhub-mid-*.service

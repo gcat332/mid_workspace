@@ -17,6 +17,57 @@ import { MidError } from "./names"
 const C = fs.constants
 export type Check = (real: string) => void
 
+/** Maps fs errors to MidErrors (anything unexpected is rethrown as is). */
+export function translateFsError(e: unknown): never {
+  const code = (e as NodeJS.ErrnoException)?.code
+  switch (code) {
+    case "ENOENT": throw new MidError("not_found")
+    case "ENXIO": throw new MidError("invalid_request") // FIFO/device opened non-blocking
+    case "ELOOP": case "ENOTDIR": throw new MidError("path_outside")
+    case "EACCES": case "EPERM": throw new MidError("no_permission")
+    case "EEXIST": case "EISDIR": case "ENOTEMPTY": throw new MidError("conflict")
+    case "ENOSPC": throw new MidError("disk_full")
+    default: throw e
+  }
+}
+export async function mapFsErrors<T>(f: () => Promise<T>): Promise<T> {
+  try {
+    return await f()
+  } catch (e) {
+    return translateFsError(e)
+  }
+}
+
+/** Reads at most `limit` bytes from the start of the handle. */
+export async function readAll(h: FileHandle, limit: number): Promise<Buffer> {
+  const buf = Buffer.alloc(limit)
+  let n = 0
+  while (n < limit) {
+    const { bytesRead } = await h.read(buf, n, limit - n, n)
+    if (bytesRead === 0) break
+    n += bytesRead
+  }
+  return buf.subarray(0, n)
+}
+
+/** Check for a file whose real location must be inside `root` (exact location is enforced by openFile). */
+export const insideCheck = (root: string): Check => (real) => {
+  if (real !== root && !real.startsWith(root + path.sep)) throw new MidError("path_outside")
+}
+
+/** Whole regular file read through a verified fd; too_large (413) above `limit` bytes. Raw fs errors propagate. */
+export async function readFileVerified(abs: string, check: Check, limit: number): Promise<Buffer> {
+  const { h, st } = await openFile(abs, "r", check)
+  try {
+    if (st.size > limit) throw new MidError("too_large", 413, `ไฟล์ใหญ่เกิน ${Math.round(limit / 1024 / 1024)} MB`)
+    const buf = await readAll(h, limit + 1)
+    if (buf.length > limit) throw new MidError("too_large", 413, `ไฟล์ใหญ่เกิน ${Math.round(limit / 1024 / 1024)} MB`)
+    return buf
+  } finally {
+    await h.close()
+  }
+}
+
 export const fdPath = (h: FileHandle, name?: string): string => `/proc/self/fd/${h.fd}${name ? "/" + name : ""}`
 
 /** The handle's real location must be exactly `expected` (when given) and pass `check`. */

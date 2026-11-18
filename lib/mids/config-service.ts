@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto"
-import { readFile, writeFile } from "node:fs/promises"
+import path from "node:path"
+import type { FileHandle } from "node:fs/promises"
 import { prisma } from "@/lib/db/client"
 import { recordAudit } from "@/lib/audit"
 import type { SessionPayload } from "@/lib/auth/jwt"
@@ -9,7 +9,9 @@ import { readAllParams, readParams, setParams, validateXml } from "./config-xml"
 import { CONFIG_XML, WRAPPER_OVERRIDE } from "./layout"
 import { MidError, validateMidName } from "./names"
 import { isReadOnlyPath, resolveMidPath } from "./paths"
+import { createFileIn, insideCheck, openDir, openFile, readAll, readFileVerified, translateFsError, type Check } from "./safe-fs"
 import { readHeapMb, setHeapMb } from "./wrapper-conf"
+import { sha256 } from "@/lib/hash"
 
 export type ConfigFile = "config.xml" | "wrapper-override.conf"
 export const CONFIG_FILES: readonly ConfigFile[] = ["config.xml", "wrapper-override.conf"]
@@ -17,6 +19,11 @@ const REL: Record<ConfigFile, string> = { "config.xml": CONFIG_XML, "wrapper-ove
 
 export const MASK = "********"
 const MAX_CONTENT_BYTES = 1024 * 1024
+/** Read cap for the files on disk (above the save cap, so an oversized hand edit still loads as an error, not OOM). */
+const MAX_DISK_BYTES = 2 * MAX_CONTENT_BYTES
+
+/** Test seam: runs after paths are resolved and checked, right before the first file I/O. */
+export const hooks: { beforeIo?: () => void | Promise<void> } = {}
 
 // PROVISIONAL: confirm in spike (docs/spike-mid-linux.md)
 export const FORM_PARAMS = {
@@ -45,7 +52,6 @@ export type ConfigFormInput = ConfigForm & { password?: string; proxyPassword?: 
 export type FileState = { content: string; hash: string }
 export type ConfigBackupMeta = { id: string; file: string; note: string; createdBy: string; createdAt: Date }
 
-const sha256 = (s: string) => createHash("sha256").update(s).digest("hex")
 const isSecret = (name: string) => /password/i.test(name)
 
 /** Replaces every secret parameter's non-empty value with MASK; every other byte is untouched. */
@@ -84,21 +90,71 @@ async function midRow(name: string) {
   return row
 }
 
-async function pathOf(name: string, file: ConfigFile): Promise<string> {
-  const p = await resolveMidPath(name, REL[file])
-  if (isReadOnlyPath(name, p)) throw new MidError("read_only")
-  return p
+type Target = { abs: string; check: Check }
+
+/**
+ * Resolved location of a managed config file plus the check every opened handle must pass: inside the MID root
+ * and not in a program dir. openFile additionally pins the handle's real path to `abs`, so a file or directory
+ * swapped by the MID process after this point (symlink to .env.local, the DB, app code ...) is refused.
+ */
+async function targetOf(name: string, file: ConfigFile): Promise<Target> {
+  const root = await resolveMidPath(name, "")
+  const abs = await resolveMidPath(name, REL[file])
+  if (isReadOnlyPath(name, abs)) throw new MidError("read_only")
+  const inside = insideCheck(root)
+  return {
+    abs,
+    check: (real) => {
+      inside(real)
+      if (isReadOnlyPath(name, real)) throw new MidError("read_only")
+    },
+  }
 }
 
+const isEnoent = (e: unknown) => (e as NodeJS.ErrnoException)?.code === "ENOENT"
+
 async function readDisk(name: string, file: ConfigFile): Promise<string> {
+  const t = await targetOf(name, file)
+  await hooks.beforeIo?.()
   try {
-    return await readFile(await pathOf(name, file), "utf8")
+    return (await readFileVerified(t.abs, t.check, MAX_DISK_BYTES)).toString("utf8")
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+    if (isEnoent(e)) {
       if (file === "wrapper-override.conf") return "" // optional file: created on first save
       throw new MidError("not_found")
     }
-    throw e
+    return translateFsError(e)
+  }
+}
+
+/** Opens the file read-write (or null when an optional wrapper file does not exist yet). */
+async function openForWrite(t: Target, file: ConfigFile): Promise<FileHandle | null> {
+  try {
+    const { h, st } = await openFile(t.abs, "rw", t.check)
+    if (st.size > MAX_DISK_BYTES) {
+      await h.close()
+      throw new MidError("too_large", 413, "ไฟล์บนเครื่องใหญ่เกิน 2 MB แก้ไขผ่านหน้าเว็บไม่ได้")
+    }
+    return h
+  } catch (e) {
+    if (isEnoent(e) && file === "wrapper-override.conf") return null
+    if (isEnoent(e)) throw new MidError("not_found")
+    return translateFsError(e)
+  }
+}
+
+/** Creates the (missing) file inside its verified parent directory; fails if it appeared meanwhile. */
+async function createVerified(t: Target): Promise<FileHandle> {
+  const dir = path.dirname(t.abs)
+  try {
+    const d = await openDir(dir, t.check)
+    try {
+      return await createFileIn(d, dir, path.basename(t.abs), t.check)
+    } finally {
+      await d.close()
+    }
+  } catch (e) {
+    return translateFsError(e)
   }
 }
 
@@ -165,21 +221,34 @@ async function saveLocked(name: string, file: ConfigFile, content: string, baseH
   if (typeof content !== "string" || typeof baseHash !== "string") throw new MidError("invalid_request")
   if (Buffer.byteLength(content) > MAX_CONTENT_BYTES) throw new MidError("too_large", 413, "ไฟล์ใหญ่เกิน 1 MB ลดขนาดแล้วลองใหม่")
   const row = await midRow(name)
-  const abs = await pathOf(name, file)
-  const current = await readDisk(name, file)
-  if (sha256(current) !== baseHash) throw new MidError("stale", 409, "ไฟล์ถูกแก้ไปแล้ว กรุณาโหลดใหม่")
-  validate(file, content)
-  const next = file === "config.xml" ? unmaskSecrets(content, current) : content
+  const t = await targetOf(name, file)
+  await hooks.beforeIo?.()
 
-  const backup = await prisma.configBackup.create({
-    data: { midId: row.id, file, content: current, note: meta.note ?? "", createdBy: user.email },
-  })
+  // read -> hash check -> backup -> truncate -> write, all on ONE verified fd (in place: owner midsvc / group midhub kept).
+  let h = await openForWrite(t, file)
+  let current: string
+  let next: string
   try {
-    // In place (no temp + rename): the file keeps its owner midsvc / group midhub.
-    await writeFile(abs, next)
-  } catch (e) {
-    await prisma.configBackup.delete({ where: { id: backup.id } }).catch(() => {})
-    throw new MidError("internal", 500, "เขียนไฟล์ไม่สำเร็จ ตรวจสอบว่ากลุ่ม midhub เขียนไฟล์นี้ได้ แล้วลองใหม่", (e as Error).message)
+    current = h ? (await readAll(h, MAX_DISK_BYTES)).toString("utf8") : ""
+    if (sha256(current) !== baseHash) throw new MidError("stale", 409, "ไฟล์ถูกแก้ไปแล้ว กรุณาโหลดใหม่")
+    validate(file, content)
+    next = file === "config.xml" ? unmaskSecrets(content, current) : content
+
+    const backup = await prisma.configBackup.create({
+      data: { midId: row.id, file, content: current, note: meta.note ?? "", createdBy: user.email },
+    })
+    try {
+      h ??= await createVerified(t)
+      const data = Buffer.from(next, "utf8")
+      await h.truncate(0)
+      await h.write(data, 0, data.length, 0)
+    } catch (e) {
+      await prisma.configBackup.delete({ where: { id: backup.id } }).catch(() => {})
+      if (e instanceof MidError && e.code !== "no_permission") throw e
+      throw new MidError("internal", 500, "เขียนไฟล์ไม่สำเร็จ ตรวจสอบว่ากลุ่ม midhub เขียนไฟล์นี้ได้ (หรือกด \"ซ่อมสิทธิ์ไฟล์\") แล้วลองใหม่", (e as Error).message)
+    }
+  } finally {
+    await h?.close()
   }
 
   const audit = () =>

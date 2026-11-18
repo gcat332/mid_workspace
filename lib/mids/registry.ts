@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises"
 import { prisma } from "@/lib/db/client"
 import { recordAudit } from "@/lib/audit"
 import type { SessionPayload } from "@/lib/auth/jwt"
@@ -6,6 +5,7 @@ import { readParams } from "./config-xml"
 import { CONFIG_XML, WRAPPER_OVERRIDE } from "./layout"
 import { MidError, midRoot, unitName, validateMidName } from "./names"
 import { resolveMidPath } from "./paths"
+import { insideCheck, readFileVerified, translateFsError } from "./safe-fs"
 import { readServiceStatus, runSystemctl, type ServiceStatus } from "./status"
 import { readHeapMb } from "./wrapper-conf"
 
@@ -30,15 +30,36 @@ async function unitLoaded(unit: string): Promise<boolean> {
   return /^LoadState=loaded$/m.test(r.stdout)
 }
 
+/** Test seam: runs after paths are resolved and checked, right before the file is opened. */
+export const hooks: { beforeIo?: () => void | Promise<void> } = {}
+
+const MAX_READ_BYTES = 2 * 1024 * 1024
+
+/**
+ * MID-relative text file read through an O_NOFOLLOW fd whose real path must equal the resolved path (inside the
+ * MID root), so a component swapped by the MID process after resolution cannot redirect the read.
+ * Throws MidError (not_found / path_outside / ...) for every failure.
+ */
+async function readVerified(name: string, rel: string): Promise<string> {
+  const root = await resolveMidPath(name, "")
+  const abs = await resolveMidPath(name, rel)
+  await hooks.beforeIo?.()
+  try {
+    return (await readFileVerified(abs, insideCheck(root), MAX_READ_BYTES)).toString("utf8")
+  } catch (e) {
+    return translateFsError(e)
+  }
+}
+
 /** Injectable for tests. */
 export const deps = { unitLoaded, readStatus: readServiceStatus }
 
 /** Reads a MID-relative text file; null when it does not exist or cannot be read. */
 async function readMidFile(name: string, rel: string): Promise<string | null> {
   try {
-    return await readFile(await resolveMidPath(name, rel), "utf8")
+    return await readVerified(name, rel)
   } catch (e) {
-    if (!(e instanceof MidError && e.code === "not_found") && (e as NodeJS.ErrnoException).code !== "ENOENT") {
+    if (!(e instanceof MidError && e.code === "not_found")) {
       console.warn(`[registry] cannot read ${rel} of MID ${name}:`, (e as Error).message)
     }
     return null
@@ -103,10 +124,10 @@ export async function importMid(name: string, user: SessionPayload): Promise<Mid
   validateMidName(name)
   let xml: string
   try {
-    xml = await readFile(await resolveMidPath(name, CONFIG_XML), "utf8")
+    xml = await readVerified(name, CONFIG_XML)
   } catch (e) {
-    if (e instanceof MidError && e.code !== "not_found") throw e
-    if (e instanceof MidError || (e as NodeJS.ErrnoException).code === "ENOENT") throw new MidError("not_a_mid")
+    if (e instanceof MidError && e.code === "not_found") throw new MidError("not_a_mid")
+    if (e instanceof MidError) throw e
     throw new MidError("internal", undefined, undefined, `cannot read ${CONFIG_XML}: ${(e as Error).message}`)
   }
   const existing = await prisma.midServer.findUnique({ where: { name } })

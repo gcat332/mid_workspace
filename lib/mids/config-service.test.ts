@@ -38,7 +38,7 @@ vi.mock("@/lib/db/client", () => {
 })
 
 import { MidError } from "./names"
-import { getBackup, listBackups, loadConfigFiles, rollback, saveConfigFile, saveForm } from "./config-service"
+import { getBackup, hooks, listBackups, loadConfigFiles, rollback, saveConfigFile, saveForm } from "./config-service"
 
 const user = { userId: "u1", email: "a@x.com", role: "member" as const, authAt: 0 }
 const sha = (s: string) => createHash("sha256").update(s).digest("hex")
@@ -277,5 +277,62 @@ describe("backups and rollback", () => {
     await expect(rollback("m1", "bx", user)).rejects.toMatchObject({ status: 404 })
     await expect(rollback("m1", "nope", user)).rejects.toMatchObject({ status: 404 })
     expect(rd(xmlPath)).toBe(XML)
+  })
+})
+
+describe("TOCTOU: config files are read/written only through verified fds", () => {
+  afterEach(() => { hooks.beforeIo = undefined })
+  let outside: string
+  beforeEach(() => {
+    outside = path.join(root, "outside")
+    fs.mkdirSync(path.join(outside, "conf"), { recursive: true })
+    fs.writeFileSync(path.join(outside, "config.xml"), "SECRET_ENV=leak\n")
+    fs.writeFileSync(path.join(outside, "conf", "wrapper-override.conf"), "APP_CODE\n")
+  })
+  const agent = () => path.join(root, "mids", "m1", "agent")
+  /** After the path checks: the agent dir becomes a symlink to a directory outside the MID. */
+  const swapAgentDir = () => {
+    if (fs.lstatSync(agent()).isSymbolicLink()) return // loadConfigFiles opens both files: swap once
+    fs.renameSync(agent(), agent() + ".old"); fs.symlinkSync(outside, agent())
+  }
+
+  it("load: config.xml replaced by a symlink after the check -> path_outside, nothing leaked", async () => {
+    hooks.beforeIo = () => { fs.rmSync(xmlPath); fs.symlinkSync(path.join(outside, "config.xml"), xmlPath) }
+    const r = await loadConfigFiles("m1").catch((e) => e)
+    expect(r).toMatchObject({ code: "path_outside" })
+    expect(JSON.stringify(r)).not.toContain("leak")
+  })
+  it("load: agent dir swapped for a symlink to outside -> path_outside", async () => {
+    hooks.beforeIo = swapAgentDir
+    await expect(loadConfigFiles("m1")).rejects.toMatchObject({ code: "path_outside" })
+  })
+  it("save: wrapper-override.conf swapped -> refused, outside file untouched, no backup", async () => {
+    hooks.beforeIo = () => { fs.rmSync(wrapPath); fs.symlinkSync(path.join(outside, "conf", "wrapper-override.conf"), wrapPath) }
+    await expect(saveConfigFile("m1", "wrapper-override.conf", "evil=1\n", sha(WRAP), user)).rejects.toMatchObject({ code: "path_outside" })
+    expect(rd(path.join(outside, "conf", "wrapper-override.conf"))).toBe("APP_CODE\n")
+    expect(db.backups).toHaveLength(0)
+  })
+  it("save: agent dir swapped -> refused, outside config untouched", async () => {
+    hooks.beforeIo = swapAgentDir
+    await expect(saveConfigFile("m1", "config.xml", XML.replace("old", "new"), sha(XML), user)).rejects.toMatchObject({ code: "path_outside" })
+    expect(rd(path.join(outside, "config.xml"))).toBe("SECRET_ENV=leak\n")
+  })
+  it("rollback: target swapped -> refused, outside untouched", async () => {
+    await saveConfigFile("m1", "config.xml", XML.replace("old", "new"), sha(XML), user)
+    hooks.beforeIo = swapAgentDir
+    await expect(rollback("m1", "b1", user)).rejects.toMatchObject({ code: "path_outside" })
+    expect(rd(path.join(outside, "config.xml"))).toBe("SECRET_ENV=leak\n")
+  })
+  it("a missing wrapper-override.conf is still created (0664) on first save", async () => {
+    fs.rmSync(wrapPath)
+    expect((await loadConfigFiles("m1")).files["wrapper-override.conf"]).toEqual({ content: "", hash: sha("") })
+    await saveConfigFile("m1", "wrapper-override.conf", "wrapper.foo=1\n", sha(""), user)
+    expect(rd(wrapPath)).toBe("wrapper.foo=1\n")
+    expect(fs.statSync(wrapPath).mode & 0o777).toBe(0o664)
+  })
+  it("keeps the inode (in-place write through the verified fd)", async () => {
+    const ino = fs.statSync(xmlPath).ino
+    await saveConfigFile("m1", "config.xml", XML.replace("old", "new"), sha(XML), user)
+    expect(fs.statSync(xmlPath).ino).toBe(ino)
   })
 })
