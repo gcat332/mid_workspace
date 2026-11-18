@@ -6,6 +6,37 @@ Caddy in front. The installer renders unit templates with the real repo path (`A
 the repo root containing `deploy/`; override: `sudo APP_DIR=/path deploy/install.sh` or pass as arg 1).
 `install.sh` never touches `bsm-agenthub` or Caddy.
 
+## Deploy
+
+`scripts/deploy.sh` is the one-command pipeline (same shape as AgentHub's): run it as root from the checkout.
+It runs the app steps as `bsmmidhub` (`sudo -u bsmmidhub -H`) from `APP_DIR` (default `/home/bsmmidhub/midhub`):
+`git pull --ff-only` -> `npm ci` (keeps devDependencies; `.npmrc` carries legacy-peer-deps) -> `npx prisma generate`
+-> `npm run build` (= `scripts/build.sh`: `next build` + `npm run helper:build`) -> `npx prisma migrate deploy`
+-> `deploy/install.sh` (root-owned helper copy, rendered units; it prints `midhub-install: changed=0|1` and
+restarts `bsm-midhub-helper` itself only when the helper copy or a unit changed) -> `systemctl restart bsm-midhub`
+-> status head. It never touches Caddy or `bsm-agenthub`.
+
+**First deploy** (new host): do sections 1-2 once by hand (clone as `bsmmidhub`, create `.env.local`; `/opt/midhub/db`
+must exist before the first migrate - create it as `bsmmidhub` 0750 or run `sudo deploy/install.sh` once after a
+build), then add the Caddy block (section 4) and verify (section 5). `deploy.sh` needs the checkout and
+`.env.local` to exist and aborts otherwise.
+
+**Updates**: just re-run it.
+
+    sudo APP_DIR=/home/bsmmidhub/midhub /home/bsmmidhub/midhub/scripts/deploy.sh
+
+Then run the go-live gates (PASS/FAIL/MANUAL, exit 1 on any FAIL; never prints secrets):
+
+    sudo APP_DIR=/home/bsmmidhub/midhub deploy/golive-gates.sh
+
+It checks: both services active, helper socket `root:bsmmidhub 0660`, helper code root-owned and not group/world
+writable, `fs.protected_hardlinks=1`, SQLite `journal_mode=wal`, `better-sqlite3` under the service Node,
+`/midhub/login` on loopback, `/midhub` + `/midhub/login` via Caddy on both sites (`https://10.4.150.142` with
+`-k`, `http://dev-agenthub.mfec.co.th` resolved to loopback), `/midhub/api/agent/mids` (also `%61gent`) = 404
+via Caddy, loopback agent API without the secret refused, AgentHub `/` still 200/307, `MIDHUB_AGENT_SECRET`
+absent or >= 32 chars, `.env.local` mode 0600. MANUAL: SSO redirect URI, admin password rotated, spike MID
+validated in the instance.
+
 ## 1. Build (as bsmmidhub, in APP_DIR)
 
 Deploy from a checkout OWNED BY bsmmidhub, e.g. as bsmmidhub:
@@ -14,8 +45,8 @@ Deploy from a checkout OWNED BY bsmmidhub, e.g. as bsmmidhub:
 bsmmidhub cannot read the repo, write `.next`, or execute node/prisma.)
 
     npm ci --legacy-peer-deps      # or plain `npm ci` if .npmrc carries legacy-peer-deps
-    npm run build
-    npm run helper:build           # produces helper/dist/helper/main.js
+    npx prisma generate            # no postinstall hook; deploy.sh does this too
+    npm run build                  # scripts/build.sh: next build + helper build (helper/dist/helper/main.js)
     # migrations are applied by the unit's ExecStartPre; to pre-check: npx prisma migrate deploy
 
 ## 2. Create .env.local (APP_DIR/.env.local, mode 600)

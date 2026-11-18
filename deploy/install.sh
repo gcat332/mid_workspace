@@ -105,6 +105,10 @@ if [[ $changed -eq 1 ]]; then
   systemctl try-restart bsm-midhub-helper.service bsm-midhub.service
 fi
 
+# Machine-readable signal for scripts/deploy.sh (1 = helper copy, a unit or group membership changed,
+# and the services were try-restarted above).
+echo "midhub-install: changed=$changed"
+
 cat <<MSG
 
 Installed. Units rendered with APP_DIR=$APP_DIR; helper copied to $HELPER_LIB (root-owned).
