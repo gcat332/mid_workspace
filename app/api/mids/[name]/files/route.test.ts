@@ -4,7 +4,10 @@ vi.mock("@/lib/auth/helpers", () => ({ requireUser: vi.fn(async () => ({ userId:
 const audit = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock("@/lib/audit", () => ({ recordAudit: audit }))
 const upload = vi.hoisted(() => vi.fn())
-vi.mock("@/lib/mids/files", async (orig) => ({ ...(await orig<typeof import("@/lib/mids/files")>()), upload }))
+vi.mock("@/lib/mids/files", async (orig) => ({
+  ...(await orig<typeof import("@/lib/mids/files")>()), upload,
+  listDir: vi.fn(async () => [{ name: "mid.sh" }]), dirReadOnly: vi.fn(async (_n: string, rel: string) => rel === "agent/bin"),
+}))
 vi.mock("@/lib/mids/registry", () => ({ getMid: vi.fn() }))
 
 const ctx = { params: Promise.resolve({ name: "m1" }) }
@@ -49,19 +52,24 @@ it("file over 50 MB inside an allowed body -> 413", async () => {
   expect(res.status).toBe(413)
 })
 
-it("more than 2 concurrent uploads -> 429 busy", async () => {
+it("a second concurrent upload -> 429 busy (one 50 MB buffer at a time, I5)", async () => {
   const { POST } = await import("./route")
   const release: Array<() => void> = []
   upload.mockImplementation(() => new Promise((r) => release.push(() => r({ size: 1, path: "work/a.bin" }))))
   const mk = () => POST(req({ "content-length": "100" }, formWith(1)), ctx)
-  const a = mk(), b = mk()
-  await vi.waitFor(() => expect(upload).toHaveBeenCalledTimes(2))
-  const c = await mk()
-  expect(c.status).toBe(429)
-  expect((await c.json()).code).toBe("busy")
+  const a = mk()
+  await vi.waitFor(() => expect(upload).toHaveBeenCalledTimes(1))
+  const b = await mk()
+  expect(b.status).toBe(429)
+  expect((await b.json()).code).toBe("busy")
   release.forEach((f) => f())
   expect((await a).status).toBe(200)
-  expect((await b).status).toBe(200)
   upload.mockResolvedValue({ size: 1, path: "work/a.bin" })
   expect((await mk()).status).toBe(200)
+})
+
+it("GET of a directory also says whether it is read-only (Q-I5)", async () => {
+  const { GET } = await import("./route")
+  const res = await GET(new Request("http://x/api/mids/m1/files?path=agent/bin"), ctx)
+  expect(await res.json()).toEqual({ entries: [{ name: "mid.sh" }], readOnly: true })
 })

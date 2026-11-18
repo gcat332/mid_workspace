@@ -6,8 +6,10 @@ import { handleRouteError } from "@/lib/http/route"
 import { getMid } from "@/lib/mids/registry"
 import { readHostMemory } from "@/lib/mids/status"
 
-const ACTIONS = ["start", "stop", "restart"] as const
+const ACTIONS = ["start", "stop", "restart", "fixOwnership"] as const
 type Action = (typeof ACTIONS)[number]
+/** Audit action names (fixOwnership keeps the dotted snake_case style of the others). */
+const AUDIT: Record<Action, string> = { start: "mid.start", stop: "mid.stop", restart: "mid.restart", fixOwnership: "mid.fix_ownership" }
 
 const GIB = 1024 ** 3
 const LOW_MEMORY_BYTES = GIB
@@ -28,7 +30,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ name: string }
   try {
     const user = await requireUser()
     const body = parseBody(await req.json().catch(() => null))
-    if (!body) return invalid("คำสั่งไม่ถูกต้อง ต้องเป็น start, stop หรือ restart")
+    if (!body) return invalid("คำสั่งไม่ถูกต้อง ต้องเป็น start, stop, restart หรือ fixOwnership")
     const { action, confirmLowMemory } = body
 
     const mid = await getMid((await ctx.params).name)
@@ -55,10 +57,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ name: string }
       await callHelper({ op: action, name: mid.name })
     } catch (e) {
       // Failed attempts belong in the trail too (who tried to start what, and why it was refused).
-      await recordAudit(user, `mid.${action}`, mid.name, { ...detail, ok: false, code: (e as { code?: string }).code ?? "internal" })
+      await recordAudit(user, AUDIT[action], mid.name, { ...detail, ok: false, code: (e as { code?: string }).code ?? "internal" })
       throw e
     }
-    await recordAudit(user, `mid.${action}`, mid.name, detail)
+    await recordAudit(user, AUDIT[action], mid.name, detail)
     return NextResponse.json({ ok: true })
   } catch (e) {
     return handleRouteError(e)

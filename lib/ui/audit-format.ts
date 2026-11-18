@@ -45,6 +45,7 @@ const KEY_LABELS: Record<string, string> = {
   instanceUrl: "Instance",
   revived: "นำเข้าซ้ำ",
   confirmLowMemory: "ยืนยันทั้งที่ RAM น้อย",
+  fixOwnership: "ซ่อมสิทธิ์ไฟล์",
   ok: "ผลลัพธ์",
   code: "รหัสข้อผิดพลาด",
 }

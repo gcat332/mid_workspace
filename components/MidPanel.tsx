@@ -34,6 +34,8 @@ export function MidPanel({ mid, host, onChanged }: Props) {
   const [pending, setPending] = useState<Pending | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<ApiError | null>(null)
+  const [fixing, setFixing] = useState(false)
+  const [fixed, setFixed] = useState(false)
 
   const sv = statusView(mid)
   const st = mid.status.state
@@ -70,6 +72,22 @@ export function MidPanel({ mid, host, onChanged }: Props) {
     }
   }
 
+  /** "ซ่อมสิทธิ์ไฟล์": the root helper makes the whole MID tree midsvc:midhub and group-writable (audited). */
+  async function fixOwnership() {
+    setErr(null); setFixed(false); setFixing(true)
+    try {
+      const res = await apiFetch(`/mids/${encodeURIComponent(mid.name)}/actions`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "fixOwnership" }),
+      })
+      if (res.ok) setFixed(true)
+      else setErr(await readApiError(res))
+    } catch {
+      setErr({ message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" })
+    } finally {
+      setFixing(false)
+    }
+  }
+
   function request(action: Action) {
     setErr(null)
     if (action === "start") void send("start", false)
@@ -93,6 +111,9 @@ export function MidPanel({ mid, host, onChanged }: Props) {
               title={startBlocked ? startReason : undefined}
               className={`${hdrBtn} border-green-600 bg-green-600 text-white hover:bg-green-700`}>Start</button>
           )}
+          <button type="button" onClick={() => void fixOwnership()} disabled={fixing || transitional}
+            title="ให้ไฟล์ทั้งหมดของ MID เป็นของ midsvc:midhub และกลุ่มแก้ไขได้ (ใช้เมื่อแก้ไฟล์ไม่ได้เพราะสิทธิ์)"
+            className={`${hdrBtn} border-gray-300 text-gray-800 hover:bg-gray-50`}>{fixing ? "กำลังซ่อม..." : "ซ่อมสิทธิ์ไฟล์"}</button>
           <button type="button" disabled title={PHASE_HINT} className={`${hdrBtn} border-gray-300 text-gray-800`}>Upgrade</button>
           <button type="button" disabled title={PHASE_HINT} className={`${hdrBtn} border-gray-300 text-gray-800`}>ลบ</button>
         </div>
@@ -103,6 +124,7 @@ export function MidPanel({ mid, host, onChanged }: Props) {
           MID ที่ล่มหรือหยุดเองยังนับเป็น 1 ช่องจนกว่าจะกด Stop
         </p>
       )}
+      {fixed && <p role="status" className="mt-2 text-sm text-emerald-700">ซ่อมสิทธิ์ไฟล์แล้ว ลองทำรายการเดิมอีกครั้ง</p>}
       {err && <div className="mt-3"><ErrorNotice error={err} /></div>}
 
       <div role="tablist" aria-label="รายละเอียด MID" className="mt-4 flex gap-1 border-b border-gray-200">
@@ -117,7 +139,7 @@ export function MidPanel({ mid, host, onChanged }: Props) {
       <div role="tabpanel" id="tabpanel" aria-labelledby={`tab-${tab}`} className="pt-4">
         {tab === "overview" && <OverviewTab mid={mid} />}
         {tab === "config" && <ConfigTab midName={mid.name} canRestart={isUp && !transitional} onRestart={() => void send("restart", false)} />}
-        {tab === "files" && <FilesTab midName={mid.name} />}
+        {tab === "files" && <FilesTab midName={mid.name} onOpenConfig={() => setTab("config")} />}
         {tab === "logs" && <LogTab midName={mid.name} />}
       </div>
 

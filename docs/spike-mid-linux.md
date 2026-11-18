@@ -6,6 +6,7 @@ in the listed place, then fill the Result column. (grep -rn PROVISIONAL to re-ch
 | Item | Where (file:line) | Current value | Verify on host | Change where | Result |
 |---|---|---|---|---|---|
 | EXEC_START (unit ExecStart) | helper/unit-template.ts:4 (EXEC_START_REL), :23 | `agent/bin/mid.sh console` | Does it run in foreground under `Type=simple`, run as midsvc, stop cleanly on SIGTERM? Is `start`/`wrapper` needed instead? Also User/Group/NoNewPrivileges/PrivateTmp OK? | `EXEC_START_REL`; refresh deploy/midhub-mid.service.example | |
+| UMask=0002 (files the MID writes stay group-writable) | helper/unit-template.ts (renderUnit) | `UMask=0002` | After the MID has run (logs, keystore, upgrade files), `stat` new files: group `midhub`, mode `g+w`? Does the MID/wrapper override the umask? If not, use "ซ่อมสิทธิ์ไฟล์" / fixOwnership | renderUnit; deploy/midhub-mid.service.example | |
 | config.xml path | lib/mids/layout.ts:2-3 | `agent/config.xml` | File exists at that path | `CONFIG_XML` | |
 | wrapper override path | lib/mids/layout.ts:4-5 | `agent/conf/wrapper-override.conf` | Exists / where heap (`wrapper.java.maxmemory`) is set | `WRAPPER_OVERRIDE` (+ heap handling) | |
 | LOG_FILES | lib/mids/layout.ts:6-7 | main `agent/logs/agent0.log.0`, wrapper `agent/logs/wrapper.log` | Names, rotation scheme, which one shows startup | `LOG_FILES` | |

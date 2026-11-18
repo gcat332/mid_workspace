@@ -133,12 +133,15 @@ export async function createFileIn(dir: FileHandle, dirReal: string, name: strin
 export const openFileIn = (dir: FileHandle, dirReal: string, name: string, check: Check): Promise<Opened> =>
   openFile(path.join(dirReal, name), "w", check, fdPath(dir, name))
 
-/** mkdir under a verified directory handle; the new dir is chmod'ed through its own handle. */
+/**
+ * mkdir under a verified directory handle; the new dir is chmod'ed through its own handle to 2775: setgid keeps
+ * group midhub on everything created inside it later (by the MID too), so the app can keep editing it.
+ */
 export async function mkdirIn(dir: FileHandle, dirReal: string, name: string, check: Check): Promise<void> {
-  await fs.promises.mkdir(fdPath(dir, name), { mode: 0o775 })
+  await fs.promises.mkdir(fdPath(dir, name), { mode: 0o2775 })
   const h = await openVerified(fdPath(dir, name), C.O_RDONLY | C.O_DIRECTORY, undefined, path.join(dirReal, name), check)
   try {
-    await h.chmod(0o775)
+    await h.chmod(0o2775)
   } finally {
     await h.close()
   }

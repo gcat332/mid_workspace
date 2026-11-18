@@ -7,15 +7,20 @@ import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { Modal } from "./Modal"
 import { API_BASE, apiFetch } from "@/lib/ui/api"
 
-const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false })
+const EDITOR_LOADING = <p className="p-3 text-sm text-gray-500">กำลังโหลด editor…</p>
+const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false, loading: () => EDITOR_LOADING })
 
-type Entry = { name: string; type: "file" | "dir"; size: number; mtime: string; readOnly: boolean; symlink: boolean; locked: boolean; secret: boolean }
+type Entry = { name: string; type: "file" | "dir"; size: number; mtime: string; readOnly: boolean; symlink: boolean; locked: boolean; secret: boolean; config: boolean }
 type Open = { path: string; content: string; hash: string; draft: string; readOnly: boolean }
 
 const NETWORK: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" }
 const MAX_UPLOAD = 50 * 1024 * 1024
 const btn = "rounded-lg border px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
 const join = (a: string, b: string) => (a ? `${a}/${b}` : b)
+const EXTLIB = "agent/extlib"
+const BAD_NAME: ApiError = { code: "invalid_filename", message: "ชื่อไฟล์/โฟลเดอร์ใช้ / \\ . .. หรือว่างไม่ได้ (ยาวไม่เกิน 255 ไบต์) แก้ชื่อแล้วลองใหม่" }
+/** Same rule as the server (lib/mids/files.ts plainName), checked before sending. */
+const validName = (n: string) => n !== "" && n !== "." && n !== ".." && !/[\\/\0]/.test(n) && new TextEncoder().encode(n).length <= 255
 const LANGS: Record<string, string> = { xml: "xml", json: "json", conf: "ini", properties: "ini", sh: "shell", js: "javascript", yaml: "yaml", yml: "yaml", md: "markdown", log: "plaintext" }
 const lang = (n: string) => LANGS[n.split(".").pop()?.toLowerCase() ?? ""] ?? "plaintext"
 function size(n: number): string {
@@ -24,11 +29,17 @@ function size(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
-export function FilesTab({ midName }: { midName: string }) {
+type Props = { midName: string; /** Switch the MID panel to the config tab (config.xml / wrapper-override.conf rows). */ onOpenConfig: () => void }
+
+export function FilesTab({ midName, onOpenConfig }: Props) {
   const base = `/mids/${encodeURIComponent(midName)}/files`
   const [dir, setDir] = useState("")
   const [entries, setEntries] = useState<Entry[] | null>(null)
+  const [dirRo, setDirRo] = useState(false)
   const [err, setErr] = useState<ApiError | null>(null)
+  const [modalErr, setModalErr] = useState<ApiError | null>(null)
+  const [saved, setSaved] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState<Open | null>(null)
   const [renaming, setRenaming] = useState<Entry | null>(null)
@@ -43,22 +54,24 @@ export function FilesTab({ midName }: { midName: string }) {
       const res = await apiFetch(`${base}?path=${encodeURIComponent(d)}`)
       if (!res.ok) { setErr(await readApiError(res)); return }
       setErr(null)
-      setEntries(((await res.json()) as { entries: Entry[] }).entries)
+      const j = (await res.json()) as { entries: Entry[]; readOnly?: boolean }
+      setEntries(j.entries)
+      setDirRo(j.readOnly === true)
     } catch { setErr(NETWORK) }
   }, [base])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(dir) }, [load, dir])
 
-  async function run(fn: () => Promise<Response>, after?: () => void): Promise<boolean> {
-    setBusy(true); setErr(null)
+  /** `onErr` decides where a failure is shown (the open modal, or the page) so it never appears twice. */
+  async function run(fn: () => Promise<Response>, onErr: (e: ApiError) => void = setErr): Promise<boolean> {
+    setBusy(true); setErr(null); setModalErr(null)
     try {
       const res = await fn()
-      if (!res.ok) { setErr(await readApiError(res)); return false }
-      after?.()
+      if (!res.ok) { onErr(await readApiError(res)); return false }
       await load(dir)
       return true
-    } catch { setErr(NETWORK); return false } finally { setBusy(false) }
+    } catch { onErr(NETWORK); return false } finally { setBusy(false) }
   }
   const json = (method: string, body: object) => () =>
     apiFetch(base, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
@@ -75,12 +88,13 @@ export function FilesTab({ midName }: { midName: string }) {
 
   async function save() {
     if (!open) return
-    setBusy(true); setErr(null)
+    setBusy(true); setErr(null); setSaved(false)
     try {
       const res = await apiFetch(base, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: open.path, content: open.draft, baseHash: open.hash }) })
       if (!res.ok) { setErr(await readApiError(res)); return }
       const j = (await res.json()) as { hash: string }
       setOpen({ ...open, content: open.draft, hash: j.hash })
+      setSaved(true)
       await load(dir)
     } catch { setErr(NETWORK) } finally { setBusy(false) }
   }
@@ -89,7 +103,7 @@ export function FilesTab({ midName }: { midName: string }) {
     if (!open) return
     const name = open.path.split("/").pop() ?? ""
     setOpen(null)
-    await openFile({ name, type: "file", size: 0, mtime: "", readOnly: open.readOnly, symlink: false, locked: false, secret: false })
+    await openFile({ name, type: "file", size: 0, mtime: "", readOnly: open.readOnly, symlink: false, locked: false, secret: false, config: false })
   }
 
   function onPick(f: File | undefined) {
@@ -106,6 +120,7 @@ export function FilesTab({ midName }: { midName: string }) {
     void run(() => apiFetch(base, { method: "POST", body: fd }))
   }
 
+  const closeEditor = () => { setOpen(null); setErr(null); setSaved(false); setConfirmClose(false) }
   const crumbs = dir ? dir.split("/") : []
   const stale = err?.code === "stale"
 
@@ -114,8 +129,9 @@ export function FilesTab({ midName }: { midName: string }) {
     return (
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className={`${btn} border-gray-300`} onClick={() => { if (!dirty || window.confirm("มีการแก้ไขที่ยังไม่บันทึก ปิดโดยไม่บันทึกหรือไม่?")) { setOpen(null); setErr(null) } }}>← กลับ</button>
-          <span className="font-mono text-sm text-gray-800">{open.path}</span>
+          <button type="button" className={`${btn} border-gray-300`} onClick={() => (dirty ? setConfirmClose(true) : closeEditor())}>← กลับ</button>
+          <span className="break-all font-mono text-sm text-gray-800">{open.path}</span>
+          {saved && !dirty && <span role="status" className="text-sm text-emerald-700">บันทึกแล้ว</span>}
           {open.readOnly
             ? <span className="ml-auto text-xs text-gray-500">🔒 อ่านอย่างเดียว</span>
             : <button type="button" disabled={busy || !dirty} onClick={() => void save()}
@@ -128,9 +144,14 @@ export function FilesTab({ midName }: { midName: string }) {
           </div>
         )}
         <div className="h-96 overflow-hidden rounded-lg border border-gray-300">
-          <MonacoEditor height="100%" language={lang(open.path)} path={`${midName}/${open.path}`} value={open.draft}
-            onChange={(v) => setOpen((o) => (o ? { ...o, draft: v ?? "" } : o))} options={{ minimap: { enabled: false }, scrollBeyondLastLine: false, readOnly: open.readOnly }} />
+          <MonacoEditor height="100%" language={lang(open.path)} path={`${midName}/${open.path}`} value={open.draft} loading={EDITOR_LOADING}
+            onChange={(v) => { setSaved(false); setOpen((o) => (o ? { ...o, draft: v ?? "" } : o)) }} options={{ minimap: { enabled: false }, scrollBeyondLastLine: false, readOnly: open.readOnly }} />
         </div>
+        {confirmClose && (
+          <ConfirmDialog title="ปิดโดยไม่บันทึก?" danger confirmLabel="ปิด ไม่บันทึก" onCancel={() => setConfirmClose(false)} onConfirm={closeEditor}>
+            มีการแก้ไขที่ยังไม่บันทึก ถ้าปิดตอนนี้ การแก้ไขจะหาย
+          </ConfirmDialog>
+        )}
       </div>
     )
   }
@@ -149,13 +170,19 @@ export function FilesTab({ midName }: { midName: string }) {
         </nav>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <input ref={fileInput} type="file" hidden aria-label="เลือกไฟล์อัปโหลด" onChange={(e) => onPick(e.target.files?.[0])} />
-          <button type="button" disabled={busy} onClick={() => fileInput.current?.click()} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`}>อัปโหลดไฟล์</button>
+          <button type="button" disabled={busy || dirRo} aria-describedby={dirRo ? "ro-hint" : undefined} onClick={() => fileInput.current?.click()} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`}>อัปโหลดไฟล์</button>
           <span className="text-xs text-gray-500">สูงสุด 50 MB ต่อไฟล์</span>
-          <button type="button" disabled={busy} onClick={() => { setNameDraft(""); setNewFolder(true) }} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`}>โฟลเดอร์ใหม่</button>
+          <button type="button" disabled={busy || dirRo} aria-describedby={dirRo ? "ro-hint" : undefined} onClick={() => { setNameDraft(""); setModalErr(null); setNewFolder(true) }} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`}>โฟลเดอร์ใหม่</button>
         </div>
       </div>
+      {dirRo && (
+        <p id="ro-hint" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+          🔒 โฟลเดอร์โปรแกรมของ MID แก้ไขไม่ได้ — อัปโหลด library ที่{" "}
+          <button type="button" className="font-mono text-blue-600 hover:underline" onClick={() => setDir(EXTLIB)}>{EXTLIB}</button> แทน
+        </p>
+      )}
 
-      {err && <ErrorNotice error={err} />}
+      {err && !newFolder && !renaming && <ErrorNotice error={err} />}
 
       {entries === null ? (
         !err && <p className="text-sm text-gray-500">กำลังโหลด...</p>
@@ -175,15 +202,18 @@ export function FilesTab({ midName }: { midName: string }) {
                   <span aria-hidden>{e.type === "dir" ? "📁" : "📄"} </span>
                   {e.type === "dir"
                     ? <button type="button" className="text-blue-700 hover:underline" onClick={() => setDir(join(dir, e.name))}>{e.name}</button>
-                    : <span>{e.name}</span>}
+                    : <span className="break-all">{e.name}</span>}
                   {e.readOnly && <span role="img" aria-label="อ่านอย่างเดียว" title="อ่านอย่างเดียว (แก้ไขไม่ได้)" className="ml-1">🔒</span>}
+                  {e.config && (
+                    <button type="button" onClick={onOpenConfig} className="ml-2 text-xs text-blue-600 hover:underline">แก้ในแท็บตั้งค่า</button>
+                  )}
                 </td>
                 <td className="px-2 text-gray-600">{e.type === "file" ? size(e.size) : ""}</td>
                 <td className="px-2 text-gray-600">{new Date(e.mtime).toLocaleString("th-TH")}</td>
                 <td className="space-x-2 pl-2 text-right whitespace-nowrap">
                   {e.type === "file" && !e.secret && <button type="button" className="text-blue-600 hover:underline" onClick={() => void openFile(e)}>เปิด</button>}
                   {e.type === "file" && !e.secret && <a className="text-blue-600 hover:underline" href={`${API_BASE}${base}/download?path=${encodeURIComponent(join(dir, e.name))}`}>ดาวน์โหลด</a>}
-                  {!e.locked && <button type="button" disabled={busy} className="text-blue-600 hover:underline" onClick={() => { setNameDraft(e.name); setRenaming(e) }}>เปลี่ยนชื่อ</button>}
+                  {!e.locked && <button type="button" disabled={busy} className="text-blue-600 hover:underline" onClick={() => { setNameDraft(e.name); setModalErr(null); setRenaming(e) }}>เปลี่ยนชื่อ</button>}
                   {!e.locked && <button type="button" disabled={busy} className="text-red-600 hover:underline" onClick={() => setDeleting(e)}>ลบ</button>}
                 </td>
               </tr>
@@ -197,17 +227,18 @@ export function FilesTab({ midName }: { midName: string }) {
           <form onSubmit={(ev) => {
             ev.preventDefault()
             const n = nameDraft.trim()
-            if (!n) return
+            if (!validName(n)) { setModalErr(BAD_NAME); return }
             const req = renaming
               ? json("POST", { op: "rename", path: join(dir, renaming.name), newName: n })
               : json("POST", { op: "mkdir", parent: dir, name: n })
-            void run(req).then((ok) => { if (ok) { setNewFolder(false); setRenaming(null) } })
+            void run(req, setModalErr).then((ok) => { if (ok) { setNewFolder(false); setRenaming(null) } })
           }}>
             <h2 id="name-title" className="text-lg font-semibold text-gray-900">{renaming ? `เปลี่ยนชื่อ ${renaming.name}` : "โฟลเดอร์ใหม่"}</h2>
             <label className="mt-3 block text-sm text-gray-700">ชื่อ
-              <input data-autofocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} autoComplete="off"
+              <input data-autofocus value={nameDraft} onChange={(e) => { setNameDraft(e.target.value); setModalErr(null) }} autoComplete="off"
+                aria-invalid={modalErr?.code === "invalid_filename"}
                 className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></label>
-            {err && <div className="mt-2"><ErrorNotice error={err} /></div>}
+            {modalErr && <div className="mt-2"><ErrorNotice error={modalErr} /></div>}
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" disabled={busy} className={`${btn} border-gray-300`} onClick={() => { setNewFolder(false); setRenaming(null) }}>ยกเลิก</button>
               <button type="submit" disabled={busy || !nameDraft.trim()} className={`${btn} border-blue-600 bg-blue-600 text-white hover:bg-blue-700`}>{busy ? "กำลังดำเนินการ..." : "ตกลง"}</button>

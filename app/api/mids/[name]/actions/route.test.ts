@@ -106,3 +106,13 @@ it("helper errors pass through handleRouteError and are audited as failures (M6)
   expect((await POST(post({ action: "stop" }), ctx())).status).toBe(503)
   expect(recordAudit).toHaveBeenLastCalledWith(expect.anything(), "mid.stop", "m1", { ok: false, code: "helper_down" })
 })
+
+it("fixOwnership: members may run it, no memory check, calls the helper and is audited (I4)", async () => {
+  const { POST } = await import("./route")
+  readHostMemory.mockResolvedValue({ totalBytes: 8 * GIB, availableBytes: 0.1 * GIB })
+  const res = await POST(post({ action: "fixOwnership" }), ctx())
+  expect(res.status).toBe(200)
+  expect(callHelper).toHaveBeenCalledWith({ op: "fixOwnership", name: "m1" })
+  expect(readHostMemory).not.toHaveBeenCalled()
+  expect(recordAudit).toHaveBeenCalledWith(expect.objectContaining({ role: "member" }), "mid.fix_ownership", "m1", {})
+})

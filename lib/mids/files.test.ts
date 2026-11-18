@@ -11,7 +11,7 @@ vi.mock("@/lib/db/client", () => ({
 }))
 vi.mock("@/lib/mids/status", () => ({ readServiceStatus: async () => ({ state: "inactive", pid: null, memoryBytes: null, since: null }), runSystemctl: async () => ({ code: 0, stdout: "" }) }))
 
-import { hooks, listDir, openDownload, mkdir, readText, remove, rename, upload, writeText } from "./files"
+import { dirReadOnly, hooks, listDir, openDownload, mkdir, readText, remove, rename, upload, writeText } from "./files"
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex")
 let root: string
@@ -62,6 +62,17 @@ describe("listDir", () => {
   })
 })
 
+describe("read-only hints (Q-I5)", () => {
+  it("dirReadOnly is true inside program dirs only; managed config files are flagged `config`", async () => {
+    expect(await dirReadOnly("m1", "agent/bin")).toBe(true)
+    expect(await dirReadOnly("m1", "agent")).toBe(false)
+    expect(await dirReadOnly("m1", "agent/extlib")).toBe(false)
+    expect((await listDir("m1", "agent")).find((e) => e.name === "config.xml")).toMatchObject({ config: true, secret: true })
+    expect((await listDir("m1", "agent/conf")).find((e) => e.name === "wrapper-override.conf")).toMatchObject({ config: true, secret: false })
+    expect((await listDir("m1", "work")).find((e) => e.name === "note.txt")).toMatchObject({ config: false })
+  })
+})
+
 describe("readText / writeText", () => {
   it("round-trips with sha256 hash and stale detection", async () => {
     const r = await readText("m1", "work/note.txt")
@@ -106,9 +117,9 @@ describe("upload", () => {
   })
   it("rejects program dirs, bad names, >50MB, config files", async () => {
     await rejects(upload("m1", "agent/bin", "a", Buffer.from("x")), "read_only", 403)
-    await rejects(upload("m1", "work", "../x.jar", Buffer.from("x")), "invalid_request", 400)
-    await rejects(upload("m1", "work", "a\0b", Buffer.from("x")), "invalid_request", 400)
-    await rejects(upload("m1", "work", "a".repeat(256), Buffer.from("x")), "invalid_request", 400)
+    await rejects(upload("m1", "work", "../x.jar", Buffer.from("x")), "invalid_filename", 400)
+    await rejects(upload("m1", "work", "a\0b", Buffer.from("x")), "invalid_filename", 400)
+    await rejects(upload("m1", "work", "a".repeat(256), Buffer.from("x")), "invalid_filename", 400)
     await rejects(upload("m1", "work", "big", Buffer.alloc(51 * 1024 * 1024)), "too_large", 413)
     await rejects(upload("m1", "agent", "config.xml", Buffer.from("x")), "use_config_tab", 403)
   })
@@ -120,12 +131,19 @@ describe("upload", () => {
 })
 
 describe("mkdir", () => {
-  it("creates 0775 dirs, refuses existing and program dirs", async () => {
+  it("creates 2775 dirs (setgid keeps group midhub for what the MID writes inside), refuses existing and program dirs", async () => {
     await mkdir("m1", "work", "d")
-    expect(fs.statSync(path.join(m, "work/d")).mode & 0o777).toBe(0o775)
+    expect(fs.statSync(path.join(m, "work/d")).mode & 0o7777).toBe(0o2775)
     await rejects(mkdir("m1", "work", "d"), "conflict", 409)
     await rejects(mkdir("m1", "agent/bin", "d"), "read_only", 403)
-    await rejects(mkdir("m1", "work", "a/b"), "invalid_request")
+  })
+  it("bad folder names are invalid_filename with a Thai cause + fix (Q-I2)", async () => {
+    for (const bad of ["../evil", "a/b", "..", ".", "", "a\\b"]) {
+      const e = await mkdir("m1", "work", bad).catch((x) => x)
+      expect(e).toMatchObject({ code: "invalid_filename", status: 400 })
+      expect(e.message).toMatch(/ชื่อไฟล์\/โฟลเดอร์/)
+    }
+    expect(fs.existsSync(path.join(root, "mids", "evil"))).toBe(false)
   })
 })
 
@@ -135,7 +153,7 @@ describe("rename", () => {
     expect(fs.existsSync(path.join(m, "work/n2.txt"))).toBe(true)
     fs.writeFileSync(path.join(m, "work/o"), "")
     await rejects(rename("m1", "work/o", "n2.txt"), "conflict", 409)
-    for (const bad of ["a/b", "..", ".", "", "a\\b"]) await rejects(rename("m1", "work/o", bad), "invalid_request", 400)
+    for (const bad of ["a/b", "..", ".", "", "a\\b"]) await rejects(rename("m1", "work/o", bad), "invalid_filename", 400)
   })
   it("refuses agent, root, program dirs, config files, and containers of them", async () => {
     await rejects(rename("m1", "agent", "x"), "read_only", 403)

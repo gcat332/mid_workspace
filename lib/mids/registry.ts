@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/client"
 import { recordAudit } from "@/lib/audit"
+import { callHelper } from "@/lib/helper/client"
 import type { SessionPayload } from "@/lib/auth/jwt"
 import { readParams } from "./config-xml"
 import { CONFIG_XML, WRAPPER_OVERRIDE } from "./layout"
@@ -165,6 +166,15 @@ export async function importMid(name: string, user: SessionPayload): Promise<Mid
     if ((e as { code?: string }).code === "P2002") throw new MidError("conflict", 409, "MID นี้ถูกนำเข้าแล้ว ดูได้ในรายการ MID")
     throw e
   }
-  await recordAudit(user, "mid.import", name, { instanceUrl: url, revived: Boolean(existing) })
+  // A tree unpacked by hand is often owned by root or another user: hand it to midsvc:midhub (group-writable)
+  // so MidHub can edit it. Best effort: the import itself already succeeded.
+  let fixOwnership: string | undefined
+  try {
+    await callHelper({ op: "fixOwnership", name })
+  } catch (e) {
+    fixOwnership = `failed: ${(e as { code?: string }).code ?? "internal"}`
+    console.warn(`[registry] fixOwnership after importing ${name} failed:`, (e as Error).message)
+  }
+  await recordAudit(user, "mid.import", name, { instanceUrl: url, revived: Boolean(existing), ...(fixOwnership ? { fixOwnership } : {}) })
   return summarize(row)
 }

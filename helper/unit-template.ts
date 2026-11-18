@@ -20,6 +20,8 @@ Type=simple
 User=midsvc
 Group=midhub
 WorkingDirectory=${midRoot}/agent
+# Files the MID creates stay group-writable (group midhub) so MidHub can edit them.
+UMask=0002
 # PROVISIONAL: confirm in spike (docs/spike-mid-linux.md)
 ExecStart=${midRoot}/${EXEC_START_REL}
 MemoryMax=${heapMb + 512}M

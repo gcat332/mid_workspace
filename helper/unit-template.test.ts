@@ -14,6 +14,9 @@ describe("renderUnit", () => {
     expect(out).toContain("ExecStart=/opt/midhub/mids/dev-mid/agent/bin/mid.sh console")
     expect(out).toContain("WorkingDirectory=/opt/midhub/mids/dev-mid/agent")
   })
+  it("UMask=0002 so files the MID creates stay group-writable for the app (I4)", () => {
+    expect(out).toMatch(/^UMask=0002$/m)
+  })
   it("injects the name only into paths under midRoot", () => {
     for (const line of out.split("\n").filter((l) => l.includes("dev-mid"))) {
       expect(line).toMatch(/=\/opt\/midhub\/mids\/dev-mid\//)

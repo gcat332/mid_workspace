@@ -7,6 +7,8 @@ type Row = Record<string, unknown>
 const db = vi.hoisted(() => ({ mids: [] as Row[], instances: [] as Row[], seq: 0 }))
 const audit = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock("@/lib/audit", () => ({ recordAudit: audit }))
+const helper = vi.hoisted(() => vi.fn(async () => ({ ok: true as const })))
+vi.mock("@/lib/helper/client", () => ({ callHelper: helper }))
 vi.mock("@/lib/db/client", () => {
   const match = (r: Row, where: Row) => Object.entries(where).every(([k, v]) => (v && typeof v === "object" && "not" in v ? r[k] !== (v as Row).not : r[k] === v))
   const table = (rows: () => Row[]) => ({
@@ -117,6 +119,23 @@ describe("importMid", () => {
     expect(db.mids).toHaveLength(1)
     expect(s.state).toBe("installed")
     expect(db.mids[0].removedAt).toBeNull()
+  })
+})
+
+describe("importMid fixes ownership (I4)", () => {
+  it("asks the helper to fix ownership of the imported tree", async () => {
+    helper.mockClear()
+    mkMid("m1", CFG("https://a.service-now.com/", "N"))
+    await importMid("m1", user)
+    expect(helper).toHaveBeenCalledWith({ op: "fixOwnership", name: "m1" })
+  })
+  it("a fixOwnership failure does not fail the import; it is noted in the audit detail", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    helper.mockRejectedValueOnce(new MidError("helper_down"))
+    mkMid("m1", CFG("https://a.service-now.com/", "N"))
+    await expect(importMid("m1", user)).resolves.toMatchObject({ name: "m1" })
+    expect(audit).toHaveBeenCalledWith(user, "mid.import", "m1", expect.objectContaining({ fixOwnership: "failed: helper_down" }))
+    warn.mockRestore()
   })
 })
 

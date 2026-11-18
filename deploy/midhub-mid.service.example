@@ -12,6 +12,8 @@ Type=simple
 User=midsvc
 Group=midhub
 WorkingDirectory=/opt/midhub/mids/spike1/agent
+# Files the MID creates stay group-writable (group midhub) so MidHub can edit them.
+UMask=0002
 # PROVISIONAL: confirm in spike (docs/spike-mid-linux.md)
 ExecStart=/opt/midhub/mids/spike1/agent/bin/mid.sh console
 MemoryMax=1536M

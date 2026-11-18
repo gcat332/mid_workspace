@@ -11,7 +11,7 @@ import { createFileIn, fdPath, lstatIn, mapFsErrors, mkdirIn, openDir, openFile,
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024 // 52,428,800
 
-const READ_ONLY_MSG = "โฟลเดอร์นี้เป็นโปรแกรมของ MID แก้ไขไม่ได้"
+const READ_ONLY_MSG = "โฟลเดอร์นี้เป็นโปรแกรมของ MID (agent/bin, agent/lib, agent/jre) แก้ไขไม่ได้ — ถ้าจะเพิ่ม library ให้อัปโหลดที่ agent/extlib แทน"
 const TOO_BIG_TEXT = "ไฟล์ใหญ่เกิน 2 MB เปิดแก้ในหน้าเว็บไม่ได้ ให้ดาวน์โหลดแทน"
 const roErr = () => new MidError("read_only", 403, READ_ONLY_MSG)
 const cfgErr = () => new MidError("use_config_tab")
@@ -30,6 +30,8 @@ export type FileEntry = {
   locked: boolean
   /** Contents are never served here (config.xml: use the config tab). */
   secret: boolean
+  /** A managed config file (config.xml, wrapper-override.conf): edited in the config tab. */
+  config: boolean
 }
 
 const inside = (dir: string, p: string): boolean => p === dir || p.startsWith(dir + path.sep)
@@ -81,7 +83,7 @@ const writeCheck = (c: Ctx): Check => (real) => {
 
 function plainName(n: unknown): string {
   if (typeof n !== "string" || n === "" || n === "." || n === ".." || /[\\/\0]/.test(n) || Buffer.byteLength(n) > 255) {
-    throw new MidError("invalid_request")
+    throw new MidError("invalid_filename")
   }
   return n
 }
@@ -139,6 +141,7 @@ export function listDir(name: string, rel: string): Promise<FileEntry[]> {
             name: n, type, size: type === "dir" ? 0 : st.size, mtime: st.mtime.toISOString(), readOnly, symlink,
             locked: !symlink && (readOnly || isContainer(c, abs)),
             secret: c.configXml.includes(abs),
+            config: !symlink && c.configFiles.includes(abs),
           })
         } catch (e) {
           if (e instanceof MidError && e.code === "path_outside") continue
@@ -150,6 +153,14 @@ export function listDir(name: string, rel: string): Promise<FileEntry[]> {
       await d.close()
     }
     return out.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : 1))
+  })
+}
+
+/** Is the directory `rel` read-only here (a program dir or inside one)? The UI disables upload/new folder there. */
+export function dirReadOnly(name: string, rel: string): Promise<boolean> {
+  return mapped(async () => {
+    const c = await ctxFor(name)
+    return isRo(c, await resolveMidPath(name, rel))
   })
 }
 

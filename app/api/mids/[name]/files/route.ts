@@ -2,12 +2,12 @@ import { NextResponse } from "next/server"
 import { requireUser } from "@/lib/auth/helpers"
 import { recordAudit } from "@/lib/audit"
 import { handleRouteError } from "@/lib/http/route"
-import { MAX_UPLOAD_BYTES, listDir, mkdir, readText, remove, rename, upload, writeText } from "@/lib/mids/files"
+import { MAX_UPLOAD_BYTES, dirReadOnly, listDir, mkdir, readText, remove, rename, upload, writeText } from "@/lib/mids/files"
 import { MidError } from "@/lib/mids/names"
 
 type Ctx = { params: Promise<{ name: string }> }
 
-// GET    ?path=            -> { entries }           (list a directory)
+// GET    ?path=            -> { entries, readOnly } (list a directory)
 // GET    ?path=&content=1  -> { content, hash }     (open a text file)
 // PUT    { path, content, baseHash }                -> { hash }
 // POST   multipart { dir, file }                    -> { size }      (upload)
@@ -20,7 +20,8 @@ const str = (v: unknown): string => {
 }
 /** Matches next.config.ts proxyClientMaxBodySize ("51mb"): 50 MB of file plus multipart framing. */
 export const MAX_BODY_BYTES = 51 * 1024 * 1024
-const MAX_CONCURRENT_UPLOADS = 2
+/** One at a time: each upload is buffered whole (up to 50 MB) inside the 1 GB app MemoryMax. */
+const MAX_CONCURRENT_UPLOADS = 1
 let uploading = 0
 
 export async function GET(req: Request, ctx: Ctx) {
@@ -30,7 +31,8 @@ export async function GET(req: Request, ctx: Ctx) {
     const url = new URL(req.url)
     const p = url.searchParams.get("path") ?? ""
     if (url.searchParams.get("content") === "1") return NextResponse.json(await readText(name, p))
-    return NextResponse.json({ entries: await listDir(name, p) })
+    const [entries, readOnly] = await Promise.all([listDir(name, p), dirReadOnly(name, p)])
+    return NextResponse.json({ entries, readOnly })
   } catch (e) {
     return handleRouteError(e)
   }
@@ -61,7 +63,7 @@ export async function POST(req: Request, ctx: Ctx) {
       if (lenHeader === null || !/^\d+$/.test(lenHeader)) throw new MidError("length_required")
       if (Number(lenHeader) > MAX_BODY_BYTES) throw new MidError("too_large")
       if (uploading >= MAX_CONCURRENT_UPLOADS) {
-        throw new MidError("busy", 429, "มีการอัปโหลดอยู่หลายรายการ กรุณารอสักครู่แล้วลองใหม่")
+        throw new MidError("busy", 429, "มีการอัปโหลดอีกรายการกำลังทำอยู่ (อัปโหลดได้ครั้งละ 1 ไฟล์) รอให้เสร็จแล้วลองใหม่")
       }
       uploading++
       try {
