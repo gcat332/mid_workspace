@@ -5,7 +5,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { ImportMidDialog } from "./ImportMidDialog"
 import { MidList } from "./MidList"
 import { MidPanel } from "./MidPanel"
-import { TopBar } from "./TopBar"
+import { AppChrome } from "./AppChrome"
+import { DashboardToolbar } from "./DashboardToolbar"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { apiFetch } from "@/lib/ui/api"
 import { createLatest } from "@/lib/ui/latest"
@@ -81,9 +82,9 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
   const current = mids?.find((m) => m.name === selected) ?? null
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <TopBar email={email} isAdmin={isAdmin} host={host} mids={mids ?? []} onImport={() => setImporting(true)} />
+    <AppChrome user={{ email, role: isAdmin ? "admin" : "member" }}>
       <main className="mx-auto max-w-6xl p-4">
+        <DashboardToolbar host={host} mids={mids ?? []} onImport={() => setImporting(true)} />
         {forbidden && (
           <div role="alert" className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             <p>หน้านั้นสำหรับ Admin เท่านั้น (ต้องเป็น Admin) หากต้องการสิทธิ์ ให้ติดต่อ Admin ของ MidHub</p>
@@ -96,20 +97,20 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
         {mids === null ? (
           <p className="text-sm text-gray-500">กำลังโหลด...</p>
         ) : mids.length === 0 ? (
-          <div className="mx-auto mt-16 max-w-md rounded-xl border border-gray-200 bg-white p-8 text-center">
+          <div className="mx-auto mt-16 max-w-md rounded-xl border border-gray-200 bg-white dark:bg-neutral-800 p-8 text-center">
             <p className="text-lg font-medium text-gray-900">ยังไม่มี MID Server</p>
             <p className="mt-2 text-sm text-gray-600">ถ้ามี MID ที่ติดตั้งไว้บนเครื่องนี้แล้ว กดปุ่มด้านล่างเพื่อนำเข้ามาจัดการได้เลย</p>
             <button type="button" onClick={() => setImporting(true)}
-              className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+              className="mt-4 btn-primary px-4 py-2 text-sm font-medium">
               Import MID ที่มีอยู่
             </button>
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-[18rem_minmax(0,1fr)]">
-            <nav aria-label="MID" className="min-w-0 rounded-xl border border-gray-200 bg-white p-2">
+            <nav aria-label="MID" className="min-w-0 rounded-xl border border-gray-200 bg-white dark:bg-neutral-800 p-2">
               <MidList mids={mids} selected={selected} onSelect={pick} />
             </nav>
-            <div ref={panelRef} className="min-w-0 scroll-mt-4 rounded-xl border border-gray-200 bg-white p-4 sm:p-5">
+            <div ref={panelRef} className="min-w-0 scroll-mt-4 rounded-xl border border-gray-200 bg-white dark:bg-neutral-800 p-4 sm:p-5">
               {current
                 ? <MidPanel key={current.name} mid={current} host={host} onChanged={() => void refresh()} />
                 : <p className="text-sm text-gray-500">เลือก MID จากรายการเพื่อดูรายละเอียด</p>}
@@ -121,6 +122,6 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
         <ImportMidDialog onCancel={() => setImporting(false)}
           onDone={(name) => { setImporting(false); void refresh(); select(name) }} />
       )}
-    </div>
+    </AppChrome>
   )
 }

@@ -18,7 +18,7 @@ export function OverviewTab({ mid }: { mid: MidView }) {
   return (
     <dl className="divide-y divide-gray-100">
       <Row label="Instance">
-        {url ? <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{url}</a> : (mid.instanceUrl ?? "-")}
+        {url ? <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">{url}</a> : (mid.instanceUrl ?? "-")}
       </Row>
       <Row label="ชื่อ MID ใน ServiceNow">{mid.midName ?? "-"}</Row>
       <Row label="เวอร์ชัน">{mid.version || "ไม่ทราบ"}</Row>
@@ -28,7 +28,7 @@ export function OverviewTab({ mid }: { mid: MidView }) {
       <Row label="Heap">{mid.heapMb} MB</Row>
       <Row label="Record ใน instance">
         {recordUrl
-          ? <a href={recordUrl} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">เปิดดู MID Server ใน ServiceNow</a>
+          ? <a href={recordUrl} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">เปิดดู MID Server ใน ServiceNow</a>
           : "-"}
       </Row>
     </dl>

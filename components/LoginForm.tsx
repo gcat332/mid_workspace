@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState, type FormEvent } from "react"
 import { useSearchParams } from "next/navigation"
+import { errorTextCls, inputCls, labelCls } from "@/lib/ui/classes"
 
 // Only these codes (from the SSO routes) are ever shown; anything else gets the generic text.
 const SSO_ERRORS: Record<string, string> = {
@@ -66,28 +67,35 @@ function LoginFormInner() {
     }
   }
 
-  const input = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 p-8">
-        <h1 className="text-xl font-semibold text-gray-900 mb-6">เข้าสู่ระบบ MidHub</h1>
+    <div className="min-h-svh flex items-center justify-center bg-gray-50 dark:bg-neutral-900">
+      <div className="bg-white dark:bg-neutral-800 rounded-xl shadow-lg w-full max-w-sm mx-4 p-8">
+        <div className="mb-6 flex items-center gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/midhub/logo-mfec-black.png" alt="MFEC" className="h-6 w-auto dark:hidden" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/midhub/logo-mfec-white.png" alt="MFEC" className="h-6 w-auto hidden dark:block" />
+          <span className="h-5 w-px bg-gray-200 dark:bg-neutral-700" />
+          <span className="text-xl font-bold tracking-tight">
+            <span className="bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 bg-clip-text text-transparent">BSM</span> <span className="text-blue-600 dark:text-blue-400">MIDHub</span>
+          </span>
+        </div>
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-neutral-100 mb-6">เข้าสู่ระบบ BSM MIDHub</h1>
 
-        {error && <p role="alert" className="mb-4 text-sm text-red-600">{error}</p>}
+        {error && <p role="alert" className={`mb-4 text-sm ${errorTextCls.replace("text-xs ", "")}`}>{error}</p>}
 
         <form onSubmit={onSubmit} className="space-y-4">
-          <label className="block text-sm text-gray-700">
-            อีเมล
-            <input type="email" required autoComplete="username" value={email}
-              onChange={(e) => setEmail(e.target.value)} className={`mt-1 ${input}`} />
-          </label>
-          <label className="block text-sm text-gray-700">
-            รหัสผ่าน
-            <input type="password" required autoComplete="current-password" value={password}
-              onChange={(e) => setPassword(e.target.value)} className={`mt-1 ${input}`} />
-          </label>
-          <button type="submit" disabled={busy}
-            className="w-full py-2.5 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors">
+          <div>
+            <label htmlFor="login-email" className={labelCls}>อีเมล</label>
+            <input id="login-email" type="email" required autoComplete="username" value={email}
+              onChange={(e) => setEmail(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label htmlFor="login-password" className={labelCls}>รหัสผ่าน</label>
+            <input id="login-password" type="password" required autoComplete="current-password" value={password}
+              onChange={(e) => setPassword(e.target.value)} className={inputCls} />
+          </div>
+          <button type="submit" disabled={busy} className="w-full py-2 px-4 text-sm font-medium btn-primary">
             {busy ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
           </button>
         </form>
@@ -96,8 +104,12 @@ function LoginFormInner() {
           <>
             <div className="my-5 text-center text-xs text-gray-400">หรือ</div>
             <a href="/midhub/api/auth/oidc/start"
-              className="block w-full py-2.5 text-center text-sm font-semibold rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 transition-colors">
-              เข้าสู่ระบบด้วย SSO
+              className="w-full py-3 px-4 text-sm font-semibold rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-700 transition-colors flex items-center justify-center gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/midhub/logo-mfec-black.png" alt="" className="h-5 w-auto dark:hidden" />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/midhub/logo-mfec-white.png" alt="" className="h-5 w-auto hidden dark:block" />
+              เข้าสู่ระบบด้วย {idp.label}
             </a>
           </>
         )}

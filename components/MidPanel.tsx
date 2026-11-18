@@ -152,7 +152,7 @@ export function MidPanel({ mid, host, onChanged }: Props) {
         {TABS.map((t) => (
           <button key={t.id} type="button" role="tab" id={`tab-${t.id}`} aria-selected={tab === t.id} aria-controls="tabpanel"
             tabIndex={tab === t.id ? 0 : -1} onClick={() => selectTab(t.id)}
-            className={`-mb-px shrink-0 border-b-2 px-4 py-2 text-sm ${tab === t.id ? "border-blue-600 font-medium text-blue-700" : "border-transparent text-gray-600 hover:text-gray-900"}`}>
+            className={`-mb-px shrink-0 border-b-2 px-4 py-2 text-sm ${tab === t.id ? "border-brand-sky font-medium text-brand-navy dark:text-blue-300" : "border-transparent text-gray-600 hover:text-gray-900"}`}>
             {t.label}
           </button>
         ))}

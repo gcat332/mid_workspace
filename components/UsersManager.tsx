@@ -5,13 +5,14 @@ import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { apiFetch } from "@/lib/ui/api"
 import { isLocked } from "@/lib/auth/lockout"
+import { inputCls } from "@/lib/ui/classes"
 
 type Role = "admin" | "member"
 type User = { id: string; email: string; role: Role; lockedAt: string | null; lastLoginAt: string | null }
 type Pending = { title: string; body: string; confirmLabel: string; danger?: boolean; run: () => Promise<boolean> }
 
 const ROLE_TH: Record<Role, string> = { admin: "ผู้ดูแลระบบ", member: "สมาชิก" }
-const input = "rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+const input = inputCls.replace("w-full ", "")
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleString("th-TH") : "—")
 const NET: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" }
 
@@ -97,7 +98,7 @@ export function UsersManager({ myId }: { myId: string }) {
         <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password"
           placeholder="รหัสผ่าน (ว่าง = SSO เท่านั้น)" aria-label="รหัสผ่าน (ไม่บังคับ — เว้นว่าง = SSO เท่านั้น)"
           className={`${input} min-w-[220px] flex-1`} />
-        <button type="submit" disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">เพิ่ม</button>
+        <button type="submit" disabled={busy} className="btn-primary px-4 py-2 text-sm font-medium">เพิ่ม</button>
       </form>
       {pwTarget && (
         <form className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3"
@@ -105,12 +106,12 @@ export function UsersManager({ myId }: { myId: string }) {
           <span className="text-sm text-gray-700">ตั้งรหัสผ่านใหม่ให้ {pwTarget.email}</span>
           <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} autoComplete="new-password"
             placeholder="อย่างน้อย 8 ตัวอักษร" aria-label="รหัสผ่านใหม่" className={`${input} min-w-[180px] flex-1`} />
-          <button type="submit" disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">บันทึก</button>
+          <button type="submit" disabled={busy} className="btn-primary px-4 py-2 text-sm font-medium">บันทึก</button>
           <button type="button" onClick={() => { setPwTarget(null); setNewPw("") }} className="text-sm text-gray-600 hover:underline">ยกเลิก</button>
         </form>
       )}
       {err && <div className="mb-2"><ErrorNotice error={err} /></div>}
-      <div className="relative overflow-x-auto rounded-xl border border-gray-200 bg-white">
+      <div className="relative overflow-x-auto rounded-xl border border-gray-200 bg-white dark:bg-neutral-800">
         <table className="w-full text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600">
             <tr>
@@ -131,12 +132,12 @@ export function UsersManager({ myId }: { myId: string }) {
                   <td className="whitespace-nowrap px-4 py-3 text-gray-500">{fmt(u.lastLoginAt)}</td>
                   <td className="space-x-3 whitespace-nowrap px-4 py-3 text-right">
                     {locked && (
-                      <button type="button" disabled={busy} className="text-blue-600 hover:underline" onClick={() => void patch(u, { unlock: true })}>ปลดล็อก</button>
+                      <button type="button" disabled={busy} className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => void patch(u, { unlock: true })}>ปลดล็อก</button>
                     )}
-                    <button type="button" className="text-blue-600 hover:underline" onClick={() => { setPwTarget(u); setNewPw(""); setErr(null) }}>ตั้งรหัสผ่าน</button>
+                    <button type="button" className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => { setPwTarget(u); setNewPw(""); setErr(null) }}>ตั้งรหัสผ่าน</button>
                     {u.id !== myId && (
                       <>
-                        <button type="button" className="text-blue-600 hover:underline"
+                        <button type="button" className="text-blue-600 dark:text-blue-400 hover:underline"
                           onClick={() => changeRole(u, u.role === "admin" ? "member" : "admin")}>
                           {u.role === "admin" ? `ลดเป็น${ROLE_TH.member}` : `เลื่อนเป็น${ROLE_TH.admin}`}
                         </button>

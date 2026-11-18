@@ -6,6 +6,7 @@ import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { apiFetch } from "@/lib/ui/api"
 import { MAX_HEAP_MB, MIN_HEAP_MB } from "@/lib/helper/protocol"
+import { inputCls } from "@/lib/ui/classes"
 
 const EDITOR_LOADING = <p className="p-3 text-sm text-gray-500">กำลังโหลด editor…</p>
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false, loading: () => EDITOR_LOADING })
@@ -25,7 +26,7 @@ type BackupFull = Backup & { content: string }
 
 const LANG: Record<ConfigFile, string> = { "config.xml": "xml", "wrapper-override.conf": "ini" }
 const NETWORK: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" }
-const input = "mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50"
+const input = `mt-1 ${inputCls} disabled:bg-gray-50 dark:disabled:bg-neutral-800`
 const btn = "rounded-lg border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
 const fmt = (iso: string) => new Date(iso).toLocaleString("th-TH")
 const KEEP_PW = "•••••••• (ตั้งไว้แล้ว — เว้นว่าง = ไม่เปลี่ยน)"
@@ -117,7 +118,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
       <div role="group" aria-label="โหมดแก้ไข" className="inline-flex overflow-hidden rounded-lg border border-gray-300 text-sm">
         {(["form", "raw"] as const).map((m) => (
           <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}
-            className={`px-4 py-1.5 ${mode === m ? "bg-blue-600 text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>
+            className={`px-4 py-1.5 ${mode === m ? "bg-blue-600 text-white" : "bg-white dark:bg-neutral-800 text-gray-700 hover:bg-gray-50"}`}>
             {m === "form" ? "ฟอร์ม" : "Raw"}
           </button>
         ))}
@@ -168,7 +169,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
           <p id="heap-note" className={`text-xs ${heapChanged ? "text-amber-700" : "text-gray-500"}`}>
             เปลี่ยน RAM แล้ว ระบบจะเขียน systemd unit ของ MID นี้ใหม่จากแม่แบบของ MidHub (unit ที่แก้เองบนเครื่องจะถูกทับ)
           </p>
-          <div><button type="submit" disabled={busy || !heapOk} className={`${btn} border-blue-600 bg-blue-600 text-white hover:bg-blue-700`}>
+          <div><button type="submit" disabled={busy || !heapOk} className={`btn-primary px-4 py-2 text-sm`}>
             {busy ? "กำลังบันทึก..." : "บันทึก"}</button></div>
         </form>
       ) : (
@@ -181,7 +182,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
             </select>
             <button type="button" disabled={busy}
               onClick={() => void put({ file: rawFile, content: drafts[rawFile], baseHash: data.files[rawFile].hash })}
-              className={`${btn} border-blue-600 bg-blue-600 text-white hover:bg-blue-700`}>{busy ? "กำลังบันทึก..." : "บันทึก"}</button>
+              className={`btn-primary px-4 py-2 text-sm`}>{busy ? "กำลังบันทึก..." : "บันทึก"}</button>
           </div>
           {rawFile === "config.xml" && <p className="text-xs text-gray-500">ค่า password แสดงเป็น ******** — ถ้าไม่แก้ ระบบจะคงค่าเดิมในไฟล์ไว้</p>}
           <div className="h-96 overflow-hidden rounded-lg border border-gray-300">
@@ -201,7 +202,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
                 <span className="font-mono text-xs">{b.file}</span>
                 <span className="text-gray-600">{fmt(b.createdAt)} · {b.createdBy}{b.note ? ` · ${b.note}` : ""}</span>
                 <button type="button" onClick={() => void pickBackup(b.id)} aria-pressed={selected?.id === b.id}
-                  className="ml-auto text-blue-600 hover:underline">เทียบกับปัจจุบัน</button>
+                  className="ml-auto text-blue-600 dark:text-blue-400 hover:underline">เทียบกับปัจจุบัน</button>
               </li>
             ))}
           </ul>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { apiFetch } from "@/lib/ui/api"
+import { inputCls } from "@/lib/ui/classes"
 
 interface IdpForm {
   provider: string
@@ -21,7 +22,7 @@ const EMPTY: IdpForm = {
   clientSecret: "", tenantId: "", redirectUri: "", scopes: "openid profile email",
 }
 
-const input = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+const input = inputCls
 const labelCls = "block text-sm text-gray-700 mb-1"
 
 export function IdpConfigManager() {
@@ -64,7 +65,7 @@ export function IdpConfigManager() {
       <p className="text-sm text-gray-600 mb-4">
         เฉพาะอีเมลที่ลงทะเบียนใน MidHub แล้วเท่านั้นที่เข้าสู่ระบบด้วย SSO ได้
       </p>
-      <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-3">
+      <div className="rounded-xl border border-gray-200 bg-white dark:bg-neutral-800 p-5 space-y-3">
         <label className="flex items-center gap-2 text-sm text-gray-700">
           <input type="checkbox" checked={form.enabled} onChange={(e) => set("enabled", e.target.checked)} />
           เปิดใช้งาน (แสดงปุ่ม SSO ในหน้าเข้าสู่ระบบ)
@@ -120,7 +121,7 @@ export function IdpConfigManager() {
         <div className="flex items-center justify-end gap-3">
           {saved && <span role="status" className="text-sm text-emerald-600">บันทึกแล้ว</span>}
           <button onClick={() => void save()} disabled={saving}
-            className="px-4 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+            className="btn-primary px-4 py-2 text-sm font-medium">
             {saving ? "กำลังบันทึก..." : "บันทึก"}
           </button>
         </div>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/ui/api"
 import { ErrorNotice, readApiError, type ApiError } from "@/components/ErrorNotice"
 import { actionLabel, compactDetail, detailPairs } from "@/lib/ui/audit-format"
+import { inputCls } from "@/lib/ui/classes"
 
 type Item = { id: string; at: string; email: string; action: string; midName: string | null; detail: string }
 
@@ -14,7 +15,7 @@ const bangkok = new Intl.DateTimeFormat("sv-SE", {
 /** `YYYY-MM-DD HH:mm:ss` in Asia/Bangkok. */
 export const formatBangkok = (iso: string): string => bangkok.format(new Date(iso))
 
-const input = "rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+const input = inputCls.replace("w-full ", "")
 
 /** Readable "label: value" lines; the full JSON stays one click away. */
 function Detail({ detail }: { detail: string }) {
@@ -36,7 +37,7 @@ function Detail({ detail }: { detail: string }) {
       {pairs && (
         <>
           <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
-            className="mt-0.5 text-blue-600 hover:underline">
+            className="mt-0.5 text-blue-600 dark:text-blue-400 hover:underline">
             {open ? "ซ่อน JSON" : "ดู JSON เต็ม"}
           </button>
           {open && <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-gray-50 p-1.5 font-mono text-gray-700">{compactDetail(detail)}</pre>}

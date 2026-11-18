@@ -48,7 +48,7 @@ export function ImportMidDialog({ onDone, onCancel }: { onDone: (name: string) =
           <button type="button" onClick={onCancel} disabled={busy}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50">ยกเลิก</button>
           <button type="submit" disabled={!valid || busy}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            className="btn-primary px-4 py-2 text-sm font-medium">
             {busy ? "กำลัง Import..." : "Import"}
           </button>
         </div>

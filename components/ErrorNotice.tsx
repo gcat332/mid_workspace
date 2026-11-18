@@ -26,7 +26,7 @@ export function ErrorNotice({ error }: { error: ApiError }) {
             {open ? "ซ่อนรายละเอียด" : "ดูรายละเอียด"}
           </button>
           {open && (
-            <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-white/70 p-2 font-mono text-xs text-red-900">
+            <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-white/70 dark:bg-black/30 p-2 font-mono text-xs text-red-900">
               {error.detail}
             </pre>
           )}

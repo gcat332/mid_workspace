@@ -1,1 +1,119 @@
 @import "tailwindcss";
+
+/* Design system mirrored from BSM AgentHub (its app/globals.css + DESIGN.md "Soft SaaS"):
+   same token names and values, minus festival themes, mascot and streaming effects. */
+
+/* Manual (class-based) dark mode: `dark:` utilities apply when <html> has .dark.
+   "System" mode is handled in JS by toggling that class from prefers-color-scheme. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+.dark {
+  /* Neutral (no blue tint) dark surface, matching the bg-neutral-900 body. */
+  --background: #171717;
+  --foreground: #ededed;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+/* Type tokens (DESIGN.md section 3). Same font stack as AgentHub: Inter is named first but not
+   web-loaded (AgentHub does not load it either), so most users see their system sans. */
+@theme {
+  --font-sans: "Inter", "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI",
+               Roboto, "Helvetica Neue", "Noto Sans Thai", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* "Soft SaaS": the blue scale is remapped to the MFEC brand blue and the neutral ground gets a
+   faint cool tint, so the standard blue-* / gray-50 utilities pick up the brand palette. */
+@theme {
+  --color-blue-50:  #EAF1FB;
+  --color-blue-100: #D7E5F6;
+  --color-blue-300: #93B6E0;
+  --color-blue-400: #6E9AD6;
+  --color-blue-500: #4C7CC0;
+  --color-blue-600: #2F5FA6; /* primary accent */
+  --color-blue-700: #244B86; /* hover/press */
+  --color-blue-800: #1C3A6B;
+  --color-blue-950: #14233D; /* dark accent-weak grounds */
+  --color-gray-50:  #F6F8FB; /* soft cool ground (rails, page bg) */
+
+  --color-brand-navy: #002A6D;      /* nav active text, avatar gradient start */
+  --color-brand-sky: #1393DF;       /* nav active underline, avatar gradient end */
+  --color-brand-sky-soft: #C0E1F6;  /* nav tab hover underline */
+  --color-ink-soft: #616166;        /* inactive nav tab text */
+  --color-logout-red: #E53935;      /* logout menu item text */
+  --color-logout-red-soft: #FEE9E9; /* logout menu item hover ground */
+  --color-on-accent: #FFFFFF;       /* text on an accent ground */
+}
+
+/* Dark mode for the shared gray / tint utilities used across the components: AgentHub writes
+   `dark:` variants per element; here the neutral scale and the soft tints are re-pointed once
+   (night palette: ground #171717, surface #262626, line #404040, ink #EDEDED). bg-white and
+   text-white are deliberately left alone: bg-white gets an explicit dark: variant at call sites. */
+.dark {
+  --color-gray-50:  #171717;
+  --color-gray-100: #262626;
+  --color-gray-200: #404040;
+  --color-gray-300: #525252;
+  --color-gray-400: #8a8a8a;
+  --color-gray-500: #a3a3a3;
+  --color-gray-600: #bdbdbd;
+  --color-gray-700: #d4d4d4;
+  --color-gray-800: #e5e5e5;
+  --color-gray-900: #ededed;
+  --color-blue-50:  #14233D;
+  --color-blue-100: #1C3A6B;
+  --color-blue-700: #93B6E0;
+  --color-blue-800: #B7CFEC;
+  --color-red-50:   #3a1717;
+  --color-red-100:  #4a1d1d;
+  --color-red-200:  #7f2a2a;
+  --color-red-300:  #a33a3a;
+  --color-red-600:  #f87171;
+  --color-red-700:  #fca5a5;
+  --color-red-800:  #fecaca;
+  --color-red-900:  #fee2e2;
+  --color-amber-50:  #3a2a0c;
+  --color-amber-100: #4a3510;
+  --color-amber-200: #6b4d14;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+  --color-amber-900: #fef3c7;
+  --color-green-100: #123524;
+  --color-green-800: #86efac;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse, .animate-bounce { animation: none !important; }
+  * { transition-duration: 0.01ms !important; }
+}
+
+/* Soft-SaaS primary button: brand gradient, soft shadow, subtle hover lift. Shared by every CTA.
+   Standard sizing: pair with `px-4 py-2 text-sm font-medium` (and its secondary sibling the same). */
+.btn-primary {
+  background-image: linear-gradient(135deg, var(--color-blue-600), var(--color-blue-400));
+  color: var(--color-on-accent);
+  border: 0;
+  border-radius: 10px;
+  font-weight: 600;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--color-blue-600) 25%, transparent);
+  transition: box-shadow 0.18s ease, transform 0.18s ease, opacity 0.15s ease;
+}
+.btn-primary:hover:not(:disabled) { box-shadow: 0 6px 16px color-mix(in srgb, var(--color-blue-600) 30%, transparent); transform: translateY(-1px); }
+.btn-primary:active:not(:disabled) { transform: translateY(0); }
+.btn-primary:disabled { opacity: 0.5; box-shadow: none; transform: none; cursor: default; }
+.btn-primary:focus-visible { outline: 2px solid var(--color-blue-400); outline-offset: 2px; }

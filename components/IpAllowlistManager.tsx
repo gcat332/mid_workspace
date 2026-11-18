@@ -5,11 +5,12 @@ import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { apiFetch } from "@/lib/ui/api"
 import { wouldAllow, isLoopback } from "@/lib/net/cidr"
+import { inputCls } from "@/lib/ui/classes"
 
 type Entry = { id: string; cidr: string; note: string; createdAt: string }
 type Pending = { title: string; body: string; confirmLabel: string; run: () => Promise<void> }
 
-const input = "rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+const input = inputCls.replace("w-full ", "")
 const NET: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" }
 
 export function IpAllowlistManager() {
@@ -83,7 +84,7 @@ export function IpAllowlistManager() {
         <p className="mb-3 text-xs text-gray-600">
           IP ของคุณที่เซิร์ฟเวอร์เห็น: <span className="font-mono text-gray-900">{myIp}</span>{" "}
           ({wouldAllow(myIp, entries.map((e) => e.cidr)) ? "อนุญาต" : "ไม่อยู่ในรายการ"}){" "}
-          <button type="button" className="text-blue-600 hover:underline" onClick={() => setCidr(myIp)}>ใช้ IP นี้</button>
+          <button type="button" className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setCidr(myIp)}>ใช้ IP นี้</button>
         </p>
       )}
       <form className="mb-3 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); add() }}>
@@ -91,10 +92,10 @@ export function IpAllowlistManager() {
           aria-label="IP หรือ CIDR" className={`${input} min-w-[200px] flex-1`} />
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="หมายเหตุ (ไม่บังคับ)"
           aria-label="หมายเหตุ" className={`${input} min-w-[140px] flex-1`} />
-        <button type="submit" disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">เพิ่ม</button>
+        <button type="submit" disabled={busy} className="btn-primary px-4 py-2 text-sm font-medium">เพิ่ม</button>
       </form>
       {err && <div className="mb-2"><ErrorNotice error={err} /></div>}
-      <div className="relative overflow-x-auto rounded-xl border border-gray-200 bg-white">
+      <div className="relative overflow-x-auto rounded-xl border border-gray-200 bg-white dark:bg-neutral-800">
         <table className="w-full text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600">
             <tr><th className="px-4 py-3">IP / CIDR</th><th className="px-4 py-3">หมายเหตุ</th><th className="px-4 py-3"><span className="sr-only">จัดการ</span></th></tr>

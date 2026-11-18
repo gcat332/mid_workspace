@@ -160,11 +160,11 @@ export function FilesTab({ midName, onOpenConfig }: Props) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <nav aria-label="ตำแหน่งโฟลเดอร์" className="flex flex-wrap items-center gap-1 text-sm">
-          <button type="button" className="text-blue-600 hover:underline" onClick={() => setDir("")}>{midName}</button>
+          <button type="button" className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setDir("")}>{midName}</button>
           {crumbs.map((c, i) => (
             <span key={i} className="flex items-center gap-1">
               <span className="text-gray-400">/</span>
-              <button type="button" className="text-blue-600 hover:underline" onClick={() => setDir(crumbs.slice(0, i + 1).join("/"))}>{c}</button>
+              <button type="button" className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setDir(crumbs.slice(0, i + 1).join("/"))}>{c}</button>
             </span>
           ))}
         </nav>
@@ -178,7 +178,7 @@ export function FilesTab({ midName, onOpenConfig }: Props) {
       {dirRo && (
         <p id="ro-hint" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
           🔒 โฟลเดอร์โปรแกรมของ MID แก้ไขไม่ได้ — อัปโหลด library ที่{" "}
-          <button type="button" className="font-mono text-blue-600 hover:underline" onClick={() => setDir(EXTLIB)}>{EXTLIB}</button> แทน
+          <button type="button" className="font-mono text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setDir(EXTLIB)}>{EXTLIB}</button> แทน
         </p>
       )}
 
@@ -193,7 +193,7 @@ export function FilesTab({ midName, onOpenConfig }: Props) {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {dir && (
-              <tr><td colSpan={4} className="py-1.5"><button type="button" className="text-blue-600 hover:underline" onClick={() => setDir(dir.split("/").slice(0, -1).join("/"))}>📁 ..</button></td></tr>
+              <tr><td colSpan={4} className="py-1.5"><button type="button" className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setDir(dir.split("/").slice(0, -1).join("/"))}>📁 ..</button></td></tr>
             )}
             {entries.length === 0 && <tr><td colSpan={4} className="py-3 text-gray-500">โฟลเดอร์ว่าง</td></tr>}
             {entries.map((e) => (
@@ -205,15 +205,15 @@ export function FilesTab({ midName, onOpenConfig }: Props) {
                     : <span className="break-all">{e.name}</span>}
                   {e.readOnly && <span role="img" aria-label="อ่านอย่างเดียว" title="อ่านอย่างเดียว (แก้ไขไม่ได้)" className="ml-1">🔒</span>}
                   {e.config && (
-                    <button type="button" onClick={onOpenConfig} className="ml-2 text-xs text-blue-600 hover:underline">แก้ในแท็บตั้งค่า</button>
+                    <button type="button" onClick={onOpenConfig} className="ml-2 text-xs text-blue-600 dark:text-blue-400 hover:underline">แก้ในแท็บตั้งค่า</button>
                   )}
                 </td>
                 <td className="px-2 text-gray-600">{e.type === "file" ? size(e.size) : ""}</td>
                 <td className="px-2 text-gray-600">{new Date(e.mtime).toLocaleString("th-TH")}</td>
                 <td className="space-x-2 pl-2 text-right whitespace-nowrap">
-                  {e.type === "file" && !e.secret && <button type="button" className="text-blue-600 hover:underline" onClick={() => void openFile(e)}>เปิด</button>}
-                  {e.type === "file" && !e.secret && <a className="text-blue-600 hover:underline" href={`${API_BASE}${base}/download?path=${encodeURIComponent(join(dir, e.name))}`}>ดาวน์โหลด</a>}
-                  {!e.locked && <button type="button" disabled={busy} className="text-blue-600 hover:underline" onClick={() => { setNameDraft(e.name); setModalErr(null); setRenaming(e) }}>เปลี่ยนชื่อ</button>}
+                  {e.type === "file" && !e.secret && <button type="button" className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => void openFile(e)}>เปิด</button>}
+                  {e.type === "file" && !e.secret && <a className="text-blue-600 dark:text-blue-400 hover:underline" href={`${API_BASE}${base}/download?path=${encodeURIComponent(join(dir, e.name))}`}>ดาวน์โหลด</a>}
+                  {!e.locked && <button type="button" disabled={busy} className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => { setNameDraft(e.name); setModalErr(null); setRenaming(e) }}>เปลี่ยนชื่อ</button>}
                   {!e.locked && <button type="button" disabled={busy} className="text-red-600 hover:underline" onClick={() => setDeleting(e)}>ลบ</button>}
                 </td>
               </tr>
@@ -241,7 +241,7 @@ export function FilesTab({ midName, onOpenConfig }: Props) {
             {modalErr && <div className="mt-2"><ErrorNotice error={modalErr} /></div>}
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" disabled={busy} className={`${btn} border-gray-300`} onClick={() => { setNewFolder(false); setRenaming(null) }}>ยกเลิก</button>
-              <button type="submit" disabled={busy || !nameDraft.trim()} className={`${btn} border-blue-600 bg-blue-600 text-white hover:bg-blue-700`}>{busy ? "กำลังดำเนินการ..." : "ตกลง"}</button>
+              <button type="submit" disabled={busy || !nameDraft.trim()} className={`btn-primary px-3 py-1.5 text-sm`}>{busy ? "กำลังดำเนินการ..." : "ตกลง"}</button>
             </div>
           </form>
         </Modal>
