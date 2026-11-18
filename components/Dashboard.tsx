@@ -1,7 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { CreateMidWizard } from "./CreateMidWizard"
 import { ImportMidDialog } from "./ImportMidDialog"
 import { MidList } from "./MidList"
 import { MidPanel } from "./MidPanel"
@@ -13,6 +14,8 @@ import { createLatest } from "@/lib/ui/latest"
 import type { HostView, MidView } from "@/lib/ui/status-view"
 
 const POLL_MS = 5000
+const noopSubscribe = () => () => undefined
+
 // Polls are not user activity: the proxy does not slide the session for them, so the 4 h idle timeout still fires.
 const BACKGROUND: RequestInit = { headers: { "X-Background": "1" } }
 
@@ -21,6 +24,10 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
   const pathname = usePathname()
   const params = useSearchParams()
   const selected = params.get("mid")
+  const jobParam = params.get("job")
+  // Modal portals into document.body, so a wizard opened by the URL on first load (reload / shared link) waits for hydration.
+  const hydrated = useSyncExternalStore(noopSubscribe, () => true, () => false)
+  const creating = hydrated && (params.get("create") === "1" || jobParam !== null)
   const forbidden = params.get("notice") === "forbidden"
 
   const [mids, setMids] = useState<MidView[] | null>(null)
@@ -79,12 +86,24 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
     }
   }, [select])
 
+  // The wizard lives in the URL (?create=1&job=<id>) so a reload resumes the progress view.
+  const openWizard = useCallback(() => router.replace(`${pathname}?create=1`, { scroll: false }), [router, pathname])
+  const setWizardJob = useCallback((id: string) => router.replace(`${pathname}?create=1&job=${encodeURIComponent(id)}`, { scroll: false }), [router, pathname])
+  const closeWizard = useCallback(() => {
+    void refresh()
+    router.replace(selected ? `${pathname}?mid=${encodeURIComponent(selected)}` : pathname, { scroll: false })
+  }, [router, pathname, selected, refresh])
+  const openCreated = useCallback((name: string) => {
+    void refresh()
+    router.replace(`${pathname}?mid=${encodeURIComponent(name)}`, { scroll: false })
+  }, [router, pathname, refresh])
+
   const current = mids?.find((m) => m.name === selected) ?? null
 
   return (
     <AppChrome user={{ email, role: isAdmin ? "admin" : "member" }}>
       <main className="mx-auto max-w-6xl p-4">
-        <DashboardToolbar host={host} mids={mids ?? []} onImport={() => setImporting(true)} />
+        <DashboardToolbar host={host} mids={mids ?? []} onImport={() => setImporting(true)} onCreate={openWizard} />
         {forbidden && (
           <div role="alert" className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             <p>หน้านั้นสำหรับ Admin เท่านั้น (ต้องเป็น Admin) หากต้องการสิทธิ์ ให้ติดต่อ Admin ของ MidHub</p>
@@ -104,6 +123,9 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
               className="mt-4 btn-primary px-4 py-2 text-sm font-medium">
               Import MID ที่มีอยู่
             </button>
+            <button type="button" onClick={openWizard} className="mt-3 block w-full text-sm font-medium text-blue-700 underline">
+              หรือ สร้าง MID ใหม่
+            </button>
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-[18rem_minmax(0,1fr)]">
@@ -118,6 +140,10 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
           </div>
         )}
       </main>
+      {creating && (
+        <CreateMidWizard isAdmin={isAdmin} host={host} mids={mids ?? []} jobId={jobParam}
+          onJobChange={setWizardJob} onOpenMid={openCreated} onClose={closeWizard} />
+      )}
       {importing && (
         <ImportMidDialog onCancel={() => setImporting(false)}
           onDone={(name) => { setImporting(false); void refresh(); select(name) }} />

@@ -3,15 +3,15 @@
 import { useEffect, useRef, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 
-const FOCUSABLE = "button:not([disabled]), input:not([disabled]), a[href]"
+const FOCUSABLE = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]"
 
-type Props = { labelledBy: string; onClose: () => void; busy?: boolean; children: ReactNode }
+type Props = { labelledBy: string; onClose: () => void; busy?: boolean; /** full-height wide dialog (full-screen sheet on phones) */ wide?: boolean; children: ReactNode }
 
 /**
  * Shared accessible modal shell: portal to body, background made inert, Esc closes (unless busy), Tab trapped,
  * focus moves in on open, stays inside when the focused control becomes disabled, and returns to the opener on close.
  */
-export function Modal({ labelledBy, onClose, busy, children }: Props) {
+export function Modal({ labelledBy, onClose, busy, wide, children }: Props) {
   const overlayRef = useRef<HTMLDivElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const busyRef = useRef(busy)
@@ -54,9 +54,11 @@ export function Modal({ labelledBy, onClose, busy, children }: Props) {
   }, [busy])
 
   return createPortal(
-    <div ref={overlayRef} className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div ref={overlayRef} className={`fixed inset-0 z-50 flex items-center justify-center bg-black/40 ${wide ? "p-0 sm:p-4" : "p-4"}`}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1}
-        className="w-full max-w-md rounded-xl bg-white dark:bg-neutral-800 p-5 shadow-xl focus:outline-none">
+        className={wide
+          ? "flex h-full w-full flex-col bg-white dark:bg-neutral-800 shadow-xl focus:outline-none sm:h-[min(92vh,52rem)] sm:max-w-3xl sm:rounded-xl"
+          : "w-full max-w-md rounded-xl bg-white dark:bg-neutral-800 p-5 shadow-xl focus:outline-none"}>
         {children}
       </div>
     </div>,

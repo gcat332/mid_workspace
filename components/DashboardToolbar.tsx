@@ -10,10 +10,11 @@ type Props = {
   host: HostView | null
   mids: MidView[]
   onImport: () => void
+  onCreate: () => void
 }
 
 // Dashboard toolbar under the app chrome: quota / RAM chips on the left, Import and create on the right.
-export function DashboardToolbar({ host, mids, onImport }: Props) {
+export function DashboardToolbar({ host, mids, onImport, onCreate }: Props) {
   const q = host ? quotaView(host.quotaUsed, host.maxRunning) : null
   const midRam = mids.reduce((s, m) => s + (m.status.memoryBytes ?? 0), 0)
   const lowRam = host !== null && host.availableBytes < GIB
@@ -46,12 +47,9 @@ export function DashboardToolbar({ host, mids, onImport }: Props) {
         <button type="button" onClick={onImport} className={ghostBtnCls}>
           Import MID ที่มีอยู่
         </button>
-        <span className="flex items-center gap-1.5">
-          <button type="button" disabled aria-describedby="create-mid-hint" className="btn-primary px-4 py-2 text-sm font-medium">
-            + สร้าง MID ใหม่
-          </button>
-          <span id="create-mid-hint" className="text-xs text-gray-500">(ยังไม่เปิดให้ใช้ในเวอร์ชันนี้)</span>
-        </span>
+        <button type="button" onClick={onCreate} className="btn-primary px-4 py-2 text-sm font-medium">
+          + สร้าง MID ใหม่
+        </button>
       </div>
     </div>
   )
