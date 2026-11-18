@@ -11,6 +11,8 @@ export interface Env {
   jobsDir: string
   maxRunning: number
   helperSocket: string
+  /** Shared secret for AgentHub's /api/agent/* calls; null = feature off. */
+  agentSecret: string | null
 }
 
 const REQUIRED = ["JWT_SECRET", "ADMIN_EMAIL", "ADMIN_PASSWORD", "MIDHUB_VAULT_KEY", "DATABASE_URL"] as const
@@ -28,6 +30,10 @@ export function loadEnv(src: Record<string, string | undefined>): Env {
   if (!Number.isInteger(maxRunning) || maxRunning < 1) {
     throw new Error("MIDHUB_MAX_RUNNING must be a positive integer")
   }
+  const agentSecret = src.MIDHUB_AGENT_SECRET || null
+  if (agentSecret !== null && agentSecret.length < 32) {
+    throw new Error("MIDHUB_AGENT_SECRET must be at least 32 characters (or unset to disable the AgentHub API)")
+  }
   const midhubRoot = src.MIDHUB_ROOT || DEFAULT_MIDHUB_ROOT
   return {
     databaseUrl: src.DATABASE_URL as string,
@@ -39,6 +45,7 @@ export function loadEnv(src: Record<string, string | undefined>): Env {
     jobsDir: path.join(midhubRoot, "jobs"),
     maxRunning,
     helperSocket: src.MIDHUB_HELPER_SOCKET || "/run/midhub/helper.sock",
+    agentSecret,
   }
 }
 

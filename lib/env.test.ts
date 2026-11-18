@@ -25,4 +25,10 @@ describe("loadEnv", () => {
   it("rejects a short JWT_SECRET", () => {
     expect(() => loadEnv({ ...required, JWT_SECRET: "short" })).toThrow(/JWT_SECRET/)
   })
+  it("agentSecret: unset/empty = null (feature off), >= 32 chars accepted, shorter rejected", () => {
+    expect(loadEnv(required).agentSecret).toBeNull()
+    expect(loadEnv({ ...required, MIDHUB_AGENT_SECRET: "" }).agentSecret).toBeNull()
+    expect(loadEnv({ ...required, MIDHUB_AGENT_SECRET: "a".repeat(32) }).agentSecret).toBe("a".repeat(32))
+    expect(() => loadEnv({ ...required, MIDHUB_AGENT_SECRET: "a".repeat(31) })).toThrow(/MIDHUB_AGENT_SECRET/)
+  })
 })

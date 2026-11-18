@@ -137,6 +137,27 @@ describe("auth gate", () => {
   })
 })
 
+describe("/api/agent/* (server-to-server)", () => {
+  it("passes without a cookie, for any method, with no CSRF or cookie handling", async () => {
+    for (const method of ["GET", "POST", "PUT", "DELETE"]) {
+      const res = await proxy(req("/api/agent/mids", { method, headers: { origin: "http://evil.example" } }))
+      expect(res.status).toBe(200)
+      expect(res.headers.get("set-cookie")).toBeNull()
+    }
+  })
+  it("still enforces the IP allowlist", async () => {
+    cidrs = ["10.0.0.0/8"]
+    const res = await proxy(req("/api/agent/mids", { headers: { "x-forwarded-for": "8.8.8.8" } }))
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ code: "ip_blocked" })
+    expect((await proxy(req("/api/agent/mids", { headers: { "x-forwarded-for": "10.1.1.1" } }))).status).toBe(200)
+  })
+  it("does not exempt look-alike paths", async () => {
+    expect((await proxy(req("/api/agentx/mids"))).status).toBe(401)
+    expect((await proxy(req("/api/agent"))).status).toBe(401)
+  })
+})
+
 describe("background polls (M2)", () => {
   it("X-Background: 1 passes but does not slide the session", async () => {
     const res = await proxy(req("/api/mids", { headers: await withCookie("midhub_session", { "x-background": "1" }) }))

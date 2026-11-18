@@ -63,6 +63,11 @@ export async function proxy(req: NextRequest) {
     return new NextResponse(body, { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8" } })
   }
 
+  // /api/agent/* is server-to-server (AgentHub over loopback, no cookie, not a browser): it skips the CSRF
+  // check and the cookie gate. It authenticates itself per request in lib/agent/auth.ts; the IP allowlist
+  // above still applies.
+  if (pathname.startsWith("/api/agent/")) return NextResponse.next()
+
   // 2) CSRF: unsafe API methods must come from this origin (public login included).
   if (pathname.startsWith("/api/") && !SAFE_METHODS.has(req.method) && crossOrigin(req)) {
     return NextResponse.json(

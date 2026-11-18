@@ -46,6 +46,9 @@ const ERRORS = {
   buildstamp_unknown: [400, "ระบุ build ของ instance ไม่ได้ ให้เลือก package ที่มีอยู่หรือกรอก buildstamp"],
   confirm_mismatch: [400, "พิมพ์ชื่อ MID ให้ตรงเพื่อยืนยัน"],
   stream_limit: [429, "เปิดดูความคืบหน้าพร้อมกันมากเกินไป ปิดหน้าต่างอื่นแล้วลองใหม่"],
+  agent_auth: [401, "AgentHub ยืนยันตัวตนกับ MidHub ไม่ผ่าน ตรวจ MIDHUB_AGENT_SECRET ทั้งสองฝั่ง"],
+  agent_user: [403, "ผู้ใช้ยังไม่มีสิทธิ์ใช้ MidHub ให้ Admin เพิ่มในหน้า Users"],
+  agent_check_failed: [403, "MID นี้ยังไม่ผ่านเงื่อนไขสำหรับ AgentHub ตรวจรายการเช็กแล้วลองใหม่"],
   conflict: [409, "การดำเนินการนี้ขัดแย้งกับสถานะปัจจุบัน รีเฟรชหน้าแล้วลองใหม่"],
 } as const satisfies Record<string, readonly [number, string]>
 
