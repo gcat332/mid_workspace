@@ -2,7 +2,7 @@
 # Deploy MidHub on a single host (no Docker). Idempotent — safe to re-run.
 # Run as root:  sudo scripts/deploy.sh      (APP_DIR=/path APP_USER=bsmmidhub to override)
 #
-# App steps (git, npm, build, migrate) run as APP_USER from APP_DIR, so the checkout, node_modules
+# App steps (git, npm, build) run as APP_USER from APP_DIR, so the checkout, node_modules
 # and .next stay owned by the service user. Only deploy/install.sh and the restart need root.
 # Runtime state (SQLite DB, MIDs) lives OUTSIDE the repo under /opt/midhub, so `git pull` never
 # touches it. DATABASE_URL comes from APP_DIR/.env.local (see deploy/README.md).
@@ -61,13 +61,10 @@ STAGE="build"
 echo "==> Build (next build + helper build)"
 as_app npm run build
 
-STAGE="prisma migrate deploy"
-echo "==> Apply DB migrations"
-# prisma.config.ts reads DATABASE_URL from the environment and does not load .env.local itself;
-# pass only that one value (the file also holds secrets that migrate has no business seeing).
-DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' .env.local | tail -n 1 | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")"
-[[ -n "$DATABASE_URL" ]] || { echo "DATABASE_URL is not set in $APP_DIR/.env.local." >&2; exit 1; }
-as_app env DATABASE_URL="$DATABASE_URL" npx prisma migrate deploy
+# DB migrations are NOT run here: `prisma migrate deploy` needs a lock the running app's SQLite
+# connection prevents ("database is locked"). bsm-midhub.service runs it as ExecStartPre on the
+# restart below (with the app stopped), and the health check fails the deploy if that fails.
+[[ -n "$(sed -n 's/^DATABASE_URL=//p' .env.local)" ]] || { echo "DATABASE_URL is not set in $APP_DIR/.env.local." >&2; exit 1; }
 
 STAGE="install.sh"
 echo "==> Install helper copy + units (root-owned helper; restarts the helper itself only if it changed)"
@@ -76,7 +73,7 @@ echo "==> Install helper copy + units (root-owned helper; restarts the helper it
 APP_USER="$APP_USER" deploy/install.sh "$APP_DIR"
 
 STAGE="restart / health check"
-echo "==> Restart service"
+echo "==> Restart service (ExecStartPre applies pending DB migrations)"
 systemctl restart "$SERVICE"
 systemctl --no-pager status "$SERVICE" | head -5 || true
 

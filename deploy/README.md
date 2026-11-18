@@ -11,10 +11,11 @@ the repo root containing `deploy/`; override: `sudo APP_DIR=/path deploy/install
 `scripts/deploy.sh` is the one-command pipeline (same shape as AgentHub's): run it as root from the checkout.
 It runs the app steps as `bsmmidhub` (`sudo -u bsmmidhub -H`) from `APP_DIR` (default `/home/bsmmidhub/midhub`):
 `git pull --ff-only` -> `npm ci` (keeps devDependencies; `.npmrc` carries legacy-peer-deps) -> `npx prisma generate`
--> `npm run build` (= `scripts/build.sh`: `next build` + `npm run helper:build`) -> `npx prisma migrate deploy`
+-> `npm run build` (= `scripts/build.sh`: `next build` + `npm run helper:build`)
 -> `deploy/install.sh` (root-owned helper copy, rendered units; it prints `midhub-install: changed=0|1` and
 restarts `bsm-midhub-helper` itself only when the helper copy or a unit changed) -> `systemctl restart bsm-midhub`
--> status head. It never touches Caddy or `bsm-agenthub`.
+(the unit's `ExecStartPre` runs `prisma migrate deploy` with the app stopped; running it beside the live app
+fails with "database is locked") -> 60 s health check on `/midhub/login`. It never touches Caddy or `bsm-agenthub`.
 
 **First deploy** (new host): do sections 1-2 once by hand (clone as `bsmmidhub`, create `.env.local`; `/opt/midhub/db`
 must exist before the first migrate - create it as `bsmmidhub` 0750 or run `sudo deploy/install.sh` once after a
