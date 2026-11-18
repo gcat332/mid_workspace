@@ -1,10 +1,18 @@
 import net from "node:net"
 import { env } from "@/lib/env"
 import { MidError } from "@/lib/mids/names"
-import type { HelperRequest, HelperResponse } from "./protocol"
+import { CLIENT_TIMEOUT_MS, HELPER_ERROR_CODES, type HelperRequest, type HelperResponse } from "./protocol"
 
-const TIMEOUT_MS = 30_000
 const HELPER_DOWN = "ตัวช่วยระบบ (midhub-helper) ไม่ทำงาน กรุณาแจ้ง Admin"
+
+function parse(buf: string): HelperResponse | null {
+  try {
+    const v = JSON.parse(buf) as Record<string, unknown>
+    if (v?.ok === true) return { ok: true }
+    if (v?.ok === false && typeof v.code === "string" && typeof v.message === "string") return v as HelperResponse
+  } catch {}
+  return null
+}
 
 function roundTrip(req: HelperRequest, socketPath: string): Promise<HelperResponse> {
   return new Promise((resolve, reject) => {
@@ -18,7 +26,7 @@ function roundTrip(req: HelperRequest, socketPath: string): Promise<HelperRespon
       fn()
     }
     sock.setEncoding("utf8")
-    sock.setTimeout(TIMEOUT_MS, () => settle(() => reject(new MidError("helper_down", 503, HELPER_DOWN))))
+    sock.setTimeout(CLIENT_TIMEOUT_MS, () => settle(() => reject(new MidError("helper_down", 503, HELPER_DOWN))))
     sock.on("connect", () => sock.write(JSON.stringify(req) + "\n"))
     sock.on("data", (c: string) => (buf += c))
     sock.on("error", (e: NodeJS.ErrnoException) =>
@@ -26,11 +34,9 @@ function roundTrip(req: HelperRequest, socketPath: string): Promise<HelperRespon
     )
     sock.on("close", () =>
       settle(() => {
-        try {
-          resolve(JSON.parse(buf) as HelperResponse)
-        } catch {
-          reject(new MidError("helper_down", 503, HELPER_DOWN))
-        }
+        const res = parse(buf)
+        if (res) resolve(res)
+        else reject(new MidError("helper_down", 503, HELPER_DOWN, `malformed helper reply: ${buf.slice(0, 200)}`))
       }),
     )
   })
@@ -40,14 +46,7 @@ function roundTrip(req: HelperRequest, socketPath: string): Promise<HelperRespon
 export async function callHelper(req: HelperRequest): Promise<{ ok: true }> {
   const res = await roundTrip(req, env.helperSocket)
   if (res.ok) return res
-  switch (res.code) {
-    case "quota_full":
-    case "invalid_name":
-    case "not_found":
-      throw new MidError(res.code)
-    case "invalid_request":
-      throw new MidError(res.code, 400, res.message)
-    default:
-      throw new MidError(res.code, 500, res.message)
-  }
+  const code = (HELPER_ERROR_CODES as readonly string[]).includes(res.code) ? res.code : "internal"
+  // Known codes use the shared Thai message/status; the raw helper text goes to `detail`.
+  throw new MidError(code, undefined, undefined, res.message)
 }

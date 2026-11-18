@@ -9,6 +9,9 @@ let tmp: string
 let calls: string[][]
 let execCalls: { file: string; args: string[] }[]
 let active: Set<string>
+let enabled: Set<string>
+
+let runResult: (args: string[]) => { code: number; stdout: string }
 
 function fakeSystemctl(): Systemctl {
   return {
@@ -17,11 +20,16 @@ function fakeSystemctl(): Systemctl {
       await new Promise((r) => setTimeout(r, 5))
       if (args[0] === "start" || args[0] === "restart") active.add(args[1])
       if (args[0] === "stop") active.delete(args[1])
-      return { code: 0, stdout: "" }
+      if (args[0] === "enable") enabled.add(args[1])
+      if (args[0] === "disable") enabled.delete(args[1])
+      return runResult(args)
     },
     async activeMidUnits() {
       await new Promise((r) => setTimeout(r, 5))
       return [...active]
+    },
+    async enabledMidUnits() {
+      return [...enabled]
     },
   }
 }
@@ -43,6 +51,7 @@ function deps(over: Partial<HandlerDeps> = {}): HandlerDeps {
 const install = (...names: string[]) =>
   names.forEach((n) => fs.writeFileSync(path.join(tmp, "systemd", `midhub-mid-${n}.service`), "x"))
 const setActive = (...names: string[]) => (active = new Set(names.map((n) => `midhub-mid-${n}.service`)))
+const setEnabled = (...names: string[]) => (enabled = new Set(names.map((n) => `midhub-mid-${n}.service`)))
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "helper-"))
@@ -51,6 +60,8 @@ beforeEach(() => {
   calls = []
   execCalls = []
   active = new Set()
+  enabled = new Set()
+  runResult = () => ({ code: 0, stdout: "" })
 })
 afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }))
 
@@ -97,6 +108,17 @@ describe("quota", () => {
     setActive("aaa", "bbb", "ccc", "ddd")
     expect(await handleRequest({ op: "restart", name: "eee" }, deps())).toMatchObject({ ok: false, code: "quota_full" })
   })
+  it("4 enabled with 0 active -> start of a 5th is refused", async () => {
+    install("eee")
+    setEnabled("aaa", "bbb", "ccc", "ddd")
+    expect(await handleRequest({ op: "start", name: "eee" }, deps())).toMatchObject({ ok: false, code: "quota_full" })
+    expect(calls).toEqual([])
+  })
+  it("restart of an enabled member of the 4 -> ok", async () => {
+    install("aaa")
+    setEnabled("aaa", "bbb", "ccc", "ddd")
+    expect(await handleRequest({ op: "restart", name: "aaa" }, deps())).toEqual({ ok: true })
+  })
   it("start of an already-active unit at the cap -> ok without systemctl start", async () => {
     install("aaa")
     setActive("aaa", "bbb", "ccc", "ddd")
@@ -121,8 +143,26 @@ describe("operations", () => {
   })
   it("systemctl failure -> systemctl_failed", async () => {
     install("aaa")
-    const d = deps({ systemctl: { run: async () => ({ code: 1, stdout: "boom" }), activeMidUnits: async () => [] } })
+    const d = deps({ systemctl: { run: async () => ({ code: 1, stdout: "boom" }), activeMidUnits: async () => [], enabledMidUnits: async () => [] } })
     expect(await handleRequest({ op: "start", name: "aaa" }, d)).toMatchObject({ ok: false, code: "systemctl_failed" })
+  })
+  it("removeUnit ignores not-loaded results", async () => {
+    install("aaa")
+    runResult = (a) => a[0] === "stop" ? { code: 5, stdout: "" } : a[0] === "disable" ? { code: 1, stdout: "Failed to disable unit: Unit file midhub-mid-aaa.service does not exist." } : { code: 0, stdout: "" }
+    expect(await handleRequest({ op: "removeUnit", name: "aaa" }, deps())).toEqual({ ok: true })
+    expect(fs.existsSync(path.join(tmp, "systemd", "midhub-mid-aaa.service"))).toBe(false)
+  })
+  it("removeUnit keeps the file on any other stop/disable failure", async () => {
+    install("aaa")
+    runResult = (a) => (a[0] === "disable" ? { code: 1, stdout: "Access denied" } : { code: 0, stdout: "" })
+    expect(await handleRequest({ op: "removeUnit", name: "aaa" }, deps())).toMatchObject({ ok: false, code: "systemctl_failed" })
+    expect(fs.existsSync(path.join(tmp, "systemd", "midhub-mid-aaa.service"))).toBe(true)
+    expect(calls.some((c) => c[0] === "daemon-reload")).toBe(false)
+  })
+  it("non-MidError failures map to internal", async () => {
+    const d = deps({ systemctl: { run: async () => ({ code: 0, stdout: "" }), activeMidUnits: async () => { throw new Error("x") }, enabledMidUnits: async () => [] } })
+    install("aaa")
+    expect(await handleRequest({ op: "start", name: "aaa" }, d)).toMatchObject({ ok: false, code: "internal" })
   })
   it("installUnit writes 0644 unit then daemon-reload; removeUnit deletes it", async () => {
     expect(await handleRequest({ op: "installUnit", name: "aaa", heapMb: 1024 }, deps())).toEqual({ ok: true })
@@ -130,6 +170,7 @@ describe("operations", () => {
     expect(fs.statSync(f).mode & 0o777).toBe(0o644)
     expect(fs.readFileSync(f, "utf8")).toContain("MemoryMax=1536M")
     expect(calls).toEqual([["daemon-reload"]])
+    expect(fs.readdirSync(path.join(tmp, "systemd"))).toEqual(["midhub-mid-aaa.service"]) // no temp file left
     calls = []
     expect(await handleRequest({ op: "removeUnit", name: "aaa" }, deps())).toEqual({ ok: true })
     expect(fs.existsSync(f)).toBe(false)
@@ -143,8 +184,8 @@ describe("fixOwnership", () => {
     fs.mkdirSync(dir)
     expect(await handleRequest({ op: "fixOwnership", name: "aaa" }, deps())).toEqual({ ok: true })
     expect(execCalls).toEqual([
-      { file: "chown", args: ["-R", "-P", "-h", "midsvc:midhub", dir] },
-      { file: "chmod", args: ["-R", "g+rwX", dir] },
+      { file: "/usr/bin/chown", args: ["-R", "-P", "-h", "midsvc:midhub", dir] },
+      { file: "/usr/bin/setpriv", args: ["--reuid=midsvc", "--regid=midhub", "--clear-groups", "/usr/bin/chmod", "-R", "g+rwX", "--", dir] },
     ])
   })
   it("refuses a symlinked MID dir", async () => {
@@ -170,5 +211,14 @@ describe("fixOwnership", () => {
   })
   it("missing dir -> not_found", async () => {
     expect(await handleRequest({ op: "fixOwnership", name: "aaa" }, deps())).toMatchObject({ ok: false, code: "not_found" })
+  })
+})
+
+describe("bounded queue", () => {
+  it("more than 32 pending -> busy", async () => {
+    install("aaa")
+    const rs = await Promise.all(Array.from({ length: 40 }, () => handleRequest({ op: "stop", name: "aaa" }, deps())))
+    expect(rs.filter((r) => !r.ok && r.code === "busy").length).toBe(8)
+    expect(rs.filter((r) => r.ok).length).toBe(32)
   })
 })

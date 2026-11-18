@@ -31,20 +31,35 @@ describe("callHelper", () => {
   it("missing socket -> helper_down 503", async () => {
     await expect(callHelper({ op: "start", name: "abc" })).rejects.toMatchObject({ name: "MidError", code: "helper_down", status: 503 })
   })
+  it("ECONNREFUSED (non-socket file) and EACCES -> helper_down", async () => {
+    fs.writeFileSync(sock.path, "")
+    await expect(callHelper({ op: "start", name: "abc" })).rejects.toMatchObject({ code: "helper_down", status: 503 })
+    fs.rmSync(sock.path)
+    await serve('{"ok":true}')
+    fs.chmodSync(sock.path, 0o000)
+    await expect(callHelper({ op: "start", name: "abc" })).rejects.toMatchObject({ code: "helper_down", status: 503 })
+  })
   it("ok response", async () => {
     await serve('{"ok":true}')
     await expect(callHelper({ op: "start", name: "abc" })).resolves.toEqual({ ok: true })
   })
   it("maps quota_full", async () => {
     await serve('{"ok":false,"code":"quota_full","message":"x"}')
-    await expect(callHelper({ op: "start", name: "abc" })).rejects.toMatchObject({ code: "quota_full", status: 409 })
+    await expect(callHelper({ op: "start", name: "abc" })).rejects.toMatchObject({ code: "quota_full", status: 409, message: "รันครบ 4 ตัวแล้ว ให้หยุดตัวอื่นก่อน" })
   })
   it("maps systemctl_failed with helper message", async () => {
     await serve('{"ok":false,"code":"systemctl_failed","message":"boom"}')
-    await expect(callHelper({ op: "start", name: "abc" })).rejects.toMatchObject({ code: "systemctl_failed", message: "boom" })
+    await expect(callHelper({ op: "start", name: "abc" })).rejects.toMatchObject({ code: "systemctl_failed", message: "สั่ง systemd ไม่สำเร็จ ดูรายละเอียดด้านล่าง หรือแจ้ง Admin", detail: "boom" })
   })
-  it("garbage reply -> helper_down", async () => {
-    await serve("nope")
-    await expect(callHelper({ op: "start", name: "abc" })).rejects.toMatchObject({ code: "helper_down" })
+  it("garbage or wrong-shape reply -> helper_down with detail", async () => {
+    for (const bad of ["nope", '{"ok":false}', '{"ok":"yes"}']) {
+      await serve(bad)
+      await expect(callHelper({ op: "start", name: "abc" })).rejects.toMatchObject({ code: "helper_down", detail: expect.stringContaining("malformed") })
+      await new Promise((r) => server!.close(r))
+    }
+  })
+  it("unknown code -> internal", async () => {
+    await serve('{"ok":false,"code":"weird","message":"m"}')
+    await expect(callHelper({ op: "start", name: "abc" })).rejects.toMatchObject({ code: "internal", detail: "m" })
   })
 })

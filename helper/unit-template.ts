@@ -24,6 +24,8 @@ WorkingDirectory=${midRoot}/agent
 ExecStart=${midRoot}/${EXEC_START_REL}
 MemoryMax=${heapMb + 512}M
 Restart=on-failure
+NoNewPrivileges=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target
