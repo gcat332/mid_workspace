@@ -55,6 +55,8 @@ was newly added to `midhub`, it runs `systemctl try-restart` on both services.
 The web app unit can write only `APP_DIR/.next` and `/opt/midhub` (`ReadWritePaths`); the rest of the
 checkout is read-only to the running app.
 
+Note: the `phase2_jobs` migration redefines the `Job` table and needs it empty (Phase 1 never wrote jobs); a dev DB with job rows must be reset.
+
 ## 4. Caddy
 
 Back up and edit `/etc/caddy/Caddyfile` by hand. Add the `@midhub path /midhub /midhub/*` + `handle @midhub` block from

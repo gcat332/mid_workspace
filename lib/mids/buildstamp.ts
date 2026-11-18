@@ -1,7 +1,8 @@
 import { MidError } from "./names"
 
+// <family>-MM-DD-YYYY[__patch<n>[-hotfix<n>]-MM-DD-YYYY]_MM-DD-YYYY_HHMM
 export const BUILDSTAMP_RE =
-  /^[a-z]+-\d{2}-\d{2}-\d{4}__patch[0-9a-z]+-\d{2}-\d{2}-\d{4}_\d{2}-\d{2}-\d{4}_\d{4}$/
+  /^[a-z]+-\d{2}-\d{2}-\d{4}(?:__patch[0-9a-z]+(?:-hotfix[0-9a-z]+)?-\d{2}-\d{2}-\d{4})?_\d{2}-\d{2}-\d{4}_\d{4}$/
 
 // glide.war value "glide-<buildstamp>.zip" -> buildstamp, or null when it does not look like one.
 export function buildstampFromGlideWar(war: string): string | null {
@@ -12,7 +13,9 @@ export function buildstampFromGlideWar(war: string): string | null {
 // Recipe confirmed in the spike (docs/spike-mid-linux.md): the LAST date (MM-DD-YYYY) gives the path.
 export function packageUrl(buildstamp: string): string {
   if (!BUILDSTAMP_RE.test(buildstamp)) throw new MidError("invalid_buildstamp")
+  // The build date is the "_MM-DD-YYYY_HHMM" tail, not a position in a split.
   const m = /_(\d{2})-(\d{2})-(\d{4})_\d{4}$/.exec(buildstamp)!
   const [, mm, dd, yyyy] = m
+  if (+mm < 1 || +mm > 12 || +dd < 1 || +dd > 31) throw new MidError("invalid_buildstamp")
   return `https://install.service-now.com/glide/distribution/builds/package/app-signed/mid/${yyyy}/${mm}/${dd}/mid.${buildstamp}.linux.x86-64.zip`
 }

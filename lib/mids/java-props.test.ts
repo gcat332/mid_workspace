@@ -55,4 +55,32 @@ describe("setProp", () => {
   it("handles indented keys", () => {
     expect(setProp("  a=1\n", "a", "9")).toBe("a=9\n")
   })
+  it("leaves an unrelated continuation untouched when setting another key", () => {
+    const t = "x=1 \\\n  a=2 \\\n  more\nb=3\n"
+    expect(setProp(t, "b", "9")).toBe("x=1 \\\n  a=2 \\\n  more\nb=9\n")
+  })
+  it("does not match a key inside a continuation", () => {
+    const t = "x=1 \\\n  a=2\n"
+    expect(setProp(t, "a", "9")).toBe(t + "a=9\n")
+    expect(readProp(t, "a")).toBeNull()
+  })
+  it("throws when the key itself spans lines, changing nothing", () => {
+    const t = "a=1 \\\n  2\n"
+    expect(() => setProp(t, "a", "9")).toThrowError(
+      expect.objectContaining({ code: "invalid_request", detail: "property a spans multiple lines" }),
+    )
+  })
+  it("rejects invalid keys and values", () => {
+    for (const [k, v] of [["a b", "1"], ["a=b", "1"], ["", "1"], ["a\n", "1"], ["a", "1\n2"], ["a", "1\r"], ["a", "1\0"], ["a", "x\\"], ["a", "x\\\\\\"]]) {
+      expect(() => setProp("", k, v)).toThrowError(expect.objectContaining({ code: "invalid_request" }))
+    }
+    expect(setProp("", "a", "x\\\\")).toBe("a=x\\\\\n")
+  })
+})
+
+describe("readProp continuation", () => {
+  it("joins continuation lines stripping leading whitespace", () => {
+    expect(readProp("a=one \\\n    two\\\n  three\nb=1\n", "a")).toBe("one two" + "three")
+    expect(readProp("a=one,\\\r\n   two\r\n", "a")).toBe("one,two")
+  })
 })

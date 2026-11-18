@@ -23,4 +23,28 @@ describe("buildstamp", () => {
       expect(() => packageUrl(bad)).toThrowError(expect.objectContaining({ code: "invalid_buildstamp" }))
     }
   })
+  it("accepts hotfix and base forms", () => {
+    const hot = "xanadu-07-02-2024__patch5-hotfix1-10-15-2024_10-23-2024_2141"
+    const hot2 = "vancouver-06-23-2023__patch10-hotfix2a-08-01-2023_08-09-2023_1200"
+    const base = "xanadu-07-02-2024_07-10-2024_1234"
+    expect(buildstampFromGlideWar(`glide-${hot}.zip`)).toBe(hot)
+    expect(packageUrl(hot)).toContain("/mid/2024/10/23/mid.")
+    expect(packageUrl(hot2)).toContain("/mid/2023/08/09/mid.")
+    expect(packageUrl(base)).toContain("/mid/2024/07/10/mid.")
+  })
+  it("rejects out-of-range month/day in the build date", () => {
+    for (const bad of [
+      "australia-02-11-2026__patch7w42-10-08-2026_13-13-2026_1248",
+      "australia-02-11-2026__patch7w42-10-08-2026_00-13-2026_1248",
+      "australia-02-11-2026__patch7w42-10-08-2026_10-32-2026_1248",
+      "australia-02-11-2026__patch7w42-10-08-2026_10-00-2026_1248",
+    ]) {
+      expect(() => packageUrl(bad)).toThrowError(expect.objectContaining({ code: "invalid_buildstamp" }))
+    }
+  })
+  it("still rejects injection attempts", () => {
+    for (const bad of ["../x", `${BS}/../../y`, `${BS}?x=1`, `${BS}\n`, `${BS}__patch1-hotfix-/x`, "a-01-01-2024_01-01-2024_1234/.."]) {
+      expect(() => packageUrl(bad)).toThrowError(expect.objectContaining({ code: "invalid_buildstamp" }))
+    }
+  })
 })
