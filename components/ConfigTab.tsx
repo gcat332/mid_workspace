@@ -15,7 +15,7 @@ type Form = {
   url: string; username: string; midName: string; useProxy: boolean
   proxyHost: string; proxyPort: string; proxyUser: string; heapMb: number
 }
-type Data = { files: Record<ConfigFile, FileState>; form: Form }
+type Data = { files: Record<ConfigFile, FileState>; form: Form; warning?: string }
 type Backup = { id: string; file: ConfigFile; note: string; createdBy: string; createdAt: string }
 type BackupFull = Backup & { content: string }
 
@@ -63,11 +63,11 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
     } catch { /* history is secondary; the load error path already tells the user */ }
   }, [base])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (keepError = false) => {
     try {
       const res = await apiFetch(base)
       if (!res.ok) { setErr(await readApiError(res)); return }
-      setErr(null)
+      if (!keepError) setErr(null)
       apply((await res.json()) as Data)
       await loadBackups()
     } catch { setErr(NETWORK) }
@@ -81,7 +81,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
     setBusy(true); setErr(null)
     try {
       const res = await apiFetch(path, init)
-      if (!res.ok) { setErr(await readApiError(res)); if (res.status === 502) void load(); return }
+      if (!res.ok) { setErr(await readApiError(res)); if (res.status === 502) void load(true); return }
       apply((await res.json()) as Data)
       await loadBackups()
       after()
@@ -115,6 +115,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
         ))}
       </div>
 
+      {data.warning && <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{data.warning}</p>}
       {err && (
         <div className="space-y-2">
           <ErrorNotice error={err} />
@@ -125,7 +126,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
       {mode === "form" ? (
         <form className="grid max-w-2xl gap-3" onSubmit={(e) => {
           e.preventDefault()
-          void put({ baseHash: data.files["config.xml"].hash, form: { ...form, password: pw.password, proxyPassword: pw.proxyPassword } })
+          void put({ baseHash: data.files["config.xml"].hash, wrapperBaseHash: data.files["wrapper-override.conf"].hash, form: { ...form, password: pw.password, proxyPassword: pw.proxyPassword } })
         }}>
           <label className="text-sm text-gray-700">Instance URL
             <input className={input} value={form.url} onChange={(e) => setF("url", e.target.value)} /></label>

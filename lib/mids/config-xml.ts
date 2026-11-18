@@ -99,6 +99,17 @@ export function readParams(xml: string): Record<string, string> {
   return out
 }
 
+/** Every `<parameter name value>` pair in document order, duplicates included. */
+export function readAllParams(xml: string): Array<[string, string]> {
+  const out: Array<[string, string]> = []
+  for (const t of tokenize(xml)) {
+    if (t.kind !== "parameter") continue
+    const n = attr(t, "name")
+    if (n) out.push([decode(n.raw), decode(attr(t, "value")?.raw ?? "")])
+  }
+  return out
+}
+
 export function validateXml(xml: string): { ok: true } | { ok: false; line: number; message: string } {
   const r = XMLValidator.validate(xml)
   if (r === true) return { ok: true }

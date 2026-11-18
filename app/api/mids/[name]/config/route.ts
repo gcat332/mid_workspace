@@ -37,7 +37,7 @@ export async function PUT(req: Request, ctx: Ctx) {
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
     if (typeof body !== "object" || body === null) throw bad()
     const baseHash = str(body.baseHash)
-    if (body.form !== undefined) await saveForm(name, parseForm(body.form), baseHash, user)
+    if (body.form !== undefined) await saveForm(name, parseForm(body.form), baseHash, str(body.wrapperBaseHash), user)
     else {
       const note = body.note === undefined ? undefined : str(body.note)
       await saveConfigFile(name, str(body.file) as ConfigFile, str(body.content), baseHash, user, note)

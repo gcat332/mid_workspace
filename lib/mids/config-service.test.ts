@@ -176,14 +176,14 @@ describe("partial retry", () => {
 describe("saveForm", () => {
   it("edits only the changed parameters; empty password means unchanged", async () => {
     const form = { url: "https://new.service-now.com/", username: "svc", midName: "mid-one", useProxy: false, proxyHost: "", proxyPort: "", proxyUser: "", heapMb: 1024, password: "", proxyPassword: "" }
-    await saveForm("m1", form, sha(XML), user)
+    await saveForm("m1", form, sha(XML), sha(WRAP), user)
     expect(rd(xmlPath)).toBe(XML.replace("old", "new"))
     expect(rd(wrapPath)).toBe(WRAP)
     expect(helper).not.toHaveBeenCalled()
   })
   it("sets password and heap", async () => {
     const form = { url: "https://old.service-now.com/", username: "svc", midName: "mid-one", useProxy: true, proxyHost: "p.local", proxyPort: "8080", proxyUser: "", heapMb: 2048, password: "newpw", proxyPassword: "" }
-    await saveForm("m1", form, sha(XML), user)
+    await saveForm("m1", form, sha(XML), sha(WRAP), user)
     const p = rd(xmlPath)
     expect(p).toContain('name="mid.instance.password" secure="true" value="newpw"')
     expect(p).toContain('name="mid.proxy.use_proxy" value="true"')
@@ -191,11 +191,60 @@ describe("saveForm", () => {
     expect(rd(wrapPath)).toBe("wrapper.java.maxmemory=2048\r\nwrapper.foo=bar\r\n")
     expect(helper).toHaveBeenCalledWith({ op: "installUnit", name: "m1", heapMb: 2048 })
   })
+  it("old wrapperBaseHash (heap changed elsewhere) -> 409, both files unchanged", async () => {
+    const old = sha(WRAP)
+    fs.writeFileSync(wrapPath, "wrapper.java.maxmemory=4096\r\n")
+    const form = { url: "https://n/", username: "svc", midName: "x", useProxy: false, proxyHost: "", proxyPort: "", proxyUser: "", heapMb: 2048 }
+    await expect(saveForm("m1", form, sha(XML), old, user)).rejects.toMatchObject({ code: "stale", status: 409 })
+    expect(rd(xmlPath)).toBe(XML)
+    expect(rd(wrapPath)).toBe("wrapper.java.maxmemory=4096\r\n")
+    expect(db.backups).toHaveLength(0)
+  })
   it("stale baseHash -> 409 and nothing written", async () => {
     const form = { url: "https://n/", username: "svc", midName: "x", useProxy: false, proxyHost: "", proxyPort: "", proxyUser: "", heapMb: 4096 }
-    await expect(saveForm("m1", form, "nope", user)).rejects.toMatchObject({ code: "stale" })
+    await expect(saveForm("m1", form, "nope", sha(WRAP), user)).rejects.toMatchObject({ code: "stale" })
     expect(rd(xmlPath)).toBe(XML)
     expect(rd(wrapPath)).toBe(WRAP)
+  })
+})
+
+describe("mask resolution", () => {
+  const raw = async () => (await loadConfigFiles("m1")).files["config.xml"].content
+  it("a renamed secret parameter left as ******** is rejected, file unchanged", async () => {
+    const r = (await raw()).replace('name="mid.instance.password"', 'name="mid.instance.passwd"')
+    await expect(saveConfigFile("m1", "config.xml", r, sha(XML), user)).rejects.toMatchObject({ code: "mask_unresolved", status: 400 })
+    expect(rd(xmlPath)).toBe(XML)
+    expect(db.backups).toHaveLength(0)
+  })
+  it("a new foo.password = ******** is rejected", async () => {
+    const r = (await raw()).replace("</parameters>", `  <parameter name="foo.password" value="********"/>\n</parameters>`)
+    await expect(saveConfigFile("m1", "config.xml", r, sha(XML), user)).rejects.toMatchObject({ code: "mask_unresolved" })
+    expect(rd(xmlPath)).toBe(XML)
+  })
+  it("a later duplicate with no on-disk counterpart is rejected", async () => {
+    const r = (await raw()).replace("</parameters>", `  <parameter name="mid.instance.password" value="********"/>\n</parameters>`)
+    await expect(saveConfigFile("m1", "config.xml", r, sha(XML), user)).rejects.toMatchObject({ code: "mask_unresolved" })
+  })
+  it("the normal masked save still keeps the on-disk value", async () => {
+    await saveConfigFile("m1", "config.xml", (await raw()).replace("old", "new"), sha(XML), user)
+    expect(rd(xmlPath)).toBe(XML.replace("old", "new"))
+  })
+})
+
+describe("load warning and heap removal", () => {
+  it("warns when config.xml on disk is malformed", async () => {
+    fs.writeFileSync(xmlPath, XML + "<oops>")
+    expect((await loadConfigFiles("m1")).warning).toMatch(/malformed/)
+    fs.writeFileSync(xmlPath, XML)
+    expect((await loadConfigFiles("m1")).warning).toBeUndefined()
+  })
+  it("removing the heap line does not call installUnit or touch heapMb", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    await saveConfigFile("m1", "wrapper-override.conf", "wrapper.foo=bar\n", sha(WRAP), user)
+    expect(helper).not.toHaveBeenCalled()
+    expect(db.mids[0].heapMb).toBe(1024)
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
   })
 })
 

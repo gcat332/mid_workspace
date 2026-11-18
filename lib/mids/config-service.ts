@@ -5,7 +5,7 @@ import { recordAudit } from "@/lib/audit"
 import type { SessionPayload } from "@/lib/auth/jwt"
 import { callHelper } from "@/lib/helper/client"
 import { MAX_HEAP_MB, MIN_HEAP_MB } from "@/lib/helper/protocol"
-import { readParams, setParams, validateXml } from "./config-xml"
+import { readAllParams, readParams, setParams, validateXml } from "./config-xml"
 import { CONFIG_XML, WRAPPER_OVERRIDE } from "./layout"
 import { MidError, validateMidName } from "./names"
 import { isReadOnlyPath, resolveMidPath } from "./paths"
@@ -55,11 +55,25 @@ export function maskSecrets(xml: string): string {
   return Object.keys(changes).length ? setParams(xml, changes) : xml
 }
 
-/** Puts the on-disk value back for every secret parameter that still carries MASK. */
+/**
+ * Puts the on-disk value back for every secret parameter that still carries MASK. A MASK with no
+ * on-disk secret of the same name (renamed or new parameter) is rejected: it would be stored literally.
+ */
 function unmaskSecrets(next: string, disk: string): string {
   const onDisk = readParams(disk)
+  const diskCount = new Map<string, number>()
+  for (const [k] of readAllParams(disk)) diskCount.set(k, (diskCount.get(k) ?? 0) + 1)
+  const seen = new Map<string, number>()
   const changes: Record<string, string> = {}
-  for (const [k, v] of Object.entries(readParams(next))) if (isSecret(k) && v === MASK) changes[k] = onDisk[k] ?? ""
+  for (const [k, v] of readAllParams(next)) {
+    if (v !== MASK) continue // any parameter, so a renamed secret (e.g. passwd) is caught too
+    const nth = (seen.get(k) ?? 0) + 1
+    seen.set(k, nth)
+    if (nth > (diskCount.get(k) ?? 0)) {
+      throw new MidError("mask_unresolved", 400, "พบค่า ******** ใน parameter ที่ไม่มีรหัสผ่านเดิม กรุณาใส่ค่าจริงหรือลบออก")
+    }
+    changes[k] = onDisk[k]
+  }
   return Object.keys(changes).length ? setParams(next, changes) : next
 }
 
@@ -113,7 +127,9 @@ function formOf(xml: string, wrapper: string): ConfigForm {
   }
 }
 
-export async function loadConfigFiles(name: string): Promise<{ files: Record<ConfigFile, FileState>; form: ConfigForm }> {
+export async function loadConfigFiles(
+  name: string,
+): Promise<{ files: Record<ConfigFile, FileState>; form: ConfigForm; warning?: string }> {
   await midRow(name)
   const [xml, wrapper] = await Promise.all([readDisk(name, "config.xml"), readDisk(name, "wrapper-override.conf")])
   return {
@@ -122,6 +138,7 @@ export async function loadConfigFiles(name: string): Promise<{ files: Record<Con
       "wrapper-override.conf": { content: wrapper, hash: sha256(wrapper) },
     },
     form: formOf(xml, wrapper),
+    ...(validateXml(xml).ok ? {} : { warning: "config.xml บนเครื่องรูปแบบไม่ถูกต้อง (malformed) ค่า password อาจแสดงโดยไม่ถูกปิดบัง ตรวจสอบและแก้ไฟล์" }),
   }
 }
 
@@ -174,6 +191,9 @@ async function saveLocked(name: string, file: ConfigFile, content: string, baseH
     )
 
   const heap = file === "wrapper-override.conf" ? readHeapMb(next) : null
+  if (file === "wrapper-override.conf" && heap === null && readHeapMb(current) !== null) {
+    console.warn(`[config] wrapper.java.maxmemory removed from MID ${name}; service unit and MidServer.heapMb left unchanged`)
+  }
   // Also when the unit is behind the file (an earlier save ended in `partial`), so saving again retries it.
   if (heap !== null && (heap !== readHeapMb(current) || heap !== row.heapMb)) {
     try {
@@ -193,8 +213,8 @@ export function saveConfigFile(name: string, file: ConfigFile, content: string, 
   return serialized(name, () => saveLocked(name, file, content, baseHash, user, { note, action: "config.save" }))
 }
 
-/** `baseHash` is the config.xml hash the form was loaded with; wrapper-override.conf is edited on its current content. */
-export function saveForm(name: string, form: ConfigFormInput, baseHash: string, user: SessionPayload): Promise<void> {
+/** Both hashes are those the form was loaded with; a mismatch on either is stale and nothing is written. */
+export function saveForm(name: string, form: ConfigFormInput, baseHash: string, wrapperBaseHash: string, user: SessionPayload): Promise<void> {
   return serialized(name, async () => {
     const heap = form.heapMb
     if (!Number.isInteger(heap) || heap < MIN_HEAP_MB || heap > MAX_HEAP_MB) {
@@ -202,7 +222,8 @@ export function saveForm(name: string, form: ConfigFormInput, baseHash: string, 
     }
     const row = await midRow(name)
     const xml = await readDisk(name, "config.xml")
-    if (sha256(xml) !== baseHash) throw new MidError("stale", 409, "ไฟล์ถูกแก้ไปแล้ว กรุณาโหลดใหม่")
+    const wrapper = await readDisk(name, "wrapper-override.conf")
+    if (sha256(xml) !== baseHash || sha256(wrapper) !== wrapperBaseHash) throw new MidError("stale", 409, "ไฟล์ถูกแก้ไปแล้ว กรุณาโหลดใหม่")
     const onDisk = readParams(xml)
     const changes: Record<string, string> = {}
     const put = (k: keyof typeof FORM_PARAMS, v: string) => {
@@ -222,7 +243,6 @@ export function saveForm(name: string, form: ConfigFormInput, baseHash: string, 
     const nextXml = setParams(xml, changes)
     if (nextXml !== xml) await saveLocked(name, "config.xml", nextXml, baseHash, user, { action: "config.save" })
 
-    const wrapper = await readDisk(name, "wrapper-override.conf")
     if (readHeapMb(wrapper) !== heap || row.heapMb !== heap) {
       await saveLocked(name, "wrapper-override.conf", setHeapMb(wrapper, heap), sha256(wrapper), user, { action: "config.save" })
     }
