@@ -11,6 +11,11 @@
 # deploy/README.md lifts that for a full 50 MB file.
 	@midhub path /midhub /midhub/*
 	handle @midhub {
+		# AgentHub's server-to-server API is loopback-only (AgentHub calls 127.0.0.1:3100 directly): never
+		# expose it through Caddy. MUST stay the first lines inside this handle (a top-level `respond`
+		# would be ordered AFTER the sibling handle and never run). Needs no body limit: it never reaches the app.
+		@midhubAgent path /midhub/api/agent /midhub/api/agent/*
+		respond @midhubAgent 404
 		@midhubUpload path_regexp ^/midhub/api/mids/[^/]+/files$
 		@midhubOther not path_regexp ^/midhub/api/mids/[^/]+/files$
 		request_body @midhubUpload {

@@ -64,6 +64,10 @@ Back up and edit `/etc/caddy/Caddyfile` by hand. Add the `@midhub path /midhub /
 matcher lists both). Because AgentHub's sites use a site-level `reverse_proxy`, the `handle` blocks take
 precedence for /midhub; AgentHub's own traffic is unchanged.
 
+The block also contains `@midhubAgent path /midhub/api/agent /midhub/api/agent/*` + `respond @midhubAgent 404` as the
+FIRST lines inside `handle @midhub`. This is mandatory (see section 9): never expose the AgentHub API through Caddy, and
+keep it inside the handle (a top-level `respond` is ordered after the sibling `handle` and would never run).
+
 Body limits are enforced by Caddy before the app sees (and authenticates) a request: only the upload
 endpoint `^/midhub/api/mids/<name>/files$` may send up to 51 MiB; everything else under /midhub is capped at
 1 MiB (config files are edited as JSON, so a config file close to the app's 1 MB save limit can hit this cap
@@ -82,6 +86,8 @@ Upload limit, two options:
             tls internal
             @midhub path /midhub /midhub/*
             handle @midhub {
+                @midhubAgent path /midhub/api/agent /midhub/api/agent/*
+                respond @midhubAgent 404
                 @midhubUpload path_regexp ^/midhub/api/mids/[^/]+/files$
                 @midhubOther not path_regexp ^/midhub/api/mids/[^/]+/files$
                 request_body @midhubUpload {
@@ -169,3 +175,29 @@ Heap changes rewrite the unit: saving a new RAM (heap) value in the config tab m
 hand-edited on the host (e.g. during the spike) is overwritten - port such edits into the template first.
 
 Note: `/opt/midhub/mids` is `2770 midsvc:midhub` (no access for others; config.xml holds a plaintext password until the MID first starts). Hosts installed earlier need `sudo chmod 2770 /opt/midhub/mids`.
+
+## 9. AgentHub integration (optional)
+
+Lets BSM AgentHub (same host, port 3000) call `/midhub/api/agent/*` server-to-server over loopback so the Java agent
+can edit MID files from a session. API reference: `docs/agent-api.md`.
+
+1. Generate one secret and use the SAME value on both sides (never print it into logs, prompts or chat):
+
+        openssl rand -base64 48
+
+2. MidHub: add `MIDHUB_AGENT_SECRET=<secret>` to `APP_DIR/.env.local` (>= 32 chars; unset = the API answers 404, feature off),
+   then `sudo systemctl restart bsm-midhub`.
+3. AgentHub (server env, never in `agentEnv()`): `MIDHUB_AGENT_SECRET=<same secret>` and
+   `MIDHUB_URL=http://127.0.0.1:3100/midhub`, then restart AgentHub (done by its owner, not by this runbook).
+4. Caddy 404 block is MANDATORY: `@midhubAgent` + `respond @midhubAgent 404` from `deploy/Caddyfile.midhub` must be in every
+   site that carries `handle @midhub` (section 4). The secret + loopback checks in the app are defense in depth only.
+5. Host must not be rewritten to loopback: AgentHub calls `127.0.0.1:3100` directly so `Host` is genuinely loopback.
+   Do not route this call through Caddy and do not add a `header_up Host 127.0.0.1` to make it pass; MidHub answers
+   403 `agent_auth` to any request whose Host or X-Forwarded-For/X-Real-IP/Forwarded is not loopback.
+6. Per MID, a user switches "อนุญาตให้ AgentHub" on in the overview tab (default off).
+
+Check from the host (replace the email with a MidHub user; expect 200 JSON, and 403 with the extra header):
+
+    curl -s -H "X-MidHub-Agent-Secret: $MIDHUB_AGENT_SECRET" -H "X-MidHub-Actor-Email: you@example.com" \
+      -H "X-MidHub-Session-Id: check-1" http://127.0.0.1:3100/midhub/api/agent/mids
+    curl -s -o /dev/null -w '%{http_code}\n' https://<host>/midhub/api/agent/mids      # must be 404 via Caddy
