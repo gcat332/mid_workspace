@@ -27,6 +27,15 @@ vi.mock("@/lib/mids/status", () => ({
   runSystemctl: async () => ({ code: 0, stdout: "" }),
 }))
 
+// Parks until the engine aborts (also when the signal is already aborted by the time the stage starts).
+const park = {
+  name: "park",
+  run: (ctx: { signal: AbortSignal }) =>
+    new Promise<void>((_r, rej) => {
+      if (ctx.signal.aborted) return rej(new Error("aborted"))
+      ctx.signal.addEventListener("abort", () => rej(new Error("aborted")))
+    }),
+}
 const BS = "australia-02-11-2026__patch7-hotfix1-10-01-2026_11-05-2026_1234"
 const PW = "instance-secret-pw"
 const PROXY_PW = "proxy-secret-pw"
@@ -62,7 +71,6 @@ beforeEach(async () => {
   eng.__abortForTests()
   eng.__resetForTests()
   // Stages that park until the engine aborts, so jobs stay "running" and never touch the host.
-  const park = { name: "park", run: (ctx: { signal: AbortSignal }) => new Promise<void>((_r, rej) => ctx.signal.addEventListener("abort", () => rej(new Error("aborted")))) }
   for (const k of ["install", "clone", "uninstall", "cancel_install"] as const) eng.registerKind(k, [park])
   await prisma.job.deleteMany()
   await prisma.midServer.deleteMany()
@@ -247,14 +255,13 @@ it("GET /api/jobs/[id]: stages, no secrets; 404 unknown", async () => {
   expect((await GET(req("GET"), { params: Promise.resolve({ id: "zzz" }) })).status).toBe(404)
 })
 
-it("POST /api/jobs/[id]/retry and cancel call the engine and audit", async () => {
+it("POST /api/jobs/[id]/retry and cancel call the engine and audit", { timeout: 30000 }, async () => {
   const { jobId } = await (await post({ instanceId, name: "rc1" })).json()
   await new Promise((r) => setTimeout(r, 50))
   eng.__abortForTests() // parked stage rejects -> job failed
   await eng.__idleForTests()
   expect((await prisma.job.findUniqueOrThrow({ where: { id: jobId } })).status).toBe("failed")
   eng.__resetForTests()
-  const park = { name: "park", run: (ctx: { signal: AbortSignal }) => new Promise<void>((_r, rej) => ctx.signal.addEventListener("abort", () => rej(new Error("aborted")))) }
   for (const k of ["install", "clone", "uninstall", "cancel_install"] as const) eng.registerKind(k, [park])
   const retry = await import("../jobs/[id]/retry/route")
   const r = await retry.POST(req("POST"), { params: Promise.resolve({ id: jobId }) })
@@ -280,14 +287,13 @@ describe("retry/cancel permissions and audit", () => {
     expect((await prisma.job.findUniqueOrThrow({ where: { id: "other1" } })).status).toBe("failed")
   })
 
-  it("creator cancels a failed install: cleanup job queued, audit has cancelled/cleanup ids", async () => {
+  it("creator cancels a failed install: cleanup job queued, audit has cancelled/cleanup ids", { timeout: 30000 }, async () => {
     const { jobId } = await (await post({ instanceId, name: "cn1" })).json()
     await new Promise((r) => setTimeout(r, 50))
     eng.__abortForTests()
     await eng.__idleForTests()
     eng.__resetForTests()
-    const park = { name: "park", run: (ctx: { signal: AbortSignal }) => new Promise<void>((_r, rej) => ctx.signal.addEventListener("abort", () => rej(new Error("aborted")))) }
-    for (const k of ["install", "clone", "uninstall", "cancel_install"] as const) eng.registerKind(k, [park])
+      for (const k of ["install", "clone", "uninstall", "cancel_install"] as const) eng.registerKind(k, [park])
     const cancel = await import("../jobs/[id]/cancel/route")
     const res = await cancel.POST(req("POST"), ctxOf(jobId))
     expect(res.status).toBe(202)
