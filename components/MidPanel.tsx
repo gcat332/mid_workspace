@@ -129,7 +129,7 @@ export function MidPanel({ mid, host, onChanged }: Props) {
           ) : (
             <button type="button" onClick={() => request("start")} disabled={busy || transitional || startBlocked}
               aria-describedby={startBlocked ? "mid-start-reason" : undefined}
-              className={`${hdrBtn} border-green-600 bg-green-600 text-white hover:bg-green-700`}>Start</button>
+              className={`${hdrBtn} border-success-solid bg-success-solid text-white hover:bg-success-solid-press`}>Start</button>
           )}
           <button type="button" onClick={() => void fixOwnership()} disabled={fixing || transitional}
             title="ให้ไฟล์ทั้งหมดของ MID เป็นของ midsvc:midhub และกลุ่มแก้ไขได้ (ใช้เมื่อแก้ไฟล์ไม่ได้เพราะสิทธิ์)"

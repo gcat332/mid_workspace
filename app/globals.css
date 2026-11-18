@@ -55,6 +55,12 @@
   --color-logout-red: #E53935;      /* logout menu item text */
   --color-logout-red-soft: #FEE9E9; /* logout menu item hover ground */
   --color-on-accent: #FFFFFF;       /* text on an accent ground */
+
+  /* Solid-fill action colors under white text (>= 4.5:1). Never re-pointed in .dark, unlike the red and green scales. */
+  --color-danger: #B91C1C;
+  --color-danger-press: #991B1B;
+  --color-success-solid: #15803D;
+  --color-success-solid-press: #166534;
 }
 
 /* Dark mode for the shared gray / tint utilities used across the components: AgentHub writes

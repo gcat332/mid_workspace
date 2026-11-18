@@ -137,7 +137,7 @@ export function FilesTab({ midName, onOpenConfig }: Props) {
           {open.readOnly
             ? <span className="ml-auto text-xs text-gray-500">🔒 อ่านอย่างเดียว</span>
             : <button type="button" disabled={busy || !dirty} onClick={() => void save()}
-                className={`${btn} ml-auto border-blue-600 bg-blue-600 text-white hover:bg-blue-700`}>{busy ? "กำลังบันทึก..." : "บันทึก"}</button>}
+                className={`btn-primary ml-auto px-3 py-1.5 text-sm`}>{busy ? "กำลังบันทึก..." : "บันทึก"}</button>}
         </div>
         {err && (
           <div className="space-y-2">

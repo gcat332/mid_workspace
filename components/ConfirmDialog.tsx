@@ -25,7 +25,7 @@ export function ConfirmDialog({ title, children, confirmLabel, danger, busy, onC
           ยกเลิก
         </button>
         <button type="button" onClick={onConfirm} disabled={busy}
-          className={danger ? "rounded-[10px] bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50" : "btn-primary px-4 py-2 text-sm font-medium"}>
+          className={danger ? "rounded-[10px] bg-danger px-4 py-2 text-sm font-semibold text-white hover:bg-danger-press disabled:opacity-50" : "btn-primary px-4 py-2 text-sm font-medium"}>
           {busy ? "กำลังดำเนินการ..." : confirmLabel}
         </button>
       </div>
