@@ -68,6 +68,54 @@ describe("setParams", () => {
   })
 })
 
+describe("tokenizer edge cases", () => {
+  it("does not read attributes out of a quoted value (exact repro)", () => {
+    const x = `<parameters><parameter value='say name="zz"' name="a"/></parameters>`
+    expect(readParams(x)).toEqual({ a: `say name="zz"` })
+    const out = setParams(x, { a: "1", zz: "q" })
+    expect(readParams(out)).toEqual({ a: "1", zz: "q" })
+    expect(out.match(/name="a"/g)).toHaveLength(1)
+  })
+  it("distinguishes prefix names (url vs url.proxy)", () => {
+    const x = `<parameters><parameter name="url.proxy" value="p"/><parameter name="url" value="u"/></parameters>`
+    const out = setParams(x, { url: "new" })
+    expect(readParams(out)).toEqual({ "url.proxy": "p", url: "new" })
+  })
+  it("handles values containing /> and >", () => {
+    const x = `<parameters><parameter name="a" value="x/>y>z"/><parameter name="b" value="1"/></parameters>`
+    expect(readParams(x)).toEqual({ a: "x/>y>z", b: "1" })
+    expect(readParams(setParams(x, { b: "2" }))).toEqual({ a: "x/>y>z", b: "2" })
+  })
+  it("edits all duplicate live names; read returns the first", () => {
+    const x = `<parameters><parameter name="a" value="1"/><parameter name="a" value="2"/></parameters>`
+    expect(readParams(x).a).toBe("1")
+    const out = setParams(x, { a: "9" })
+    expect(out).toBe(`<parameters><parameter name="a" value="9"/><parameter name="a" value="9"/></parameters>`)
+  })
+  it("decodes entity-encoded names and numeric refs, and does not trim values", () => {
+    const x = `<parameters><parameter name="n&amp;m" value=" a&#10;b&#x41; "/></parameters>`
+    expect(readParams(x)).toEqual({ "n&m": " a\nbA " })
+    expect(setParams(x, { "n&m": "z" })).toBe(`<parameters><parameter name="n&amp;m" value="z"/></parameters>`)
+  })
+  it("expands an empty <parameters/> when appending, and throws without any <parameters>", () => {
+    const out = setParams(`<parameters/>\n`, { a: "1" })
+    expect(out).toBe(`<parameters>\n  <parameter name="a" value="1"/>\n</parameters>\n`)
+    expect(validateXml(out)).toEqual({ ok: true })
+    expect(() => setParams("<x/>", { a: "1" })).toThrow(/parameters/)
+  })
+  it("round-trips tricky values", () => {
+    for (const v of ["a&b", `q"uote`, "it's", "<tag>", "/>", `name="x"`, "line1\nline2", "tab\there", "cr\r\n", "&amp;", ""]) {
+      for (const base of [XML, `<parameters/>`, `<parameters><parameter name="k" value='z'/></parameters>`]) {
+        const out = setParams(base, { k: v, "new.key": v })
+        const r = readParams(out)
+        expect(r.k).toBe(v)
+        expect(r["new.key"]).toBe(v)
+        expect(validateXml(out)).toEqual({ ok: true })
+      }
+    }
+  })
+})
+
 describe("validateXml", () => {
   it("ok for valid xml", () => expect(validateXml(XML)).toEqual({ ok: true }))
   it("reports a line number for broken xml", () => {

@@ -18,3 +18,14 @@ describe("wrapper conf heap", () => {
     expect(setHeapMb("", 2048)).toBe("wrapper.java.maxmemory=2048\n")
   })
 })
+
+describe("wrapper conf CRLF", () => {
+  const CRLF = "a=b\r\nwrapper.java.maxmemory=1024\r\nc=d\r\n"
+  it("reads and replaces without touching line endings or duplicating", () => {
+    expect(readHeapMb(CRLF)).toBe(1024)
+    expect(setHeapMb(CRLF, 2048)).toBe("a=b\r\nwrapper.java.maxmemory=2048\r\nc=d\r\n")
+  })
+  it("appends with CRLF when the file uses CRLF", () => {
+    expect(setHeapMb("a=b\r\n", 2048)).toBe("a=b\r\nwrapper.java.maxmemory=2048\r\n")
+  })
+})

@@ -22,7 +22,12 @@ vi.mock("@/lib/db/client", () => {
     },
     update: async ({ where, data }: { where: Row; data: Row }) => Object.assign(rows().find((r) => match(r, where)) as Row, data),
   })
-  return { prisma: { midServer: table(() => db.mids), instance: table(() => db.instances) } }
+  const prisma = {
+    midServer: table(() => db.mids),
+    instance: table(() => db.instances),
+    $transaction: async (fn: (tx: unknown) => unknown) => fn(prisma),
+  }
+  return { prisma }
 })
 
 import { MidError } from "./names"
@@ -66,6 +71,20 @@ describe("importMid", () => {
     deps.unitLoaded = async () => false
     await expect(importMid("m1", user)).rejects.toMatchObject({ code: "not_found", status: 404 })
     expect(db.mids).toHaveLength(0)
+  })
+  it("a unit-check exec failure is internal, not not_found", async () => {
+    mkMid("m1", CFG("https://a.service-now.com/", "M1"))
+    deps.unitLoaded = async () => {
+      throw new MidError("internal", undefined, undefined, "systemctl timed out")
+    }
+    await expect(importMid("m1", user)).rejects.toMatchObject({ code: "internal", detail: "systemctl timed out" })
+  })
+  it("maps a unique-constraint race (P2002) to conflict", async () => {
+    mkMid("m1", CFG("https://a.service-now.com/", "M1"))
+    const { prisma } = await import("@/lib/db/client")
+    const spy = vi.spyOn(prisma.midServer, "create").mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }))
+    await expect(importMid("m1", user)).rejects.toMatchObject({ code: "conflict", status: 409 })
+    spy.mockRestore()
   })
   it("rejects an invalid name", async () => {
     await expect(importMid("Bad Name", user)).rejects.toMatchObject({ code: "invalid_name" })

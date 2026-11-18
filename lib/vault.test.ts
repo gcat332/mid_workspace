@@ -24,6 +24,12 @@ describe("vault", () => {
   it("throws on a malformed blob", () => {
     expect(() => decryptSecret("nope")).toThrow(/malformed/)
   })
+  it("rejects a wrong-length iv or tag", () => {
+    const [iv, tag, ct] = encryptSecret("secret").split(":")
+    const short = Buffer.alloc(4).toString("base64url")
+    expect(() => decryptSecret([short, tag, ct].join(":"))).toThrow(/malformed/)
+    expect(() => decryptSecret([iv, short, ct].join(":"))).toThrow(/malformed/)
+  })
   it("rejects a key that is not 32 bytes", () => {
     envMock.vaultKey = "change-me-vault-key"
     expect(() => encryptSecret("x")).toThrow(/32 bytes/)

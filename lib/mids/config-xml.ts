@@ -1,14 +1,99 @@
-import { XMLParser, XMLValidator } from "fast-xml-parser"
+import { XMLValidator } from "fast-xml-parser"
+import { MidError } from "./names"
 
-const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_", parseAttributeValue: false })
+// One tokenizer feeds both readParams and setParams so they agree on what "the parameter" is.
+// Attributes are parsed left to right as name=quoted-value pairs, so text inside a quoted value
+// (`name="zz"`, `/>`, `>`) can never be mistaken for an attribute or a tag end.
 
-/** Reads `<parameter name value>` pairs from a MID config.xml. */
+type Attr = { name: string; valStart: number; valEnd: number; raw: string }
+type Tok = {
+  kind: "parameter" | "parameters-open" | "parameters-close"
+  start: number
+  end: number
+  attrsEnd: number
+  selfClosing: boolean
+  attrs: Attr[]
+}
+
+const MARKUP = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)/g
+const ATTR_RE = /\s+([^\s=/>"']+)\s*=\s*(?:"([^"]*)"|'([^']*)')/y
+const TAIL_RE = /\s*(\/?)>/y
+
+function tokenize(xml: string): Tok[] {
+  const toks: Tok[] = []
+  MARKUP.lastIndex = 0
+  for (let m = MARKUP.exec(xml); m; m = MARKUP.exec(xml)) {
+    if (m[2] === undefined) continue // comment / CDATA / PI: skipped whole
+    const name = m[2]
+    const start = m.index
+    if (m[1]) {
+      const c = /\s*>/y
+      c.lastIndex = MARKUP.lastIndex
+      if (name === "parameters" && c.test(xml)) {
+        toks.push({ kind: "parameters-close", start, end: c.lastIndex, attrsEnd: start, selfClosing: false, attrs: [] })
+      }
+      continue
+    }
+    const attrs: Attr[] = []
+    let pos = MARKUP.lastIndex
+    for (;;) {
+      ATTR_RE.lastIndex = pos
+      const a = ATTR_RE.exec(xml)
+      if (!a) break
+      const raw = a[2] ?? a[3]
+      const valEnd = ATTR_RE.lastIndex - 1
+      attrs.push({ name: a[1], valStart: valEnd - raw.length, valEnd, raw })
+      pos = ATTR_RE.lastIndex
+    }
+    TAIL_RE.lastIndex = pos
+    const t = TAIL_RE.exec(xml)
+    if (!t) continue // malformed tag: validateXml reports it
+    MARKUP.lastIndex = TAIL_RE.lastIndex
+    if (name === "parameter" || name === "parameters") {
+      toks.push({
+        kind: name === "parameter" ? "parameter" : "parameters-open",
+        start,
+        end: TAIL_RE.lastIndex,
+        attrsEnd: pos,
+        selfClosing: t[1] === "/",
+        attrs,
+      })
+    }
+  }
+  return toks
+}
+
+const NAMED: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" }
+function decode(s: string): string {
+  return s.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|(amp|lt|gt|quot|apos));/g, (m, d, h, n) => {
+    if (n) return NAMED[n]
+    const cp = d !== undefined ? Number(d) : parseInt(h, 16)
+    return cp <= 0x10ffff ? String.fromCodePoint(cp) : m
+  })
+}
+
+function escAttr(v: string, quote: string): string {
+  const s = v
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "&#10;")
+    .replace(/\r/g, "&#13;")
+    .replace(/\t/g, "&#9;")
+  return quote === "'" ? s.replace(/'/g, "&apos;") : s.replace(/"/g, "&quot;")
+}
+
+const attr = (t: Tok, n: string): Attr | undefined => t.attrs.find((a) => a.name === n)
+
+/** Reads `<parameter name value>` pairs (entities decoded, values untrimmed). With duplicate names the first wins. */
 export function readParams(xml: string): Record<string, string> {
-  const root = parser.parse(xml)?.parameters
-  const list = root && typeof root === "object" ? root.parameter : undefined
   const out: Record<string, string> = {}
-  for (const p of [list].flat()) {
-    if (p && typeof p === "object" && typeof p["@_name"] === "string") out[p["@_name"]] = String(p["@_value"] ?? "")
+  for (const t of tokenize(xml)) {
+    if (t.kind !== "parameter") continue
+    const n = attr(t, "name")
+    if (!n) continue
+    const name = decode(n.raw)
+    if (!(name in out)) out[name] = decode(attr(t, "value")?.raw ?? "")
   }
   return out
 }
@@ -19,51 +104,64 @@ export function validateXml(xml: string): { ok: true } | { ok: false; line: numb
   return { ok: false, line: r.err.line, message: r.err.msg }
 }
 
-const escAttr = (v: string, quote: string): string => {
-  const s = v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-  return quote === "'" ? s.replace(/'/g, "&apos;") : s.replace(/"/g, "&quot;")
-}
-
-// Comments are matched first so a commented-out <parameter> is never edited. Quoted attribute values may contain '>'.
-const TOKEN = /<!--[\s\S]*?-->|<parameter\b(?:[^>"']|"[^"]*"|'[^']*')*>/g
-const ATTR = (n: string) => new RegExp(`(\\s${n}\\s*=\\s*)(?:"([^"]*)"|'([^']*)')`)
+type Edit = { start: number; end: number; text: string }
 
 /**
- * Sets the `value` attribute of existing `<parameter name="X">` elements by editing the text in place
- * (no re-serialisation, so every other byte is untouched). Missing keys are appended before `</parameters>`.
+ * Sets the `value` attribute of every live `<parameter name="X">` by editing the text in place (no
+ * re-serialisation, every other byte untouched). Missing keys are appended inside `<parameters>`.
  */
 export function setParams(xml: string, changes: Record<string, string>): string {
-  const pending = new Map(Object.entries(changes))
-  let out = xml.replace(TOKEN, (tag) => {
-    if (tag.startsWith("<!--")) return tag
-    const nm = ATTR("name").exec(tag)
-    const name = nm ? (nm[2] ?? nm[3]) : undefined
-    if (name === undefined || !pending.has(name)) return tag
-    const value = pending.get(name) as string
+  const toks = tokenize(xml)
+  const pending = new Set(Object.keys(changes))
+  const edits: Edit[] = []
+  for (const t of toks) {
+    if (t.kind !== "parameter") continue
+    const n = attr(t, "name")
+    const name = n ? decode(n.raw) : undefined
+    if (name === undefined || !Object.hasOwn(changes, name)) continue
     pending.delete(name)
-    const val = ATTR("value").exec(tag)
-    if (val) {
-      const q = val[2] !== undefined ? '"' : "'"
-      return tag.replace(ATTR("value"), (_m, pre: string) => `${pre}${q}${escAttr(value, q)}${q}`)
+    const v = attr(t, "value")
+    if (v) {
+      const q = xml[v.valStart - 1]
+      edits.push({ start: v.valStart, end: v.valEnd, text: escAttr(changes[name], q) })
+    } else {
+      edits.push({ start: t.attrsEnd, end: t.attrsEnd, text: ` value="${escAttr(changes[name], '"')}"` })
     }
-    return tag.replace(/(\s*\/?>)$/, ` value="${escAttr(value, '"')}"$1`)
-  })
-  if (pending.size === 0) return out
+  }
 
-  let close = -1
-  for (const m of out.matchAll(new RegExp(`${TOKEN.source}|<\\/parameters\\s*>`, "g"))) {
-    if (/^<\/parameters/.test(m[0])) close = m.index
+  if (pending.size > 0) {
+    const els = [...pending].map((k) => `<parameter name="${escAttr(k, '"')}" value="${escAttr(changes[k], '"')}"/>`)
+    const close = toks.findLast((t) => t.kind === "parameters-close")
+    const open = toks.findLast((t) => t.kind === "parameters-open")
+    if (close) {
+      const lineStart = xml.lastIndexOf("\n", close.start - 1) + 1
+      const own = /^[ \t]*$/.test(xml.slice(lineStart, close.start))
+      const prev = toks.findLast((t) => t.kind === "parameter" && t.start < close.start)
+      const pls = prev ? xml.lastIndexOf("\n", prev.start - 1) + 1 : 0
+      const seg = prev ? xml.slice(pls, prev.start) : ""
+      const lineIndent = prev && /^[ \t]*$/.test(seg) ? seg : "  "
+      const text = own ? els.map((e) => `${lineIndent}${e}\n`).join("") : els.join("")
+      const at = own ? lineStart : close.start
+      edits.push({ start: at, end: at, text })
+    } else if (open?.selfClosing) {
+      const lineStart = xml.lastIndexOf("\n", open.start - 1) + 1
+      const base = /^[ \t]*/.exec(xml.slice(lineStart, open.start))![0]
+      const tail = xml.slice(open.start, open.end).replace(/\s*\/>$/, ">")
+      edits.push({
+        start: open.start,
+        end: open.end,
+        text: `${tail}\n${els.map((e) => `${base}  ${e}\n`).join("")}${base}</parameters>`,
+      })
+    } else {
+      throw new MidError(
+        "invalid_request",
+        400,
+        "config.xml ไม่มี element <parameters> จึงเพิ่มค่าพารามิเตอร์ไม่ได้ ตรวจสอบไฟล์แล้วลองใหม่",
+      )
+    }
   }
-  if (close < 0) throw new Error("config.xml has no </parameters> element to add parameters to")
-  const lineStart = out.lastIndexOf("\n", close - 1) + 1
-  const own = /^[ \t]*$/.test(out.slice(lineStart, close))
-  const prev = [...out.slice(0, close).matchAll(/^([ \t]*)<parameter\b/gm)].pop()
-  const indent = prev ? prev[1] : "  "
-  const els = [...pending].map(([k, v]) => `<parameter name="${escAttr(k, '"')}" value="${escAttr(v, '"')}"/>`)
-  if (own) {
-    out = out.slice(0, lineStart) + els.map((e) => `${indent}${e}\n`).join("") + out.slice(lineStart)
-  } else {
-    out = out.slice(0, close) + els.join("") + out.slice(close)
-  }
+
+  let out = xml
+  for (const e of edits.sort((a, b) => b.start - a.start)) out = out.slice(0, e.start) + e.text + out.slice(e.end)
   return out
 }

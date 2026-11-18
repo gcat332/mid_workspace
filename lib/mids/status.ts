@@ -91,7 +91,8 @@ export function parseSystemctlShow(out: string): ServiceStatus {
   }
 }
 
-function run(args: string[]): Promise<RunResult> {
+/** execFile wrapper for unprivileged systemctl calls (fixed binary, argument array, timeout). */
+export function runSystemctl(args: string[]): Promise<RunResult> {
   return new Promise((resolve) => {
     execFile(SYSTEMCTL, args, { timeout: EXEC_TIMEOUT_MS, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
       resolve(mapExecResult(err, stdout, stderr))
@@ -101,7 +102,7 @@ function run(args: string[]): Promise<RunResult> {
 
 export async function readServiceStatus(name: string): Promise<ServiceStatus> {
   const unit = unitName(name) // validates the name first
-  const r = await run(["show", unit, "--property=ActiveState,SubState,MainPID,MemoryCurrent,ActiveEnterTimestamp"])
+  const r = await runSystemctl(["show", unit, "--property=ActiveState,SubState,MainPID,MemoryCurrent,ActiveEnterTimestamp"])
   if (r.code !== 0) throw new Error(`systemctl show failed (code ${r.code}): ${r.stdout.trim().slice(0, 200)}`)
   return parseSystemctlShow(r.stdout)
 }
@@ -131,7 +132,7 @@ export type SlotUsage = {
 
 /** Counts MID slots unprivileged, with the exact commands and parsers the helper uses for its quota. */
 export async function readSlotUsage(): Promise<SlotUsage> {
-  const [active, enabled] = await Promise.all([run(LIST_ACTIVE_ARGS), run(LIST_ENABLED_ARGS)])
+  const [active, enabled] = await Promise.all([runSystemctl(LIST_ACTIVE_ARGS), runSystemctl(LIST_ENABLED_ARGS)])
   const alive = parseActiveMidUnits(listOutput(active, "systemctl list-units"))
   const on = parseEnabledMidUnits(listOutput(enabled, "systemctl list-unit-files"))
   return { running: alive.length, quotaUsed: new Set([...alive, ...on]).size }

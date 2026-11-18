@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process"
 import { readFile } from "node:fs/promises"
 import { prisma } from "@/lib/db/client"
 import { recordAudit } from "@/lib/audit"
@@ -7,7 +6,7 @@ import { readParams } from "./config-xml"
 import { CONFIG_XML, WRAPPER_OVERRIDE } from "./layout"
 import { MidError, midRoot, unitName, validateMidName } from "./names"
 import { resolveMidPath } from "./paths"
-import { readServiceStatus, type ServiceStatus } from "./status"
+import { readServiceStatus, runSystemctl, type ServiceStatus } from "./status"
 import { readHeapMb } from "./wrapper-conf"
 
 export type MidSummary = {
@@ -20,15 +19,15 @@ export type MidSummary = {
   status: ServiceStatus
 }
 
-const SYSTEMCTL = "/usr/bin/systemctl"
 const UNKNOWN: ServiceStatus = { state: "unknown", pid: null, memoryBytes: null, since: null }
 
-function unitLoaded(unit: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    execFile(SYSTEMCTL, ["show", unit, "--property=LoadState"], { timeout: 10_000 }, (err, stdout) => {
-      resolve(!err && /^LoadState=loaded$/m.test(stdout))
-    })
-  })
+/** true = loaded, false = systemd says the unit is not loaded. An exec failure/timeout throws (not "missing"). */
+async function unitLoaded(unit: string): Promise<boolean> {
+  const r = await runSystemctl(["show", unit, "--property=LoadState"])
+  if (r.code !== 0) {
+    throw new MidError("internal", undefined, undefined, `systemctl show ${unit} failed (code ${r.code}): ${r.stdout.trim().slice(0, 200)}`)
+  }
+  return /^LoadState=loaded$/m.test(r.stdout)
 }
 
 /** Injectable for tests. */
@@ -38,7 +37,10 @@ export const deps = { unitLoaded, readStatus: readServiceStatus }
 async function readMidFile(name: string, rel: string): Promise<string | null> {
   try {
     return await readFile(await resolveMidPath(name, rel), "utf8")
-  } catch {
+  } catch (e) {
+    if (!(e instanceof MidError && e.code === "not_found") && (e as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn(`[registry] cannot read ${rel} of MID ${name}:`, (e as Error).message)
+    }
     return null
   }
 }
@@ -61,14 +63,17 @@ async function summarize(row: Row): Promise<MidSummary> {
   const [xml, inst, status] = await Promise.all([
     readMidFile(row.name, CONFIG_XML),
     row.instanceId ? prisma.instance.findUnique({ where: { id: row.instanceId } }) : null,
-    deps.readStatus(row.name).catch(() => UNKNOWN),
+    deps.readStatus(row.name).catch((e: unknown) => {
+      console.warn(`[registry] status of MID ${row.name} unavailable:`, (e as Error).message)
+      return UNKNOWN
+    }),
   ])
   let params: Record<string, string> = {}
   if (xml !== null) {
     try {
       params = readParams(xml)
-    } catch {
-      // unreadable config: keep nulls
+    } catch (e) {
+      console.warn(`[registry] config.xml of MID ${row.name} is unreadable:`, (e as Error).message)
     }
   }
   return {
@@ -102,7 +107,7 @@ export async function importMid(name: string, user: SessionPayload): Promise<Mid
   } catch (e) {
     if (e instanceof MidError && e.code !== "not_found") throw e
     if (e instanceof MidError || (e as NodeJS.ErrnoException).code === "ENOENT") throw new MidError("not_a_mid")
-    throw e
+    throw new MidError("internal", undefined, undefined, `cannot read ${CONFIG_XML}: ${(e as Error).message}`)
   }
   const existing = await prisma.midServer.findUnique({ where: { name } })
   if (existing && existing.state !== "removed") {
@@ -119,18 +124,26 @@ export async function importMid(name: string, user: SessionPayload): Promise<Mid
 
   const params = readParams(xml)
   const url = normalizeUrl(params.url)
-  let instanceId: string | null = null
-  if (url) {
-    const inst =
-      (await prisma.instance.findUnique({ where: { url } })) ??
-      (await prisma.instance.create({ data: { url, label: new URL(url).host, createdBy: user.email } }))
-    instanceId = inst.id
-  }
   const heapMb = readHeapMb((await readMidFile(name, WRAPPER_OVERRIDE)) ?? "") ?? 1024
-  const data = { dir: midRoot(name), serviceName: unit, heapMb, state: "installed", instanceId, removedAt: null }
-  const row = existing
-    ? await prisma.midServer.update({ where: { name }, data: { ...data, createdBy: user.email } })
-    : await prisma.midServer.create({ data: { name, ...data, createdBy: user.email } })
+  let row: Row
+  try {
+    row = await prisma.$transaction(async (tx) => {
+      let instanceId: string | null = null
+      if (url) {
+        const inst =
+          (await tx.instance.findUnique({ where: { url } })) ??
+          (await tx.instance.create({ data: { url, label: new URL(url).host, createdBy: user.email } }))
+        instanceId = inst.id
+      }
+      const data = { dir: midRoot(name), serviceName: unit, heapMb, state: "installed", instanceId, removedAt: null }
+      return existing
+        ? tx.midServer.update({ where: { name }, data: { ...data, createdBy: user.email } })
+        : tx.midServer.create({ data: { name, ...data, createdBy: user.email } })
+    })
+  } catch (e) {
+    if ((e as { code?: string }).code === "P2002") throw new MidError("conflict", 409, "MID นี้ถูกนำเข้าแล้ว ดูได้ในรายการ MID")
+    throw e
+  }
   await recordAudit(user, "mid.import", name, { instanceUrl: url, revived: Boolean(existing) })
   return summarize(row)
 }

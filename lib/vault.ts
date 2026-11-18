@@ -24,6 +24,7 @@ export function decryptSecret(blob: string): string {
   const parts = blob.split(":")
   if (parts.length !== 3) throw new Error("malformed secret blob")
   const [iv, tag, ct] = parts.map((p) => Buffer.from(p, "base64url"))
+  if (iv.length !== 12 || tag.length !== 16) throw new Error("malformed secret blob")
   const decipher = createDecipheriv(ALGO, vaultKey(), iv)
   decipher.setAuthTag(tag) // a tampered ciphertext/tag throws in final() — fail closed
   return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8")
