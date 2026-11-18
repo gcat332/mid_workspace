@@ -1,17 +1,16 @@
-import { execFile } from "node:child_process"
 import { readFile } from "node:fs/promises"
 import { unitName } from "./names"
 import {
   LIST_ACTIVE_ARGS,
   LIST_ENABLED_ARGS,
   listOutput,
-  mapExecResult,
   parseActiveMidUnits,
   parseEnabledMidUnits,
+  runFile,
+  SYSTEMCTL,
   type RunResult,
 } from "./unit-list"
 
-const SYSTEMCTL = "/usr/bin/systemctl"
 const EXEC_TIMEOUT_MS = 10_000
 
 export type ServiceStatus = {
@@ -91,14 +90,8 @@ export function parseSystemctlShow(out: string): ServiceStatus {
   }
 }
 
-/** execFile wrapper for unprivileged systemctl calls (fixed binary, argument array, timeout). */
-export function runSystemctl(args: string[]): Promise<RunResult> {
-  return new Promise((resolve) => {
-    execFile(SYSTEMCTL, args, { timeout: EXEC_TIMEOUT_MS, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-      resolve(mapExecResult(err, stdout, stderr))
-    })
-  })
-}
+/** Unprivileged systemctl call (fixed binary, argument array, timeout) via the runner the helper uses too. */
+export const runSystemctl = (args: string[]): Promise<RunResult> => runFile(SYSTEMCTL, args, EXEC_TIMEOUT_MS)
 
 export async function readServiceStatus(name: string): Promise<ServiceStatus> {
   const unit = unitName(name) // validates the name first

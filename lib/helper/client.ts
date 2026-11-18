@@ -1,9 +1,11 @@
 import net from "node:net"
 import { env } from "@/lib/env"
-import { MidError } from "@/lib/mids/names"
+import { MidError, quotaFullMessage } from "@/lib/mids/names"
 import { CLIENT_TIMEOUT_MS, HELPER_ERROR_CODES, type HelperRequest, type HelperResponse } from "./protocol"
 
-const HELPER_DOWN = "ตัวช่วยระบบ (midhub-helper) ไม่ทำงาน กรุณาแจ้ง Admin"
+/** Next step for whoever can reach the server (shown behind the details toggle). */
+const HELPER_HINT = "ตรวจด้วย: systemctl status bsm-midhub-helper (และ journalctl -u bsm-midhub-helper -n 50)"
+const helperDown = (extra?: string) => new MidError("helper_down", undefined, undefined, extra ? `${HELPER_HINT}\n${extra}` : HELPER_HINT)
 
 function parse(buf: string): HelperResponse | null {
   try {
@@ -26,17 +28,17 @@ function roundTrip(req: HelperRequest, socketPath: string): Promise<HelperRespon
       fn()
     }
     sock.setEncoding("utf8")
-    sock.setTimeout(CLIENT_TIMEOUT_MS, () => settle(() => reject(new MidError("helper_down", 503, HELPER_DOWN))))
+    sock.setTimeout(CLIENT_TIMEOUT_MS, () => settle(() => reject(helperDown("timeout"))))
     sock.on("connect", () => sock.write(JSON.stringify(req) + "\n"))
     sock.on("data", (c: string) => (buf += c))
     sock.on("error", (e: NodeJS.ErrnoException) =>
-      settle(() => reject(["ENOENT", "ECONNREFUSED", "EACCES"].includes(e.code ?? "") ? new MidError("helper_down", 503, HELPER_DOWN) : e)),
+      settle(() => reject(["ENOENT", "ECONNREFUSED", "EACCES"].includes(e.code ?? "") ? helperDown(e.code) : e)),
     )
     sock.on("close", () =>
       settle(() => {
         const res = parse(buf)
         if (res) resolve(res)
-        else reject(new MidError("helper_down", 503, HELPER_DOWN, `malformed helper reply: ${buf.slice(0, 200)}`))
+        else reject(helperDown(`malformed helper reply: ${buf.slice(0, 200)}`))
       }),
     )
   })
@@ -48,5 +50,5 @@ export async function callHelper(req: HelperRequest): Promise<{ ok: true }> {
   if (res.ok) return res
   const code = (HELPER_ERROR_CODES as readonly string[]).includes(res.code) ? res.code : "internal"
   // Known codes use the shared Thai message/status; the raw helper text goes to `detail`.
-  throw new MidError(code, undefined, undefined, res.message)
+  throw new MidError(code, undefined, code === "quota_full" ? quotaFullMessage(env.maxRunning) : undefined, res.message)
 }

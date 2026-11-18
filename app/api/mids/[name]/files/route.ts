@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireUser } from "@/lib/auth/helpers"
 import { recordAudit } from "@/lib/audit"
-import { handleRouteError } from "@/lib/http/route"
+import { handleRouteError, readJsonObject } from "@/lib/http/route"
 import { MAX_UPLOAD_BYTES, dirReadOnly, listDir, mkdir, readText, remove, rename, upload, writeText } from "@/lib/mids/files"
 import { MidError } from "@/lib/mids/names"
 
@@ -42,8 +42,8 @@ export async function PUT(req: Request, ctx: Ctx) {
   try {
     const user = await requireUser()
     const { name } = await ctx.params
-    const b = (await req.json().catch(() => null)) as Record<string, unknown> | null
-    if (typeof b !== "object" || b === null) throw bad()
+    const b = await readJsonObject(req)
+    if (!b) throw bad()
     const path = str(b.path)
     const r = await writeText(name, path, str(b.content), str(b.baseHash))
     await recordAudit(user, "file.write", name, { path: path.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/") })
@@ -78,8 +78,8 @@ export async function POST(req: Request, ctx: Ctx) {
         uploading--
       }
     }
-    const b = (await req.json().catch(() => null)) as Record<string, unknown> | null
-    if (typeof b !== "object" || b === null) throw bad()
+    const b = await readJsonObject(req)
+    if (!b) throw bad()
     if (b.op === "mkdir") {
       const parent = str(b.parent)
       const dn = str(b.name)

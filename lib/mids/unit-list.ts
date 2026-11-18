@@ -1,7 +1,20 @@
-// Free of Next/Prisma/env imports: shared by the root helper (helper/systemctl.ts) and the web app (lib/mids/status.ts).
+// Free of Next/Prisma/env imports (node builtins only): shared by the root helper (helper/systemctl.ts) and the web app (lib/mids/status.ts).
 // Both must count MID units exactly the same way so the UI never disagrees with the helper's quota.
 
+import { execFile } from "node:child_process"
+
 export type RunResult = { code: number; stdout: string }
+
+export const SYSTEMCTL = "/usr/bin/systemctl"
+
+/** execFile with an argument array (never a shell), a timeout and a 1 MB output cap; stdout includes stderr. */
+export function runFile(file: string, args: string[], timeoutMs: number): Promise<RunResult> {
+  return new Promise((resolve) => {
+    execFile(file, args, { timeout: timeoutMs, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      resolve(mapExecResult(err, stdout, stderr))
+    })
+  })
+}
 
 /** Pure mapping of an execFile callback result. Real numeric exit codes are kept; anything else (timeout kill,
  * signal, spawn error, maxBuffer overflow) becomes -1 with the cause in the output, so it can never look like exit 1. */

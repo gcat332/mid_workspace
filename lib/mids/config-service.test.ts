@@ -92,6 +92,12 @@ describe("loadConfigFiles", () => {
     expect(r.files["config.xml"].content).toContain('name="mid.proxy.password" value="********"')
     expect(r.files["config.xml"].content).toContain('value="https://old.service-now.com/"')
   })
+  it("tells the form whether passwords exist on disk, as booleans only (Q-M9)", async () => {
+    const r = await loadConfigFiles("m1")
+    expect(r.form).toMatchObject({ hasPassword: true, hasProxyPassword: true })
+    fs.writeFileSync(xmlPath, XML.replace(/ENC\(secret==\)/, "").replace("proxysecret", ""))
+    expect((await loadConfigFiles("m1")).form).toMatchObject({ hasPassword: false, hasProxyPassword: false })
+  })
   it("a MID that is not registered is 404", async () => {
     await expect(loadConfigFiles("m9")).rejects.toMatchObject({ code: "not_found" })
   })
@@ -103,12 +109,14 @@ describe("saveConfigFile", () => {
     expect(rd(xmlPath)).toBe(XML)
     expect(db.backups).toHaveLength(0)
   })
-  it("invalid XML -> 400 with line number, file unchanged", async () => {
+  it("invalid XML -> 400 with a Thai message + line number, parser text only in detail (Q-M3), file unchanged", async () => {
     const bad = XML.replace("</parameters>", "<oops>\n</parameters>")
     const err = await saveConfigFile("m1", "config.xml", bad, sha(XML), user).catch((e) => e)
     expect(err).toBeInstanceOf(MidError)
     expect(err.status).toBe(400)
-    expect(err.message).toMatch(/บรรทัด \d+/)
+    expect(err.message).toMatch(/ตรวจแท็กที่เปิด\/ปิดไม่ตรงกันรอบบรรทัด \d+/)
+    expect(err.detail).toBeTruthy()
+    expect(err.message).not.toContain(err.detail) // English parser text only behind the details toggle
     expect(rd(xmlPath)).toBe(XML)
     expect(db.backups).toHaveLength(0)
   })

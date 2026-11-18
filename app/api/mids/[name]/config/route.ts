@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { requireUser } from "@/lib/auth/helpers"
-import { handleRouteError } from "@/lib/http/route"
+import { handleRouteError, readJsonObject } from "@/lib/http/route"
 import { loadConfigFiles, saveConfigFile, saveForm, type ConfigFile, type ConfigFormInput } from "@/lib/mids/config-service"
 import { MidError } from "@/lib/mids/names"
 
@@ -34,8 +34,8 @@ export async function PUT(req: Request, ctx: Ctx) {
   try {
     const user = await requireUser()
     const { name } = await ctx.params
-    const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
-    if (typeof body !== "object" || body === null) throw bad()
+    const body = await readJsonObject(req)
+    if (!body) throw bad()
     const baseHash = str(body.baseHash)
     if (body.form !== undefined) await saveForm(name, parseForm(body.form), baseHash, str(body.wrapperBaseHash), user)
     else {

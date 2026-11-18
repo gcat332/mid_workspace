@@ -47,8 +47,11 @@ export type ConfigForm = {
   proxyPort: string
   proxyUser: string
   heapMb: number
+  /** A password / proxy password is set on disk (the value itself never leaves the server). */
+  hasPassword: boolean
+  hasProxyPassword: boolean
 }
-export type ConfigFormInput = ConfigForm & { password?: string; proxyPassword?: string }
+export type ConfigFormInput = Omit<ConfigForm, "hasPassword" | "hasProxyPassword"> & { password?: string; proxyPassword?: string }
 export type FileState = { content: string; hash: string }
 export type ConfigBackupMeta = { id: string; file: string; note: string; createdBy: string; createdAt: Date }
 
@@ -180,6 +183,8 @@ function formOf(xml: string, wrapper: string): ConfigForm {
     proxyPort: g("proxyPort"),
     proxyUser: g("proxyUser"),
     heapMb: readHeapMb(wrapper) ?? 1024,
+    hasPassword: g("password") !== "",
+    hasProxyPassword: g("proxyPassword") !== "",
   }
 }
 
@@ -202,7 +207,7 @@ function validate(file: ConfigFile, content: string): void {
   if (file === "config.xml") {
     const v = validateXml(content)
     if (!v.ok) {
-      throw new MidError("invalid_xml", 400, `config.xml ไม่ถูกต้อง (บรรทัด ${v.line}): ${v.message} แก้ไขแล้วบันทึกใหม่`)
+      throw new MidError("invalid_xml", 400, `config.xml รูปแบบ XML ไม่ถูกต้อง ตรวจแท็กที่เปิด/ปิดไม่ตรงกันรอบบรรทัด ${v.line} แก้ไขแล้วบันทึกใหม่`, v.message)
     }
     return
   }

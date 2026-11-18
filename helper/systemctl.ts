@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process"
 import { EXEC_TIMEOUT_MS } from "../lib/helper/protocol"
 import {
   LIST_ACTIVE_ARGS,
@@ -7,10 +6,12 @@ import {
   mapExecResult,
   parseActiveMidUnits,
   parseEnabledMidUnits,
+  runFile,
+  SYSTEMCTL,
   type RunResult,
 } from "../lib/mids/unit-list"
 
-export const SYSTEMCTL = "/usr/bin/systemctl"
+export { SYSTEMCTL }
 export const CHOWN = "/usr/bin/chown"
 export const CHMOD = "/usr/bin/chmod"
 export const SETPRIV = "/usr/bin/setpriv"
@@ -27,12 +28,7 @@ export type Systemctl = {
 }
 
 /** execFile with an argument array; never a shell. stdout includes stderr so callers can see failures. */
-export const realExec: Exec = (file, args) =>
-  new Promise((resolve) => {
-    execFile(file, args, { timeout: EXEC_TIMEOUT_MS, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
-      resolve(mapExecResult(err, stdout, stderr))
-    })
-  })
+export const realExec: Exec = (file, args) => runFile(file, args, EXEC_TIMEOUT_MS)
 
 export function makeSystemctl(exec: Exec = realExec): Systemctl {
   return {

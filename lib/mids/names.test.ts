@@ -53,3 +53,9 @@ describe("MidError", () => {
     expect([e.status, e.message]).toEqual([410, "x"])
   })
 })
+
+import { quotaFullMessage } from "./names"
+it("quota_full text is built from the configured maximum (M4)", () => {
+  expect(quotaFullMessage(6)).toBe("รันครบ 6 ตัวแล้ว ให้หยุดตัวอื่นก่อน")
+  expect(new MidError("quota_full").message).not.toMatch(/\d/)
+})

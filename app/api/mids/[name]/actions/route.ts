@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { requireUser } from "@/lib/auth/helpers"
 import { recordAudit } from "@/lib/audit"
 import { callHelper } from "@/lib/helper/client"
-import { handleRouteError } from "@/lib/http/route"
+import { handleRouteError, readJsonObject } from "@/lib/http/route"
 import { getMid } from "@/lib/mids/registry"
 import { readHostMemory } from "@/lib/mids/status"
 
@@ -29,7 +29,7 @@ function parseBody(raw: unknown): { action: Action; confirmLowMemory?: boolean }
 export async function POST(req: Request, ctx: { params: Promise<{ name: string }> }) {
   try {
     const user = await requireUser()
-    const body = parseBody(await req.json().catch(() => null))
+    const body = parseBody(await readJsonObject(req))
     if (!body) return invalid("คำสั่งไม่ถูกต้อง ต้องเป็น start, stop, restart หรือ fixOwnership")
     const { action, confirmLowMemory } = body
 

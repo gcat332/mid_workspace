@@ -12,13 +12,13 @@ const ERRORS = {
   not_found: [404, "ไม่พบ MID หรือไฟล์ที่ระบุ ตรวจสอบชื่อ/พาธแล้วลองใหม่"],
   read_only: [403, "โฟลเดอร์นี้เป็นแบบอ่านอย่างเดียว (agent/bin, agent/lib, agent/jre) ไม่สามารถแก้ไขได้"],
   stale: [409, "ไฟล์ถูกแก้ไขโดยผู้อื่นแล้ว กรุณาโหลดใหม่แล้วแก้ไขอีกครั้ง"],
-  quota_full: [409, "รันครบ 4 ตัวแล้ว ให้หยุดตัวอื่นก่อน"],
+  quota_full: [409, "รันครบจำนวนสูงสุดแล้ว ให้หยุดตัวอื่นก่อน"],
   disk_full: [409, "พื้นที่ของ MID เต็ม ลบไฟล์ที่ไม่ใช้แล้วลองใหม่"],
   busy: [503, "ตัวช่วยระบบกำลังยุ่ง กรุณารอสักครู่แล้วลองใหม่"],
   invalid_request: [400, "คำขอไม่ถูกต้อง กรุณารีเฟรชหน้าแล้วลองใหม่ หากยังเป็นอีกให้แจ้ง Admin"],
   systemctl_failed: [500, "สั่ง systemd ไม่สำเร็จ ดูรายละเอียดด้านล่าง หรือแจ้ง Admin"],
   internal: [500, "ตัวช่วยระบบทำงานผิดพลาด ดูรายละเอียดด้านล่าง หรือแจ้ง Admin"],
-  helper_down: [503, "บริการ helper ไม่ตอบสนอง ตรวจสอบว่า midhub-helper ทำงานอยู่ แล้วลองใหม่"],
+  helper_down: [503, "บริการ helper (bsm-midhub-helper) ไม่ตอบสนอง ลองใหม่อีกครั้งในอีกสักครู่ หากยังไม่ได้ ผู้ดูแลเซิร์ฟเวอร์ต้องตรวจสอบ service นี้ (ดูรายละเอียด)"],
   not_a_mid: [400, "โฟลเดอร์นี้ไม่ใช่ MID Server ที่ถูกต้อง ตรวจสอบว่ามีโฟลเดอร์ agent อยู่"],
   not_text: [415, "ไฟล์นี้ไม่ใช่ไฟล์ข้อความ จึงเปิดแก้ไขในหน้าเว็บไม่ได้ ให้ดาวน์โหลดแทน"],
   too_large: [413, "ไฟล์ใหญ่เกินกำหนด (สูงสุด 50 MB) ลดขนาดไฟล์แล้วลองใหม่"],
@@ -31,6 +31,9 @@ const ERRORS = {
 } as const satisfies Record<string, readonly [number, string]>
 
 export type MidErrorCode = keyof typeof ERRORS
+
+/** quota_full text with the configured maximum (names.ts stays env-free for the helper; callers pass the number). */
+export const quotaFullMessage = (maxRunning: number): string => `รันครบ ${maxRunning} ตัวแล้ว ให้หยุดตัวอื่นก่อน`
 
 export class MidError extends Error {
   readonly code: string
