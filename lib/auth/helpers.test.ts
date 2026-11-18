@@ -49,6 +49,12 @@ describe("session revalidation against the DB", () => {
     await expect(requireUser()).rejects.toMatchObject({ status: 401 })
   })
 
+  it("a lock older than 15 minutes has expired and no longer revokes the session (I3)", async () => {
+    dbUser = { ...dbUser!, lockedAt: new Date(Date.now() - 16 * 60_000) }
+    const { requireUser } = await import("@/lib/auth/helpers")
+    await expect(requireUser()).resolves.toMatchObject({ userId: "u1" })
+  })
+
   it("token issued before sessionsValidAfter -> 401; a later login still works", async () => {
     const { requireUser } = await import("@/lib/auth/helpers")
     dbUser = { ...dbUser!, sessionsValidAfter: new Date(Date.now() + 60_000) }

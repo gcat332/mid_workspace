@@ -3,6 +3,7 @@ import { requireAdmin, responseOrRethrow } from "@/lib/auth/helpers"
 import { hashPassword } from "@/lib/auth/session"
 import { prisma } from "@/lib/db/client"
 import { USER_SELECT, PASSWORD_MIN_ERROR } from "@/lib/auth/user-admin"
+import { clearLoginLimiter } from "@/lib/auth/login-limiter"
 
 type Ctx = { params: Promise<{ id: string }> }
 const SELF = "ไม่สามารถลดสิทธิ์/ลบบัญชีตัวเองได้"
@@ -42,6 +43,8 @@ export async function PATCH(req: Request, { params }: Ctx) {
   if (result === "missing") return err("ไม่พบผู้ใช้", 404)
   if (result === "last-admin") return err(LAST_ADMIN, 400)
   const user = result
+  // The in-memory login limiter would otherwise keep refusing for up to 15 minutes after an unlock/reset.
+  if (data.lockedAt === null || data.passwordHash) clearLoginLimiter(user.email)
   return NextResponse.json(user)
 }
 

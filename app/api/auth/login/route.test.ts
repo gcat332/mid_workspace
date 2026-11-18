@@ -64,3 +64,50 @@ it("unknown email and wrong password return the same 401 body", async () => {
   expect(b.status).toBe(401)
   expect(await a.json()).toEqual(await b.json())
 })
+
+it("wrong password says how many attempts remain before the lock (Q-M7)", async () => {
+  const { POST } = await import("./route")
+  const ip = "10.7.7.7"
+  const a = await POST(post({ email: "admin@x.com", password: "bad" }, ip))
+  expect((await a.json()).message).toContain("เหลืออีก 2 ครั้ง")
+  const b = await POST(post({ email: "admin@x.com", password: "bad" }, ip))
+  expect((await b.json()).message).toContain("เหลืออีก 1 ครั้ง")
+})
+
+it("a lock older than 15 minutes expires: the right password works and the count restarts (I3)", async () => {
+  const { POST } = await import("./route")
+  rows[0].lockedAt = new Date(Date.now() - 16 * 60_000)
+  rows[0].failedLoginCount = 3
+  const res = await POST(post({ email: "admin@x.com", password: "right-pass" }))
+  expect(res.status).toBe(200)
+  expect(rows[0]).toMatchObject({ lockedAt: null, failedLoginCount: 0 })
+})
+
+it("after an expired lock a wrong password counts from zero again (not instantly re-locked)", async () => {
+  const { POST } = await import("./route")
+  rows[0].lockedAt = new Date(Date.now() - 16 * 60_000)
+  rows[0].failedLoginCount = 3
+  const res = await POST(post({ email: "admin@x.com", password: "bad" }))
+  expect(res.status).toBe(401)
+  expect(rows[0]).toMatchObject({ lockedAt: null, failedLoginCount: 1 })
+})
+
+it("a lock younger than 15 minutes still refuses, saying how long to wait", async () => {
+  const { POST } = await import("./route")
+  rows[0].lockedAt = new Date(Date.now() - 5 * 60_000)
+  const res = await POST(post({ email: "admin@x.com", password: "right-pass" }))
+  expect(res.status).toBe(423)
+  expect((await res.json()).message).toMatch(/15 นาที/)
+})
+
+it("429 states the wait in minutes; clearing the limiter for the email lets it through (Q-M7)", async () => {
+  const { POST } = await import("./route")
+  const { clearLoginLimiter } = await import("@/lib/auth/login-limiter")
+  const ip = "10.8.8.8"
+  for (let i = 0; i < 5; i++) await POST(post({ email: "nobody@x.com", password: "bad" }, ip))
+  const limited = await POST(post({ email: "nobody@x.com", password: "bad" }, ip))
+  expect(limited.status).toBe(429)
+  expect((await limited.json()).message).toMatch(/\d+ นาที/)
+  clearLoginLimiter("nobody@x.com")
+  expect((await POST(post({ email: "nobody@x.com", password: "bad" }, ip))).status).toBe(401)
+})

@@ -44,7 +44,7 @@ describe("IP allowlist", () => {
     cidrs = ["10.0.0.0/8"]
     const res = await proxy(req("/api/mids", { headers: { "x-forwarded-for": "8.8.8.8" } }))
     expect(res.status).toBe(403)
-    expect(await res.json()).toEqual({ error: "Forbidden", ip: "8.8.8.8" })
+    expect(await res.json()).toMatchObject({ code: "ip_blocked", ip: "8.8.8.8" })
   })
 
   it("empty allowlist allows everyone", async () => {
@@ -78,7 +78,7 @@ describe("auth gate", () => {
   it("401 JSON for an API call without a cookie", async () => {
     const res = await proxy(req("/api/mids"))
     expect(res.status).toBe(401)
-    expect(await res.json()).toEqual({ error: "Unauthorized" })
+    expect(await res.json()).toMatchObject({ code: "unauthorized" })
   })
 
   it("treats an AgentHub `session` cookie alone as logged out", async () => {
@@ -127,9 +127,51 @@ describe("auth gate", () => {
     expect((await proxy(req("/api/auth/oidcx/start"))).status).toBe(401)
   })
 
-  it("sends an already-signed-in user away from /login", async () => {
+  it("lets /login render even with a valid JWT: a revoked user must reach the form (no redirect loop)", async () => {
+    // The JWT alone cannot tell a revoked (locked/deleted/reset) user from a live one; the login page
+    // asks the DB (getSessionUser) and only then sends a live user on to the app.
     const res = await proxy(req("/login", { headers: await withCookie("midhub_session") }))
-    expect(res.status).toBe(307)
-    expect(new URL(res.headers.get("location")!).pathname).toBe("/midhub")
+    expect(res.status).toBe(200)
+    expect(res.headers.get("location")).toBeNull()
+    expect(res.headers.get("set-cookie")).toBeNull() // never re-mint a possibly revoked session here
+  })
+})
+
+describe("background polls (M2)", () => {
+  it("X-Background: 1 passes but does not slide the session", async () => {
+    const res = await proxy(req("/api/mids", { headers: await withCookie("midhub_session", { "x-background": "1" }) }))
+    expect(res.status).toBe(200)
+    expect(res.headers.get("set-cookie")).toBeNull()
+  })
+  it("a normal request still slides", async () => {
+    const res = await proxy(req("/api/mids", { headers: await withCookie("midhub_session") }))
+    expect(res.headers.get("set-cookie") ?? "").toContain("midhub_session=")
+  })
+})
+
+describe("CSRF origin check on unsafe API methods (M1)", () => {
+  const unsafe = async (method: string, h: Record<string, string>, path = "/api/mids/m1/actions") =>
+    proxy(req(path, { method, headers: await withCookie("midhub_session", { host: "localhost:3100", ...h }) }))
+
+  it.each(["POST", "PUT", "PATCH", "DELETE"])("%s with a foreign Origin -> 403", async (m) => {
+    const res = await unsafe(m, { origin: "https://evil.example" })
+    expect(res.status).toBe(403)
+    expect((await res.json()).code).toBe("csrf")
+  })
+  it("Sec-Fetch-Site cross-site / same-site -> 403", async () => {
+    expect((await unsafe("POST", { "sec-fetch-site": "cross-site" })).status).toBe(403)
+    expect((await unsafe("POST", { "sec-fetch-site": "same-site" })).status).toBe(403)
+  })
+  it("same-origin Origin, Sec-Fetch-Site same-origin/none, or no headers (curl) pass", async () => {
+    expect((await unsafe("POST", { origin: "http://localhost:3100" })).status).toBe(200)
+    expect((await unsafe("POST", { origin: "https://localhost:3100" })).status).toBe(200) // TLS ends at Caddy
+    expect((await unsafe("POST", { "sec-fetch-site": "same-origin" })).status).toBe(200)
+    expect((await unsafe("POST", { "sec-fetch-site": "none" })).status).toBe(200)
+    expect((await unsafe("POST", {})).status).toBe(200)
+  })
+  it("also guards the public login endpoint; GET is never blocked", async () => {
+    const login = await proxy(req("/api/auth/login", { method: "POST", headers: { host: "localhost:3100", origin: "https://evil.example" } }))
+    expect(login.status).toBe(403)
+    expect((await unsafe("GET", { origin: "https://evil.example", "sec-fetch-site": "cross-site" }, "/api/mids")).status).toBe(200)
   })
 })

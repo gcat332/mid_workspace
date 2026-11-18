@@ -1,4 +1,6 @@
-import { requireUser } from "@/lib/auth/helpers"
+import { cookies } from "next/headers"
+import { requireUser, userFromToken } from "@/lib/auth/helpers"
+import { SESSION_COOKIE } from "@/lib/auth/jwt"
 import { downloadResponse } from "@/lib/http/download"
 import { handleRouteError } from "@/lib/http/route"
 import { LOG_FILES } from "@/lib/mids/layout"
@@ -16,11 +18,14 @@ const POLL_MS = 1000
 const PING_MS = 15_000
 const STALL_MS = 10_000
 const MAX_QUEUED_BYTES = 1_000_000
+/** A long-lived stream re-checks its session this often and closes once it is revoked (lock/delete/reset). */
+const REAUTH_MS = 60_000
 let active = 0
 
 export async function GET(req: Request, ctx: Ctx) {
   try {
     await requireUser()
+    const token = (await cookies()).get(SESSION_COOKIE)?.value
     const { name } = await ctx.params
     await getMid(name) // unknown -> 404
     const sp = new URL(req.url).searchParams
@@ -49,6 +54,7 @@ export async function GET(req: Request, ctx: Ctx) {
     const enc = new TextEncoder()
     let ping: ReturnType<typeof setInterval> | undefined
     let watch: ReturnType<typeof setInterval> | undefined
+    let reauth: ReturnType<typeof setInterval> | undefined
     let released = false
     let stalledSince = 0
     let controllerRef: ReadableStreamDefaultController<Uint8Array> | undefined
@@ -56,7 +62,7 @@ export async function GET(req: Request, ctx: Ctx) {
       if (released) return
       released = true
       active--
-      clearInterval(ping); clearInterval(watch)
+      clearInterval(ping); clearInterval(watch); clearInterval(reauth)
       req.signal.removeEventListener("abort", stop)
       void pre?.h.close().catch(() => {}) // never handed to the tail
     }
@@ -75,6 +81,12 @@ export async function GET(req: Request, ctx: Ctx) {
         const send = (s: string) => { try { controller.enqueue(enc.encode(s)); checkStall() } catch { /* closed */ } }
         ping = setInterval(() => { if ((controller.desiredSize ?? 0) >= 0) send(": ping\n\n") }, PING_MS)
         watch = setInterval(checkStall, 1000)
+        reauth = setInterval(() => {
+          void userFromToken(token).then(
+            (u) => { if (!u) ac.abort() },
+            () => {}, // DB hiccup: keep streaming, try again next round
+          )
+        }, REAUTH_MS)
         send(": ok\n\n")
         void (async () => {
           try {

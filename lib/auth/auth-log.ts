@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/client"
+import { clientIpFrom } from "@/lib/net/cidr"
 
 export type AuthEventName = "login_ok" | "login_refused" | "sso_ok" | "sso_failed" | "unlocked"
 export const FAILED_EVENTS: AuthEventName[] = ["login_refused", "sso_failed"]
@@ -7,11 +8,6 @@ export const FAILED_EVENTS: AuthEventName[] = ["login_refused", "sso_failed"]
 // length-capped so a forged newline cannot fake a second log line.
 const clean = (v: string, max: number): string => v.replace(/[\x00-\x1f\x7f]/g, "").slice(0, max)
 
-/** Client IP from the reverse proxy's X-Forwarded-For (first hop), else x-real-ip. */
-export function clientIp(headers: Headers): string {
-  const xff = headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-  return clean(xff || headers.get("x-real-ip") || "unknown", 45)
-}
 
 export async function recordAuthEvent(
   event: AuthEventName,
@@ -20,7 +16,8 @@ export async function recordAuthEvent(
 ): Promise<void> {
   const reason = fields.reason ?? ""
   const email = clean(fields.email ?? "", 200)
-  const ip = clientIp(req.headers)
+  // Same client-IP rule as the allowlist gate (Caddy's X-Forwarded-For first hop).
+  const ip = clean(clientIpFrom(req.headers) || "unknown", 45)
   const userAgent = clean(req.headers.get("user-agent") ?? "", 160)
   const detail = Object.entries(fields.detail ?? {})
     .map(([k, v]) => `${k}=${JSON.stringify(clean(v, 200))}`)

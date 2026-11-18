@@ -12,12 +12,15 @@ import { createLatest } from "@/lib/ui/latest"
 import type { HostView, MidView } from "@/lib/ui/status-view"
 
 const POLL_MS = 5000
+// Polls are not user activity: the proxy does not slide the session for them, so the 4 h idle timeout still fires.
+const BACKGROUND: RequestInit = { headers: { "X-Background": "1" } }
 
 export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean }) {
   const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
   const selected = params.get("mid")
+  const forbidden = params.get("notice") === "forbidden"
 
   const [mids, setMids] = useState<MidView[] | null>(null)
   const [host, setHost] = useState<HostView | null>(null)
@@ -32,7 +35,7 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
     const load = async <T,>(path: string, what: string): Promise<{ data?: T; err?: ApiError }> => {
       let res: Response
       try {
-        res = await apiFetch(path)
+        res = await apiFetch(path, BACKGROUND)
       } catch {
         return { err: { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่าย ระบบจะลองใหม่อัตโนมัติ" } }
       }
@@ -72,6 +75,13 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
     <div className="min-h-screen bg-gray-50">
       <TopBar email={email} isAdmin={isAdmin} host={host} mids={mids ?? []} onImport={() => setImporting(true)} />
       <main className="mx-auto max-w-6xl p-4">
+        {forbidden && (
+          <div role="alert" className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <p>หน้านั้นสำหรับ Admin เท่านั้น (ต้องเป็น Admin) หากต้องการสิทธิ์ ให้ติดต่อ Admin ของ MidHub</p>
+            <button type="button" onClick={() => router.replace(selected ? `${pathname}?mid=${encodeURIComponent(selected)}` : pathname)}
+              className="ml-auto shrink-0 text-amber-800 underline">ปิด</button>
+          </div>
+        )}
         {midsErr && <div className="mb-4"><ErrorNotice error={midsErr} /></div>}
         {hostErr && <div className="mb-4"><ErrorNotice error={hostErr} /></div>}
         {mids === null ? (

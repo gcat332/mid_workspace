@@ -18,6 +18,27 @@ async function slideSession(res: NextResponse, payload: SessionPayload): Promise
   res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions())
 }
 
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
+
+/**
+ * CSRF guard for state-changing API calls (sameSite=lax already keeps the cookie off cross-site POSTs; this
+ * also stops same-site-but-other-origin pages). Browsers always send Origin and/or Sec-Fetch-Site on such
+ * requests; non-browser clients (curl) send neither and are let through. Scheme is ignored: TLS ends at Caddy.
+ */
+function crossOrigin(req: NextRequest): boolean {
+  const site = req.headers.get("sec-fetch-site")
+  if (site && site !== "same-origin" && site !== "none") return true
+  const origin = req.headers.get("origin")
+  if (!origin) return false
+  let originHost: string
+  try {
+    originHost = new URL(origin).host
+  } catch {
+    return true // "null" or garbage
+  }
+  return originHost !== (req.headers.get("host") ?? req.nextUrl.host)
+}
+
 // Build a redirect to an in-app path. basePath is added explicitly (and "/" maps to the bare
 // basePath) so the Location never gets a stray trailing slash.
 function redirectTo(req: NextRequest, path: string): NextResponse {
@@ -34,26 +55,37 @@ export async function proxy(req: NextRequest) {
     // Echo the IP the gate checked so a blocked admin knows what to whitelist.
     // text/plain on purpose: X-Forwarded-For is client-supplied.
     const chain = req.headers.get("x-forwarded-for") ?? ""
-    if (pathname.startsWith("/api/")) return NextResponse.json({ error: "Forbidden", ip }, { status: 403 })
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ code: "ip_blocked", message: `IP ของคุณ (${ip}) ไม่อยู่ใน IP Allowlist กรุณาให้ Admin เพิ่ม IP นี้`, ip }, { status: 403 })
+    }
     const body = `Access from your network is not allowed.\n\nYour IP as this server sees it: ${ip}` +
       (chain.includes(",") ? `\nX-Forwarded-For: ${chain}` : "") + "\n"
     return new NextResponse(body, { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8" } })
   }
 
+  // 2) CSRF: unsafe API methods must come from this origin (public login included).
+  if (pathname.startsWith("/api/") && !SAFE_METHODS.has(req.method) && crossOrigin(req)) {
+    return NextResponse.json(
+      { code: "csrf", message: "คำขอนี้ไม่ได้มาจากหน้า MidHub เอง จึงถูกปฏิเสธ กรุณาเปิด MidHub แล้วทำรายการใหม่" },
+      { status: 403 },
+    )
+  }
+
+  // 3) /login always renders. The JWT alone cannot tell a revoked user (locked/deleted/password reset) from a
+  // live one; the page asks the DB and sends a live user on to the app. Bouncing here caused a redirect loop.
+  if (pathname === "/login") return NextResponse.next()
+
   const token = req.cookies.get(SESSION_COOKIE)?.value
   const payload: SessionPayload | null = token ? await verifyToken(token) : null
 
-  // 2) /login: an already-signed-in user goes to the app; otherwise show the form.
-  if (pathname === "/login") {
-    return payload ? redirectTo(req, "/") : NextResponse.next()
-  }
-
-  // 3) Other public paths (exact match, no loose prefix).
+  // 4) Other public paths (exact match, no loose prefix).
   if (PUBLIC_PATHS.has(pathname)) return NextResponse.next()
 
-  // 4) Auth gate.
+  // 5) Auth gate.
   if (!payload) {
-    if (pathname.startsWith("/api/")) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ code: "unauthorized", message: "เซสชันหมดอายุหรือยังไม่ได้เข้าสู่ระบบ กรุณาเข้าสู่ระบบใหม่" }, { status: 401 })
+    }
     const res = redirectTo(req, "/login")
     res.cookies.set(SESSION_COOKIE, "", { ...sessionCookieOptions(), maxAge: 0 })
     // Preserve a safe deep link across the login round-trip (validLoginNext needs the /midhub prefix).
@@ -66,6 +98,8 @@ export async function proxy(req: NextRequest) {
   const res = NextResponse.next()
   // Logout clears the cookie itself; a fresh token here could win the Set-Cookie race and undo it.
   if (pathname === "/api/auth/logout") return res
+  // Background polls (X-Background: 1) are not user activity: they must not keep an idle session alive.
+  if (req.headers.get("x-background") === "1") return res
   await slideSession(res, payload)
   return res
 }

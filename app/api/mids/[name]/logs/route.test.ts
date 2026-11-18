@@ -1,6 +1,11 @@
 import { beforeEach, expect, it, vi } from "vitest"
 
-vi.mock("@/lib/auth/helpers", () => ({ requireUser: vi.fn(async () => ({ userId: "u1" })) }))
+const session = vi.hoisted(() => ({ valid: true, tokens: [] as (string | undefined)[] }))
+vi.mock("@/lib/auth/helpers", () => ({
+  requireUser: vi.fn(async () => ({ userId: "u1" })),
+  userFromToken: vi.fn(async (t: string | undefined) => { session.tokens.push(t); return session.valid ? { userId: "u1" } : null }),
+}))
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: (n: string) => (n === "midhub_session" ? { value: "tok" } : undefined) }) }))
 vi.mock("@/lib/mids/registry", () => ({ getMid: vi.fn(async () => ({})) }))
 vi.mock("@/lib/mids/files", () => ({ isLogKey: (k: string) => k === "main" || k === "wrapper", openLog: vi.fn(async () => async () => ({ h: { close: async () => {} }, st: {} })), openDownload: vi.fn() }))
 const stalled = vi.hoisted(() => ({ mode: "idle" as "idle" | "one-big" | "flood", signal: undefined as AbortSignal | undefined }))
@@ -20,7 +25,7 @@ vi.mock("@/lib/mids/log-tail", () => ({
 
 const ctx = { params: Promise.resolve({ name: "m1" }) }
 const get = (q: string, ac = new AbortController()) => import("./route").then((m) => m.GET(new Request(`http://x/api/mids/m1/logs${q}`, { signal: ac.signal }), ctx))
-beforeEach(() => { vi.resetModules(); stalled.mode = "idle"; stalled.signal = undefined })
+beforeEach(() => { vi.resetModules(); stalled.mode = "idle"; stalled.signal = undefined; session.valid = true; session.tokens = [] })
 
 it("invalid file -> 400", async () => {
   expect((await get("?file=../../etc/passwd")).status).toBe(400)
@@ -66,4 +71,18 @@ it("closes a client whose queue exceeds ~1 MB immediately", async () => {
   const res = await get("?file=main")
   expect(res.status).toBe(200)
   await vi.waitFor(() => expect(stalled.signal?.aborted).toBe(true))
+})
+
+it("re-checks the session every ~60 s and closes the stream once it is revoked (M9)", async () => {
+  vi.useFakeTimers()
+  try {
+    const res = await get("?file=main")
+    expect(res.status).toBe(200)
+    await vi.advanceTimersByTimeAsync(61_000)
+    expect(session.tokens).toEqual(["tok"]) // the cookie captured at connect time
+    expect(stalled.signal?.aborted).toBe(false)
+    session.valid = false // e.g. user locked, deleted or password reset by an admin
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(stalled.signal?.aborted).toBe(true)
+  } finally { vi.useRealTimers() }
 })

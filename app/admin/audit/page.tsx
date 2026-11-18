@@ -1,12 +1,9 @@
-import { redirect } from "next/navigation"
-import { getSessionUser } from "@/lib/auth/helpers"
+import { adminPageUser } from "@/lib/auth/page"
 import { AdminNav } from "@/components/AdminNav"
 import { AuditLog } from "@/components/AuditLog"
 
 export default async function AdminAuditPage() {
-  const user = await getSessionUser()
-  if (!user) redirect("/login")
-  if (user.role !== "admin") redirect("/")
+  await adminPageUser()
   return (
     <main className="mx-auto max-w-5xl p-6">
       <AdminNav />

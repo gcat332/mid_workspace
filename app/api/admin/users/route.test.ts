@@ -184,3 +184,15 @@ it("the last-admin check and the write run inside one transaction", async () => 
   expect(count).not.toHaveBeenCalled()
   expect(findUnique).not.toHaveBeenCalled()
 })
+
+it("unlock and password reset clear the in-memory login limiter for that email (Q-M7)", async () => {
+  const { PATCH } = await import("./[id]/route")
+  const { hitLoginLimiter } = await import("@/lib/auth/login-limiter")
+  for (const body of [{ unlock: true }, { password: "newpassword" }]) {
+    for (let i = 0; i < 6; i++) hitLoginLimiter("10.0.0.1", "m@x.com")
+    expect(hitLoginLimiter("10.0.0.1", "m@x.com").limited).toBe(true)
+    findUnique.mockResolvedValue({ id: "u2", role: "member", email: "m@x.com" })
+    expect((await PATCH(json("PATCH", body), ctx("u2"))).status).toBe(200)
+    expect(hitLoginLimiter("10.0.0.1", "m@x.com").limited).toBe(false)
+  }
+})

@@ -7,6 +7,7 @@ import { signToken, SESSION_COOKIE } from "@/lib/auth/session"
 import { sessionCookieOptions } from "@/lib/auth/cookie"
 import { validLoginNext, LOGIN_NEXT_COOKIE } from "@/lib/auth/login-next"
 import { recordAuthEvent } from "@/lib/auth/auth-log"
+import { isLocked } from "@/lib/auth/lockout"
 
 // SSO callback: validate state, exchange the code, verify the id_token, then sign in ONLY a
 // user already registered in MidHub. The redirect carries a short error code (never free text);
@@ -65,9 +66,10 @@ export async function GET(req: Request) {
 
     const user = await findRegisteredUser(email)
     if (!user) return fail("not_registered", "not_registered", {}, email)
-    if (user.lockedAt) return fail("locked", "locked", {}, email)
+    // SSO stays blocked while a password lock is in force (it expires after LOCK_MINUTES).
+    if (isLocked(user.lockedAt)) return fail("locked", "locked", {}, email)
 
-    await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date(), failedLoginCount: 0 } })
+    await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date(), failedLoginCount: 0, lockedAt: null } })
     await recordAuthEvent("sso_ok", req, { email: user.email })
     const role = user.role === "admin" ? "admin" : "member"
     const token = await signToken({ userId: user.id, email: user.email, role })

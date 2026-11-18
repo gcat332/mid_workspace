@@ -110,6 +110,13 @@ Then:
   (find the exact URL in the Network tab); lines should appear as the log grows.
 - `journalctl -u bsm-midhub -u bsm-midhub-helper -n 50` is clean
 
+### Locked out?
+
+Three wrong passwords lock an account for 15 minutes (SSO is refused while locked, too); it then unlocks by
+itself, or an admin can unlock it under Admin -> ผู้ใช้. Break-glass when the only admin is locked out:
+`sudo systemctl restart bsm-midhub` - on boot the app clears the lock on `ADMIN_EMAIL` (its password is never
+overwritten).
+
 ## 6. SSO (optional)
 
 Add the redirect URI (`<PUBLIC_URL>/midhub/api/auth/oidc/callback`) in the IdP; configure it at `/midhub/admin/idp`; add a team member email under users;

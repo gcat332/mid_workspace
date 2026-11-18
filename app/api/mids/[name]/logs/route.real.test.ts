@@ -4,7 +4,8 @@ import path from "node:path"
 import { execFileSync } from "node:child_process"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
-vi.mock("@/lib/auth/helpers", () => ({ requireUser: vi.fn(async () => ({ userId: "u1" })) }))
+vi.mock("@/lib/auth/helpers", () => ({ requireUser: vi.fn(async () => ({ userId: "u1" })), userFromToken: vi.fn(async () => ({ userId: "u1" })) }))
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }) }))
 vi.mock("@/lib/mids/registry", () => ({ getMid: vi.fn(async () => ({})) }))
 vi.mock("@/lib/db/client", () => ({ prisma: {} }))
 vi.mock("@/lib/mids/status", () => ({ readServiceStatus: async () => ({}), runSystemctl: async () => ({ code: 0, stdout: "" }) }))

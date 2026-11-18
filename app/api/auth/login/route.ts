@@ -4,61 +4,58 @@ import { prisma } from "@/lib/db/client"
 import { verifyPassword, signToken, SESSION_COOKIE } from "@/lib/auth/session"
 import { sessionCookieOptions } from "@/lib/auth/cookie"
 import { validLoginNext, LOGIN_NEXT_COOKIE } from "@/lib/auth/login-next"
-import { MAX_FAILED_LOGINS } from "@/lib/auth/lockout"
-import { recordAuthEvent, clientIp } from "@/lib/auth/auth-log"
+import { isLocked, lockMinutesLeft, LOCK_MINUTES, MAX_FAILED_LOGINS } from "@/lib/auth/lockout"
+import { clearLoginLimiter, hitLoginLimiter } from "@/lib/auth/login-limiter"
+import { recordAuthEvent } from "@/lib/auth/auth-log"
+import { clientIpFrom } from "@/lib/net/cidr"
+import { jsonError } from "@/lib/http/route"
 
-// In-memory per-(ip+email) limiter; single instance only.
-const WINDOW_MS = 15 * 60 * 1000
-const MAX_ATTEMPTS = 5
-const attempts = new Map<string, { count: number; first: number }>()
-
-function rateLimited(key: string): boolean {
-  const now = Date.now()
-  const rec = attempts.get(key)
-  if (!rec || now - rec.first > WINDOW_MS) {
-    attempts.set(key, { count: 1, first: now })
-    return false
-  }
-  rec.count++
-  return rec.count > MAX_ATTEMPTS
-}
-
+// Error bodies use the app's { code, message } shape; the login page shows `message` itself (no 401 redirect).
 const logRefused = (reason: string, email: string, req: Request): Promise<void> =>
   recordAuthEvent("login_refused", req, { reason, email })
 
-const LOCKED_MESSAGE = "บัญชีถูกล็อกเพราะกรอกรหัสผ่านผิดหลายครั้ง กรุณาติดต่อผู้ดูแลระบบเพื่อปลดล็อก"
+const locked = (minutes: number): Response =>
+  jsonError("locked", `บัญชีถูกล็อกชั่วคราว ${LOCK_MINUTES} นาทีเพราะกรอกรหัสผ่านผิด ${MAX_FAILED_LOGINS} ครั้ง ` +
+    `รออีกประมาณ ${minutes} นาทีแล้วลองใหม่ หรือติดต่อผู้ดูแลระบบให้ปลดล็อก`, 423)
+
+/** Same body for an unknown email and a wrong password (only the remaining count differs by attempt number). */
+const invalid = (remaining: number): Response =>
+  jsonError("invalid_credentials", `อีเมลหรือรหัสผ่านไม่ถูกต้อง (เหลืออีก ${remaining} ครั้งก่อนบัญชีถูกล็อก)`, 401)
 
 export async function POST(req: Request) {
   let body: { email?: unknown; password?: unknown }
   try {
     body = await req.json()
   } catch {
-    return NextResponse.json({ error: "คำขอไม่ถูกต้อง (ต้องเป็น JSON)" }, { status: 400 })
+    return jsonError("invalid_request", "คำขอไม่ถูกต้อง (ต้องเป็น JSON) กรุณารีเฟรชหน้าแล้วลองใหม่", 400)
   }
   if (typeof body?.email !== "string" || typeof body?.password !== "string" || !body.email || !body.password) {
-    return NextResponse.json({ error: "กรุณากรอกอีเมลและรหัสผ่าน" }, { status: 400 })
+    return jsonError("invalid_request", "กรุณากรอกอีเมลและรหัสผ่าน", 400)
   }
   const email = body.email.trim().toLowerCase()
   const password = body.password
+  const ip = clientIpFrom(req.headers) || "unknown"
 
-  const key = `${clientIp(req.headers)}:${email}`
-  if (rateLimited(key)) {
+  const hit = hitLoginLimiter(ip, email)
+  if (hit.limited) {
     await logRefused("rate_limited", email, req)
-    return NextResponse.json({ error: "ลองเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่" }, { status: 429 })
+    return jsonError("rate_limited", `ลองเข้าสู่ระบบบ่อยเกินไป กรุณารอประมาณ ${hit.retryAfterMinutes} นาทีแล้วลองใหม่`, 429)
   }
-
-  const invalid = (): Response => NextResponse.json({ error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" }, { status: 401 })
 
   const user = await prisma.user.findUnique({ where: { email } })
   if (!user) {
     await logRefused("unknown_email", email, req)
-    return invalid()
+    return invalid(Math.max(1, MAX_FAILED_LOGINS - hit.count))
   }
 
-  // Locked stays locked whatever the password is; only an admin clears it.
-  if (user.lockedAt) {
+  // Locked stays locked whatever the password is, until it expires or an admin unlocks it.
+  if (isLocked(user.lockedAt)) {
     await logRefused("locked", email, req)
-    return NextResponse.json({ error: LOCKED_MESSAGE }, { status: 423 })
+    return locked(lockMinutesLeft(user.lockedAt!))
+  }
+  if (user.lockedAt) {
+    // Expired lock: start counting again from zero.
+    await prisma.user.update({ where: { id: user.id }, data: { lockedAt: null, failedLoginCount: 0 } })
   }
 
   if (!(await verifyPassword(password, user.passwordHash))) {
@@ -71,13 +68,13 @@ export async function POST(req: Request) {
     if (failedLoginCount >= MAX_FAILED_LOGINS) {
       await prisma.user.update({ where: { id: user.id }, data: { lockedAt: new Date() } })
       await logRefused("bad_password_now_locked", email, req)
-      return NextResponse.json({ error: LOCKED_MESSAGE }, { status: 423 })
+      return locked(LOCK_MINUTES)
     }
     await logRefused("bad_password", email, req)
-    return invalid()
+    return invalid(MAX_FAILED_LOGINS - failedLoginCount)
   }
 
-  attempts.delete(key)
+  clearLoginLimiter(email, ip)
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date(), failedLoginCount: 0 } })
   await recordAuthEvent("login_ok", req, { email: user.email })
 

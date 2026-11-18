@@ -1,12 +1,9 @@
-import { redirect } from "next/navigation"
-import { getSessionUser } from "@/lib/auth/helpers"
+import { adminPageUser } from "@/lib/auth/page"
 import { AdminNav } from "@/components/AdminNav"
 import { IpAllowlistManager } from "@/components/IpAllowlistManager"
 
 export default async function AdminIpAllowlistPage() {
-  const user = await getSessionUser()
-  if (!user) redirect("/login")
-  if (user.role !== "admin") redirect("/")
+  await adminPageUser()
   return (
     <main className="mx-auto max-w-3xl p-6">
       <AdminNav />
