@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<parameters>
+  <!-- Reconstructed from the spike MID template; placeholder values only. -->
+  <!-- MID Server instance URL -->
+  <parameter name="url" value="https://YOUR_INSTANCE.service-now.com"/>
+
+  <!-- MID Server instance user -->
+  <parameter name="mid.instance.username" value="YOUR_MID_USER"/>
+
+  <!-- MID Server instance password, encrypted on first start -->
+  <parameter name="mid.instance.password" secure="true" value="YOUR_PASSWORD"/>
+
+  <!-- Example using CyberArk instead of a literal password:
+  <parameter name="mid.instance.password" value="" secure="true" cyberark="true"/>
+  -->
+
+  <!-- MID Server name as shown in the instance -->
+  <parameter name="name" value="YOUR_MIDSERVER_NAME"/>
+
+  <!-- Set once the MID registers; leave empty -->
+  <parameter name="mid_sys_id" value=""/>
+
+  <!-- Proxy settings
+  <parameter name="mid.proxy.use_proxy" value="false"/>
+  <parameter name="mid.proxy.host" value="YOUR_PROXY_HOST"/>
+  <parameter name="mid.proxy.port" value="3128"/>
+  <parameter name="mid.proxy.username" value="YOUR_PROXY_USER"/>
+  <parameter name="mid.proxy.password" value="YOUR_PROXY_PASSWORD"/>
+  -->
+
+  <!-- Unrelated parameters -->
+  <parameter name="mid.buffer.size" value="1048576"/>
+  <parameter name="mid.log.level" value="info"/>
+  <parameter name="mid.custom.setting" value="keep-me"/>
+  <parameter name="threads.max" value="25"/>
+</parameters>
