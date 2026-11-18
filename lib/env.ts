@@ -1,3 +1,5 @@
+import { DEFAULT_MIDHUB_ROOT } from "@/lib/mids/names"
+
 export interface Env {
   databaseUrl: string
   jwtSecret: string
@@ -30,7 +32,7 @@ export function loadEnv(src: Record<string, string | undefined>): Env {
     adminEmail: (src.ADMIN_EMAIL as string).toLowerCase(),
     adminPassword: src.ADMIN_PASSWORD as string,
     vaultKey: src.MIDHUB_VAULT_KEY as string,
-    midhubRoot: src.MIDHUB_ROOT || "/opt/midhub",
+    midhubRoot: src.MIDHUB_ROOT || DEFAULT_MIDHUB_ROOT,
     maxRunning,
     helperSocket: src.MIDHUB_HELPER_SOCKET || "/run/midhub/helper.sock",
   }

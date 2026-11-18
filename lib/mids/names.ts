@@ -1,6 +1,7 @@
 // Free of Next/Prisma imports: the root helper daemon imports this via lib/helper/protocol.ts.
 import path from "node:path"
-import { env } from "@/lib/env"
+
+export const DEFAULT_MIDHUB_ROOT = "/opt/midhub"
 
 export const MID_NAME_RE = /^[a-z0-9][a-z0-9-]{1,39}$/
 
@@ -40,4 +41,6 @@ export function validateMidName(n: string): string {
 
 export const unitName = (n: string): string => `midhub-mid-${validateMidName(n)}.service`
 
-export const midRoot = (n: string): string => path.join(env.midhubRoot, "mids", validateMidName(n))
+// Reads process.env directly (not lib/env) so the root helper needn't have the app secrets; it passes `root` explicitly.
+export const midRoot = (n: string, root: string = process.env.MIDHUB_ROOT || DEFAULT_MIDHUB_ROOT): string =>
+  path.join(root, "mids", validateMidName(n))

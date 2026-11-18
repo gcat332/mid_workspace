@@ -1,8 +1,6 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect } from "vitest"
 
-vi.mock("@/lib/env", () => ({ env: { midhubRoot: "/opt/midhub" } }))
-
-import { MID_NAME_RE, validateMidName, unitName, midRoot, MidError } from "./names"
+import { DEFAULT_MIDHUB_ROOT, MID_NAME_RE, validateMidName, unitName, midRoot, MidError } from "./names"
 
 describe("MID names", () => {
   it.each(["a", "-ab", "Ab", "a_b", "a".repeat(41), "", "ab/c", "..", "ab "])("rejects %j", (n) => {
@@ -21,6 +19,19 @@ describe("MID names", () => {
   it("builds unit name and root", () => {
     expect(unitName("poc")).toBe("midhub-mid-poc.service")
     expect(midRoot("poc")).toBe("/opt/midhub/mids/poc")
+  })
+  it("midRoot needs no app secrets and honours MIDHUB_ROOT / explicit root", () => {
+    const saved = { ...process.env }
+    try {
+      for (const k of Object.keys(process.env)) if (/^(JWT_|ADMIN_|MIDHUB_|DATABASE_)/.test(k)) delete process.env[k]
+      expect(DEFAULT_MIDHUB_ROOT).toBe("/opt/midhub")
+      expect(midRoot("poc")).toBe("/opt/midhub/mids/poc")
+      process.env.MIDHUB_ROOT = "/srv/x"
+      expect(midRoot("poc")).toBe("/srv/x/mids/poc")
+      expect(midRoot("poc", "/r")).toBe("/r/mids/poc")
+    } finally {
+      process.env = saved
+    }
   })
   it("unitName/midRoot validate the name", () => {
     expect(() => unitName("../x")).toThrowError(MidError)
