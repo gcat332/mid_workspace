@@ -15,4 +15,22 @@ export async function register(): Promise<void> {
   } catch (err) {
     console.error("[instances] url normalisation failed:", err instanceof Error ? err.message : "unknown")
   }
+  const step = async (label: string, fn: () => unknown | Promise<unknown>) => {
+    try {
+      await fn()
+    } catch (err) {
+      console.error(`[boot] ${label} failed:`, err instanceof Error ? err.message : "unknown")
+    }
+  }
+  await step("registerInstallKinds", async () => (await import("@/lib/jobs/install")).registerInstallKinds())
+  await step("registerUninstallKinds", async () => (await import("@/lib/jobs/uninstall")).registerUninstallKinds())
+  await step("resumeJobs", async () => (await import("@/lib/jobs/engine")).resumeJobs())
+  await step("gcPackages", async () => (await import("@/lib/mids/packages")).gcPackages())
+  await step("sweepArchives", async () => (await import("@/lib/jobs/uninstall")).sweepArchives())
+  await step("sweepArchives schedule", () => {
+    setInterval(
+      () => void step("sweepArchives", async () => (await import("@/lib/jobs/uninstall")).sweepArchives()),
+      24 * 3600_000,
+    ).unref()
+  })
 }

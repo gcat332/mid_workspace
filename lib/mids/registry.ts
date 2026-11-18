@@ -19,6 +19,7 @@ export type MidSummary = {
   version: string | null
   state: string
   status: ServiceStatus
+  job: { id: string; kind: string; stage: string; status: string } | null
 }
 
 const UNKNOWN: ServiceStatus = { state: "unknown", pid: null, memoryBytes: null, since: null }
@@ -83,12 +84,17 @@ function normalizeUrl(raw: string | undefined): string | null {
 type Row = { name: string; state: string; heapMb: number; version: string | null; instanceId: string | null }
 
 async function summarize(row: Row): Promise<MidSummary> {
-  const [xml, inst, status] = await Promise.all([
+  const [xml, inst, status, job] = await Promise.all([
     readMidFile(row.name, CONFIG_XML),
     row.instanceId ? prisma.instance.findUnique({ where: { id: row.instanceId } }) : null,
     deps.readStatus(row.name).catch((e: unknown) => {
       console.warn(`[registry] status of MID ${row.name} unavailable:`, (e as Error).message)
       return UNKNOWN
+    }),
+    prisma.job.findFirst({
+      where: { midName: row.name },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { id: true, kind: true, stage: true, status: true },
     }),
   ])
   let params: Record<string, string> = {}
@@ -107,6 +113,7 @@ async function summarize(row: Row): Promise<MidSummary> {
     version: row.version,
     state: row.state,
     status,
+    job,
   }
 }
 

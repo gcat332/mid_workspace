@@ -461,3 +461,8 @@ async function failJob(job: JobRow, err: unknown, onFailure?: (e: unknown) => Pr
     }
   }
 }
+
+/** Stage names of a registered kind (for the API/UI), or [] when the kind is not registered. */
+export function kindStageNames(kind: string): string[] {
+  return state().kinds.get(kind as JobKind)?.stages.map((s) => s.name) ?? []
+}

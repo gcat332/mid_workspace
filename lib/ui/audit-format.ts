@@ -6,6 +6,10 @@ const ACTION_LABELS: Record<string, string> = {
   "mid.stop": "หยุด MID",
   "mid.restart": "รีสตาร์ท MID",
   "mid.fix_ownership": "ซ่อมสิทธิ์ไฟล์ MID",
+  "job.create": "สร้างงานติดตั้ง MID",
+  "job.retry": "ลองงานติดตั้งใหม่",
+  "job.cancel": "ยกเลิกงาน",
+  "mid.uninstall": "ถอนการติดตั้ง MID",
   "config.save": "บันทึกคอนฟิก",
   "config.rollback": "ย้อนคอนฟิก",
   "file.write": "แก้ไขไฟล์",
@@ -54,6 +58,10 @@ const KEY_LABELS: Record<string, string> = {
   fixOwnership: "ซ่อมสิทธิ์ไฟล์",
   ok: "ผลลัพธ์",
   code: "รหัสข้อผิดพลาด",
+  kind: "ประเภทงาน",
+  snName: "ชื่อใน ServiceNow",
+  cloneFrom: "โคลนจาก",
+  jobId: "งาน",
 }
 
 const ROLE_TH: Record<string, string> = { admin: "ผู้ดูแลระบบ", member: "สมาชิก" }
