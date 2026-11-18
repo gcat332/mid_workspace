@@ -6,7 +6,7 @@
 #
 # Usage:
 #   sudo ./deploy/golive-gates.sh
-#   APP_DIR=/home/bsmmidhub/midhub APP_USER=bsmmidhub PORT=3100 ./deploy/golive-gates.sh
+#   sudo APP_DIR=/home/bsmmidhub/midhub APP_USER=bsmmidhub PORT=3100 ./deploy/golive-gates.sh
 #
 # Exit code: 0 if no FAIL, 1 if any gate FAILED. MANUAL items never fail the run
 # (they must be verified by hand — see deploy/README.md).
@@ -32,16 +32,19 @@ no()  { echo "  [FAIL] $1"; fail=$((fail+1)); }
 man() { echo "  [MANUAL] $1"; manual=$((manual+1)); }
 hdr() { echo; echo "── $1"; }
 
-# Run a command as the service user (root -> runuser; already that user -> direct).
-as_app() {
-  if [ "$(id -u)" -eq 0 ]; then runuser -u "$APP_USER" -- "$@"
-  elif [ "$(id -un)" = "$APP_USER" ]; then "$@"
-  else sudo -n -u "$APP_USER" "$@"; fi
-}
+# Run a command as the service user (the script itself requires root).
+as_app() { runuser -u "$APP_USER" -- "$@"; }
 # HTTP status code only ("000" when unreachable). Extra args go to curl.
 code() { curl -s -o /dev/null --max-time 10 -w '%{http_code}' "$@" 2>/dev/null || true; }
-# Value of KEY in .env.local (last wins, surrounding quotes stripped). Callers must never echo it.
-envval() { sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tail -n 1 | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/"; }
+# Value of KEY in .env.local like systemd's EnvironmentFile: last wins, CR stripped, one pair of
+# surrounding quotes removed. Callers must never echo it.
+envval() { sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tr -d '\r' | tail -n 1 | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/"; }
+# HTTPS site probes: source address 127.0.0.1 (destination stays the site's own IP, so Caddy still picks
+# the IP vhost). Caddy then sees a loopback client, which AgentHub's IP allowlist always admits; from the
+# host's own LAN address it answers 403. (--connect-to 127.0.0.1 fails: the IP-site cert has no match there.)
+HTTPS_ARGS=(-k --interface 127.0.0.1)   # -k ONLY for the internal-CA IP site
+
+[ "$(id -u)" -eq 0 ] || { echo "Run as root: sudo ./deploy/golive-gates.sh (the 0600 .env.local, the helper socket and the service-user checks need it)." >&2; exit 1; }
 
 echo "BSM MidHub — go-live gate checks"
 echo "APP_DIR=$APP_DIR  APP_USER=$APP_USER  SERVICE=$SERVICE  PORT=$PORT"
@@ -85,7 +88,7 @@ if [ -n "$dburl" ] && [ "${db:0:1}" = "/" ] && [ -f "$db" ]; then
   jm=$(cd "$APP_DIR" && as_app "$NODE_BIN" -e "const D=require('better-sqlite3');const d=new D(process.argv[1],{readonly:true});console.log(d.pragma('journal_mode',{simple:true}))" "$db" 2>/dev/null)
   [ "$jm" = "wal" ] && ok "journal_mode=wal ($db)" || no "journal_mode=${jm:-unreadable} (expected wal) for $db"
 else
-  man "DATABASE_URL in $ENV_FILE is not an absolute file: path to an existing DB — check journal_mode by hand (expect: wal)"
+  no "DATABASE_URL in $ENV_FILE is unset, not an absolute file: path, or the DB file does not exist. Expected file:/opt/midhub/db/midhub.db"
 fi
 
 # ── Gate 6: native module ABI under the service Node ──────────────────────────
@@ -107,26 +110,31 @@ c=$(code "http://127.0.0.1:$PORT/midhub/login")
 
 # ── Gate 8: via Caddy, both sites ─────────────────────────────────────────────
 hdr "Gate 8 — via Caddy on both sites (/midhub, /midhub/login = 200; /midhub/api/agent/mids = 404)"
-# Final status after following redirects (/midhub may 308 → /midhub/login).
-# The HTTP site is resolved to loopback so the check does not depend on DNS from this host.
+# Final status AND final URL after following redirects (/midhub may 308 → /midhub/login). A site whose
+# MidHub handler is missing falls through to AgentHub (307 → /login = 200), so the final path must still
+# be under /midhub. The HTTP site is resolved to loopback so the check does not depend on DNS here.
 check_site() { # label, then curl base args (-k / --resolve), then base URL last
   local label="$1"; shift
-  local base="${!#}" args=("${@:1:$#-1}")
+  local base="${!#}" args=("${@:1:$#-1}") out fc fu
   for p in /midhub /midhub/login; do
-    c=$(code -L --max-redirs 3 "${args[@]}" "$base$p")
-    [ "$c" = "200" ] && ok "$label $p → 200" || no "$label $p → $c (expected 200)"
+    out=$(curl -s -o /dev/null --max-time 10 -L --max-redirs 3 -w '%{http_code} %{url_effective}' "${args[@]}" "$base$p" 2>/dev/null || true)
+    fc="${out%% *}"; fu="${out#* }"
+    case "$fu" in
+      "$base"/midhub|"$base"/midhub/*|"$base"/midhub\?*) [ "$fc" = "200" ] && ok "$label $p → 200 (final $fu)" || no "$label $p → $fc (final $fu; expected 200)" ;;
+      *) no "$label $p → $fc, final URL '$fu' is outside /midhub (MidHub not served on this site; AgentHub fall-through?)" ;;
+    esac
   done
   for p in /midhub/api/agent/mids /midhub/api/%61gent/mids; do
     c=$(code "${args[@]}" "$base$p")
     [ "$c" = "404" ] && ok "$label $p → 404 (AgentHub API not exposed)" || no "$label $p → $c (expected 404). Fix: @midhubAgent block missing in this Caddy site (deploy/Caddyfile.midhub)"
   done
 }
-check_site "$HTTPS_SITE" -k "$HTTPS_SITE"   # -k ONLY for the internal-CA IP site
+check_site "$HTTPS_SITE" "${HTTPS_ARGS[@]}" "$HTTPS_SITE"
 check_site "http://$HTTP_HOST" --resolve "$HTTP_HOST:80:127.0.0.1" "http://$HTTP_HOST"
 
 # ── Gate 9: AgentHub still answers ────────────────────────────────────────────
 hdr "Gate 9 — AgentHub unaffected (/ = 200 or 307)"
-for spec in "$HTTPS_SITE|-k" "http://$HTTP_HOST|--resolve $HTTP_HOST:80:127.0.0.1"; do
+for spec in "$HTTPS_SITE|${HTTPS_ARGS[*]}" "http://$HTTP_HOST|--resolve $HTTP_HOST:80:127.0.0.1"; do
   base="${spec%%|*}"; read -r -a a <<< "${spec#*|}"
   c=$(code "${a[@]}" "$base/")
   case "$c" in 200|307) ok "$base/ → $c" ;; *) no "$base/ → $c (expected 200 or 307). AgentHub broken — check Caddy and bsm-agenthub" ;; esac
@@ -138,7 +146,7 @@ c=$(code -H 'X-Forwarded-For: 1.2.3.4' "http://127.0.0.1:$PORT/midhub/api/agent/
 case "$c" in
   401|404) ok "no secret + spoofed XFF → $c" ;;
   403)     ok "no secret + spoofed XFF → 403 (refused)" ;;
-  *)       no "no secret + spoofed XFF → $c (must be 401 or 404, never 200)" ;;
+  *)       no "no secret + spoofed XFF → $c (must be 401, 403 or 404, never 200)" ;;
 esac
 
 # ── Gate 11: MIDHUB_AGENT_SECRET absent or strong (value never printed) ───────
@@ -158,10 +166,10 @@ else
 fi
 
 # ── Gate 12: .env.local mode 0600 ─────────────────────────────────────────────
-hdr "Gate 12 — .env.local mode 0600"
+hdr "Gate 12 — .env.local owned by $APP_USER, mode 0600"
 if [ -f "$ENV_FILE" ]; then
-  m=$(stat -c '%a' "$ENV_FILE")
-  [ "$m" = "600" ] && ok ".env.local mode 600" || no ".env.local mode is $m (expected 600). Fix: chmod 600 $ENV_FILE"
+  m=$(stat -c '%U %a' "$ENV_FILE")
+  [ "$m" = "$APP_USER 600" ] && ok ".env.local $m" || no ".env.local is '$m' (expected '$APP_USER 600'). Fix: chown $APP_USER:$APP_USER $ENV_FILE; chmod 600 $ENV_FILE"
 else
   no "$ENV_FILE missing"
 fi
