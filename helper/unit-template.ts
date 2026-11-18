@@ -1,7 +1,7 @@
 import { MidError } from "../lib/mids/names"
 import { MAX_HEAP_MB, MIN_HEAP_MB } from "../lib/helper/protocol"
 
-// PROVISIONAL: confirm in spike (docs/spike-mid-linux.md)
+// Confirmed in spike 2026-11-18 (docs/spike-mid-linux.md)
 export const EXEC_START_REL = "agent/bin/mid.sh console"
 
 export function renderUnit({ heapMb, midRoot }: { name: string; heapMb: number; midRoot: string }): string {
@@ -22,7 +22,7 @@ Group=midhub
 WorkingDirectory=${midRoot}/agent
 # Files the MID creates stay group-writable (group midhub) so MidHub can edit them.
 UMask=0002
-# PROVISIONAL: confirm in spike (docs/spike-mid-linux.md)
+# Confirmed in spike 2026-11-18 (docs/spike-mid-linux.md)
 ExecStart=${midRoot}/${EXEC_START_REL}
 MemoryMax=${heapMb + 512}M
 Restart=on-failure

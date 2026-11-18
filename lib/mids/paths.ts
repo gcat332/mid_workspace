@@ -59,7 +59,7 @@ export async function resolveMidPath(name: string, rel: string): Promise<string>
   return resolved
 }
 
-// PROVISIONAL: confirm in spike (docs/spike-mid-linux.md)
+// Confirmed in spike 2026-11-18 (docs/spike-mid-linux.md)
 /** Read-only program dirs under `<mid root>/agent`. Single source of truth (also used by files.ts). */
 export const PROGRAM_DIRS = ["bin", "lib", "jre"] as const
 

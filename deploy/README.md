@@ -159,7 +159,7 @@ helper itself when the copy changed. Restarting the helper does not stop running
     # MID units: sudo systemctl disable --now 'midhub-mid-*' ; rm /etc/systemd/system/midhub-mid-*.service
     # Data (only if intended): /opt/midhub, the SQLite DB, then `userdel midsvc; groupdel midhub`
 
-`deploy/midhub-mid.service.example` shows what the helper generates per MID (ExecStart PROVISIONAL, see
+`deploy/midhub-mid.service.example` shows what the helper generates per MID (values confirmed by the Phase 0 spike, see
 `docs/spike-mid-linux.md`).
 
 Heap changes rewrite the unit: saving a new RAM (heap) value in the config tab makes the helper regenerate

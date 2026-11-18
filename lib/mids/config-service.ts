@@ -25,7 +25,7 @@ const MAX_DISK_BYTES = 2 * MAX_CONTENT_BYTES
 /** Test seam: runs after paths are resolved and checked, right before the first file I/O. */
 export const hooks: { beforeIo?: () => void | Promise<void> } = {}
 
-// PROVISIONAL: confirm in spike (docs/spike-mid-linux.md)
+// Confirmed in spike 2026-11-18 (docs/spike-mid-linux.md)
 export const FORM_PARAMS = {
   url: "url",
   username: "mid.instance.username",
