@@ -53,6 +53,8 @@ id -nG "$APP_USER" | tr ' ' '\n' | grep -qx midhub || { usermod -aG midhub "$APP
 install -d -m 0755 -o root -g root "$ROOT_DIR"
 install -d -m 2775 -o midsvc -g midhub "$ROOT_DIR/mids"
 chown midsvc:midhub "$ROOT_DIR/mids"; chmod 2775 "$ROOT_DIR/mids"
+install -d -m 0700 -o "$APP_USER" -g "$APP_USER" "$ROOT_DIR/staging"  # private extraction area, same fs as mids
+chown "$APP_USER:$APP_USER" "$ROOT_DIR/staging"; chmod 0700 "$ROOT_DIR/staging"
 for d in packages archive db jobs; do
   install -d -m 0750 -o "$APP_USER" -g "$APP_USER" "$ROOT_DIR/$d"
   chown "$APP_USER:$APP_USER" "$ROOT_DIR/$d"; chmod 0750 "$ROOT_DIR/$d"

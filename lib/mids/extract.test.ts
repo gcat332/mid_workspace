@@ -1,8 +1,8 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { MAX_UNCOMPRESSED, checkListing, extractPackage, validateZip } from "./extract"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { MAX_UNCOMPRESSED, checkListing, extractPackage, hooks, validateZip } from "./extract"
 import { VALID_ENTRIES, makeZip, type ZipEntry } from "./test-fixtures/make-zip"
 
 let root: string
@@ -76,6 +76,11 @@ describe("extractPackage", () => {
     expect(fs.existsSync(path.join(mids, "m1/agent/bin/mid.sh"))).toBe(true)
     expect(fs.readFileSync(path.join(mids, "m1/.midhub-installed-by"), "utf8")).toBe("job1")
     expect(fs.readdirSync(mids).filter((n) => n.startsWith(".extract-"))).toEqual([])
+    expect(fs.readdirSync(path.join(root, "staging"))).toEqual([])
+    expect(fs.statSync(path.join(root, "staging")).mode & 0o777).toBe(0o700)
+    expect(fs.statSync(path.join(mids, "m1/agent")).mode & 0o7777).toBe(0o2775)
+    expect(fs.statSync(path.join(mids, "m1/agent/bin/mid.sh")).mode & 0o777).toBe(0o775)
+    expect(fs.statSync(path.join(mids, "m1/agent/config.xml")).mode & 0o777).toBe(0o664)
   })
   it("a symlink entry in the zip is rejected by the tree walk even without validateZip", async () => {
     const p = await zip("l.zip", [...VALID_ENTRIES, { name: "agent/link", symlinkTo: "/etc" }])
@@ -89,22 +94,74 @@ describe("extractPackage", () => {
     await extractPackage(p, "m1", "job1")
     expect(fs.existsSync(path.join(mids, "m1/marker-keep"))).toBe(true)
     await rejects(extractPackage(p, "m1", "job2"), "conflict")
-    fs.mkdirSync(path.join(mids, ".extract-job3/stale"), { recursive: true })
+    fs.mkdirSync(path.join(root, "staging/.extract-job3/stale"), { recursive: true, mode: 0o700 })
     await extractPackage(p, "m2", "job3")
     expect(fs.existsSync(path.join(mids, "m2/agent/config.xml"))).toBe(true)
     expect(fs.existsSync(path.join(mids, "m2/stale"))).toBe(false)
   })
-  it("removes the temp dir when aborted", async () => {
+  it("removes the temp dir when aborted before start", async () => {
     const p = await zip("ok.zip", VALID_ENTRIES)
     const ac = new AbortController()
     ac.abort()
     await expect(extractPackage(p, "m1", "job1", ac.signal)).rejects.toThrow()
     expect(fs.readdirSync(mids)).toEqual([])
+    expect(fs.readdirSync(path.join(root, "staging"))).toEqual([])
   })
-  it("a corrupt zip fails unzip -> zip_invalid and cleans up", async () => {
+  it("aborts while unzip is running and cleans up", async () => {
+    const p = await zip("ok.zip", VALID_ENTRIES)
+    const ac = new AbortController()
+    hooks.onSpawn = () => ac.abort()
+    try {
+      await expect(extractPackage(p, "m1", "job1", ac.signal)).rejects.toThrow()
+    } finally {
+      hooks.onSpawn = undefined
+    }
+    expect(fs.readdirSync(mids)).toEqual([])
+    expect(fs.readdirSync(path.join(root, "staging"))).toEqual([])
+  })
+  it("a corrupt zip is zip_invalid and leaves nothing", async () => {
     const p = path.join(zips, "bad.zip")
     fs.writeFileSync(p, "garbage")
     await rejects(extractPackage(p, "m1", "job1"), "zip_invalid")
     expect(fs.readdirSync(mids)).toEqual([])
+  })
+  it("refuses a staging dir that is group-writable", async () => {
+    const p = await zip("ok.zip", VALID_ENTRIES)
+    fs.mkdirSync(path.join(root, "staging"), { mode: 0o700 })
+    fs.chmodSync(path.join(root, "staging"), 0o770)
+    await rejects(extractPackage(p, "m1", "job1"), "internal")
+    expect(fs.readdirSync(mids)).toEqual([])
+  })
+  it("refuses a staging dir that is a symlink or not owned by us", async () => {
+    const p = await zip("ok.zip", VALID_ENTRIES)
+    fs.mkdirSync(path.join(root, "elsewhere"), { mode: 0o700 })
+    fs.symlinkSync(path.join(root, "elsewhere"), path.join(root, "staging"))
+    await rejects(extractPackage(p, "m1", "job1"), "internal")
+    fs.unlinkSync(path.join(root, "staging"))
+    const uid = process.getuid!()
+    fs.mkdirSync(path.join(root, "staging"), { mode: 0o700 })
+    const spy = vi.spyOn(process, "getuid").mockReturnValue(uid + 1)
+    try {
+      await rejects(extractPackage(p, "m1", "job1"), "internal")
+    } finally {
+      spy.mockRestore()
+    }
+  })
+  it("does not trust a marker owned by another uid", async () => {
+    const p = await zip("ok.zip", VALID_ENTRIES)
+    await extractPackage(p, "m1", "job1")
+    const uid = process.getuid!()
+    const spy = vi.spyOn(process, "getuid").mockReturnValue(uid + 1)
+    try {
+      await rejects(extractPackage(p, "m1", "job1"), "conflict")
+    } finally {
+      spy.mockRestore()
+    }
+  })
+  it("does not trust a hard-linked marker", async () => {
+    const p = await zip("ok.zip", VALID_ENTRIES)
+    await extractPackage(p, "m1", "job1")
+    fs.linkSync(path.join(mids, "m1/.midhub-installed-by"), path.join(root, "other-link"))
+    await rejects(extractPackage(p, "m1", "job1"), "conflict")
   })
 })
