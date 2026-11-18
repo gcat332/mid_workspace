@@ -3,9 +3,9 @@ import { formatBytes, formatUptime, statusView, type MidView } from "@/lib/ui/st
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex gap-4 py-2 text-sm">
-      <dt className="w-40 shrink-0 text-gray-500">{label}</dt>
-      <dd className="min-w-0 break-words text-gray-900">{children}</dd>
+    <div className="flex flex-col gap-0.5 py-2 text-sm sm:flex-row sm:gap-4">
+      <dt className="shrink-0 text-gray-500 sm:w-40">{label}</dt>
+      <dd className="min-w-0 break-all text-gray-900">{children}</dd>
     </div>
   )
 }
@@ -21,7 +21,7 @@ export function OverviewTab({ mid }: { mid: MidView }) {
         {url ? <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{url}</a> : (mid.instanceUrl ?? "-")}
       </Row>
       <Row label="ชื่อ MID ใน ServiceNow">{mid.midName ?? "-"}</Row>
-      <Row label="เวอร์ชัน">{mid.version ?? "-"}</Row>
+      <Row label="เวอร์ชัน">{mid.version || "ไม่ทราบ"}</Row>
       <Row label="สถานะ service">{sv.icon} {sv.label}</Row>
       <Row label="Uptime">{running ? formatUptime(mid.status.since) : "-"}</Row>
       <Row label="RAM ที่ใช้">{formatBytes(mid.status.memoryBytes)}</Row>

@@ -94,7 +94,7 @@ export function IpAllowlistManager() {
         <button type="submit" disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">เพิ่ม</button>
       </form>
       {err && <div className="mb-2"><ErrorNotice error={err} /></div>}
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+      <div className="relative overflow-x-auto rounded-xl border border-gray-200 bg-white">
         <table className="w-full text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600">
             <tr><th className="px-4 py-3">IP / CIDR</th><th className="px-4 py-3">หมายเหตุ</th><th className="px-4 py-3"><span className="sr-only">จัดการ</span></th></tr>

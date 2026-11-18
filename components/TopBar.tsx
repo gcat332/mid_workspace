@@ -43,7 +43,7 @@ export function TopBar({ email, isAdmin, host, mids, onImport }: Props) {
           <span className={`rounded-full px-3 py-1 text-sm font-medium ${q.full ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}`}>
             {q.text}
           </span>
-          <span className="text-sm text-gray-700">RAM: MID ใช้ {formatBytes(midRam)} / ทั้งเครื่อง {formatBytes(host.totalBytes)} (ว่าง {formatBytes(host.availableBytes)})</span>
+          <span className="min-w-0 text-sm text-gray-700">RAM: MID ใช้ {formatBytes(midRam)} / ทั้งเครื่อง {formatBytes(host.totalBytes)} (ว่าง {formatBytes(host.availableBytes)})</span>
           {lowRam && <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700">RAM ว่างเหลือน้อย</span>}
         </>
       )}
@@ -51,11 +51,14 @@ export function TopBar({ email, isAdmin, host, mids, onImport }: Props) {
         <button type="button" onClick={onImport} className={`${btn} border border-gray-300 text-gray-700 hover:bg-gray-50`}>
           Import MID ที่มีอยู่
         </button>
-        <button type="button" disabled title="เปิดใช้ใน Phase 2" className={`${btn} bg-blue-600 text-white disabled:opacity-50`}>
-          + สร้าง MID ใหม่
-        </button>
+        <span className="flex items-center gap-1.5">
+          <button type="button" disabled aria-describedby="create-mid-hint" className={`${btn} bg-blue-600 text-white disabled:opacity-50`}>
+            + สร้าง MID ใหม่
+          </button>
+          <span id="create-mid-hint" className="text-xs text-gray-500">(ยังไม่เปิดให้ใช้ในเวอร์ชันนี้)</span>
+        </span>
         {isAdmin && <Link href="/admin/users" className={`${btn} text-blue-600 hover:underline`}>Admin</Link>}
-        <span className="text-sm text-gray-500">{email}</span>
+        <span className="min-w-0 break-all text-sm text-gray-500">{email}</span>
         <button type="button" onClick={logout} className={`${btn} text-gray-700 hover:bg-gray-100`}>ออกจากระบบ</button>
         {logoutErr && <span role="alert" className="text-sm text-red-600">ออกจากระบบไม่สำเร็จ ลองกดอีกครั้ง</span>}
       </div>

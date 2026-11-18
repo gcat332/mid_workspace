@@ -10,7 +10,12 @@ export const nextBackoff = (attempt: number): number => Math.min(BACKOFF_MAX_MS,
 export const shouldRetry = (httpStatus: number): boolean => httpStatus < 400 || httpStatus >= 500 || httpStatus === 408 || httpStatus === 429
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-/** Level token as a whole word (so "ERRORS" or "NOWARNING" do not match). Empty level matches everything. */
+/**
+ * Level token as a whole word (so "ERRORS" or "NOWARNING" do not match). Empty level matches everything;
+ * "WARN+" means WARN or worse (WARN or ERROR).
+ */
 export function levelMatches(text: string, level: string): boolean {
-  return !level || new RegExp(`\\b${escapeRe(level)}\\b`).test(text)
+  if (!level) return true
+  if (level === "WARN+") return levelMatches(text, "WARN") || levelMatches(text, "ERROR")
+  return new RegExp(`\\b${escapeRe(level)}\\b`).test(text)
 }

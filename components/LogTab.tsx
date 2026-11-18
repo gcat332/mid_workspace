@@ -7,7 +7,7 @@ import { levelMatches, nextBackoff, shouldRetry } from "@/lib/ui/log-stream"
 
 const MAX_LINES = 5000
 const FILES = [{ id: "main", label: "agent (main)" }, { id: "wrapper", label: "wrapper" }] as const
-const LEVELS = [{ id: "", label: "ทั้งหมด" }, { id: "ERROR", label: "ERROR" }, { id: "WARN", label: "WARN" }] as const
+const LEVELS = [{ id: "", label: "ทั้งหมด" }, { id: "ERROR", label: "ERROR" }, { id: "WARN+", label: "WARN ขึ้นไป" }] as const
 type Status = "connecting" | "live" | "missing"
 type Line = { id: number; text: string }
 
@@ -34,6 +34,7 @@ export function LogTab({ midName }: { midName: string }) {
   const [status, setStatus] = useState<Status>("connecting")
   const [err, setErr] = useState<ApiError | null>(null)
   const [snapshot, setSnapshot] = useState<Line[]>([]) // the list as it was when paused
+  const [pausedAt, setPausedAt] = useState(0) // id of the next line at pause time
   const nextId = useRef(0)
   const box = useRef<HTMLDivElement>(null)
   const url = `/mids/${encodeURIComponent(midName)}/logs?file=${file}`
@@ -113,9 +114,11 @@ export function LogTab({ midName }: { midName: string }) {
   }, [shown, paused])
 
   function togglePause() {
-    if (!paused) setSnapshot(lines)
+    if (!paused) { setSnapshot(lines); setPausedAt(nextId.current) }
     setPaused((p) => !p)
   }
+  // Lines that arrived while paused (approximate after a reconnect, which replays the server window).
+  const newWhilePaused = paused ? Math.max(0, (lines.at(-1)?.id ?? pausedAt - 1) + 1 - pausedAt) : 0
   function switchFile(f: (typeof FILES)[number]["id"]) {
     setFile(f); setLines([]); setErr(null)
   }
@@ -135,6 +138,9 @@ export function LogTab({ midName }: { midName: string }) {
         <input type="search" aria-label="ค้นหาใน log" placeholder="ค้นหา" value={q} onChange={(e) => setQ(e.target.value)}
           className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
         <button type="button" onClick={togglePause} aria-pressed={paused} className={ctl}>{paused ? "เลื่อนอัตโนมัติ" : "หยุดชั่วคราว"}</button>
+        {paused && newWhilePaused > 0 && (
+          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">มีบรรทัดใหม่ {newWhilePaused.toLocaleString()} บรรทัด</span>
+        )}
         <a href={`${API_BASE}${url}&download=1`} className={ctl}>ดาวน์โหลด</a>
         <span role="status" className="flex items-center gap-1.5 text-sm text-gray-600">
           <span aria-hidden className={`inline-block h-2 w-2 rounded-full ${dot}`} />{statusText}

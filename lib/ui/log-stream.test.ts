@@ -14,3 +14,9 @@ it("level filter matches whole words only", () => {
   expect(levelMatches("INFO NOWARN", "WARN")).toBe(false)
   expect(levelMatches("anything", "")).toBe(true)
 })
+it("WARN+ matches WARN and ERROR lines (Q-M14)", () => {
+  expect(levelMatches("12:00 WARN slow", "WARN+")).toBe(true)
+  expect(levelMatches("12:00 ERROR boom", "WARN+")).toBe(true)
+  expect(levelMatches("12:00 INFO ok", "WARN+")).toBe(false)
+  expect(levelMatches("12:00 WARNING x", "WARN+")).toBe(false)
+})

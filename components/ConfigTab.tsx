@@ -5,15 +5,19 @@ import { useCallback, useEffect, useState } from "react"
 import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { apiFetch } from "@/lib/ui/api"
+import { MAX_HEAP_MB, MIN_HEAP_MB } from "@/lib/helper/protocol"
 
-const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false })
-const DiffEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.DiffEditor), { ssr: false })
+const EDITOR_LOADING = <p className="p-3 text-sm text-gray-500">กำลังโหลด editor…</p>
+const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false, loading: () => EDITOR_LOADING })
+const DiffEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.DiffEditor), { ssr: false, loading: () => EDITOR_LOADING })
 
 type ConfigFile = "config.xml" | "wrapper-override.conf"
 type FileState = { content: string; hash: string }
 type Form = {
   url: string; username: string; midName: string; useProxy: boolean
   proxyHost: string; proxyPort: string; proxyUser: string; heapMb: number
+  /** Set on disk (values never reach the browser). */
+  hasPassword?: boolean; hasProxyPassword?: boolean
 }
 type Data = { files: Record<ConfigFile, FileState>; form: Form; warning?: string }
 type Backup = { id: string; file: ConfigFile; note: string; createdBy: string; createdAt: string }
@@ -24,6 +28,7 @@ const NETWORK: ApiError = { message: "เชื่อมต่อเซิร์
 const input = "mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50"
 const btn = "rounded-lg border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
 const fmt = (iso: string) => new Date(iso).toLocaleString("th-TH")
+const KEEP_PW = "•••••••• (ตั้งไว้แล้ว — เว้นว่าง = ไม่เปลี่ยน)"
 
 type Props = {
   midName: string
@@ -47,6 +52,7 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
   const [backups, setBackups] = useState<Backup[]>([])
   const [selected, setSelected] = useState<BackupFull | null>(null)
   const [confirmRollback, setConfirmRollback] = useState(false)
+  const [saved, setSaved] = useState(false)
 
   const apply = useCallback((d: Data) => {
     setData(d)
@@ -78,12 +84,13 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
   useEffect(() => { void load() }, [load])
 
   async function send(path: string, init: RequestInit, after: () => void) {
-    setBusy(true); setErr(null)
+    setBusy(true); setErr(null); setSaved(false)
     try {
       const res = await apiFetch(path, init)
       if (!res.ok) { setErr(await readApiError(res)); if (res.status === 502) void load(true); return }
       apply((await res.json()) as Data)
       await loadBackups()
+      setSaved(true)
       after()
     } catch { setErr(NETWORK) } finally { setBusy(false) }
   }
@@ -91,8 +98,9 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
 
   if (!data || !form) return err ? <ErrorNotice error={err} /> : <p className="text-sm text-gray-500">กำลังโหลดการตั้งค่า...</p>
 
-  const setF = <K extends keyof Form>(k: K, v: Form[K]) => setForm({ ...form, [k]: v })
-  const heapOk = Number.isInteger(form.heapMb) && form.heapMb >= 256 && form.heapMb <= 8192
+  const setF = <K extends keyof Form>(k: K, v: Form[K]) => { setSaved(false); setForm({ ...form, [k]: v }) }
+  const heapOk = Number.isInteger(form.heapMb) && form.heapMb >= MIN_HEAP_MB && form.heapMb <= MAX_HEAP_MB
+  const heapChanged = form.heapMb !== data.form.heapMb
   const stale = err?.code === "stale"
 
   async function pickBackup(id: string) {
@@ -115,11 +123,12 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
         ))}
       </div>
 
+      {saved && !err && <p role="status" className="text-sm text-emerald-700">บันทึกแล้ว</p>}
       {data.warning && <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{data.warning}</p>}
       {err && (
         <div className="space-y-2">
           <ErrorNotice error={err} />
-          {stale && <button type="button" onClick={() => void load()} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`}>โหลดใหม่</button>}
+          {stale && <button type="button" onClick={() => void load()} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`}>โหลดใหม่ (การแก้ไขที่ยังไม่บันทึกจะหาย)</button>}
         </div>
       )}
 
@@ -133,7 +142,8 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
           <label className="text-sm text-gray-700">Username
             <input className={input} value={form.username} onChange={(e) => setF("username", e.target.value)} autoComplete="off" /></label>
           <label className="text-sm text-gray-700">Password (เว้นว่าง = ไม่เปลี่ยน)
-            <input className={input} type="password" value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} autoComplete="new-password" /></label>
+            <input className={input} type="password" value={pw.password} onChange={(e) => { setSaved(false); setPw({ ...pw, password: e.target.value }) }} autoComplete="new-password"
+              placeholder={form.hasPassword ? KEEP_PW : "ยังไม่ได้ตั้ง"} /></label>
           <label className="text-sm text-gray-700">ชื่อ MID ใน ServiceNow
             <input className={input} value={form.midName} onChange={(e) => setF("midName", e.target.value)} /></label>
           <label className="flex items-center gap-2 text-sm text-gray-700">
@@ -147,13 +157,17 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
               <label className="text-sm text-gray-700">Proxy username
                 <input className={input} value={form.proxyUser} onChange={(e) => setF("proxyUser", e.target.value)} autoComplete="off" /></label>
               <label className="text-sm text-gray-700">Proxy password (เว้นว่าง = ไม่เปลี่ยน)
-                <input className={input} type="password" value={pw.proxyPassword} onChange={(e) => setPw({ ...pw, proxyPassword: e.target.value })} autoComplete="new-password" /></label>
+                <input className={input} type="password" value={pw.proxyPassword} onChange={(e) => { setSaved(false); setPw({ ...pw, proxyPassword: e.target.value }) }} autoComplete="new-password"
+                  placeholder={form.hasProxyPassword ? KEEP_PW : "ยังไม่ได้ตั้ง"} /></label>
             </div>
           )}
-          <label className="text-sm text-gray-700">RAM (heap) MB — 256 ถึง 8192
-            <input className={input} type="number" min={256} max={8192} step={64} value={Number.isNaN(form.heapMb) ? "" : form.heapMb}
-              onChange={(e) => setF("heapMb", e.target.valueAsNumber)} aria-invalid={!heapOk} /></label>
-          {!heapOk && <p className="text-xs text-red-700">RAM ต้องเป็นจำนวนเต็ม 256-8192 MB</p>}
+          <label className="text-sm text-gray-700">RAM (heap) MB — {MIN_HEAP_MB} ถึง {MAX_HEAP_MB}
+            <input className={input} type="number" min={MIN_HEAP_MB} max={MAX_HEAP_MB} step={64} value={Number.isNaN(form.heapMb) ? "" : form.heapMb}
+              onChange={(e) => setF("heapMb", e.target.valueAsNumber)} aria-invalid={!heapOk} aria-describedby="heap-note" /></label>
+          {!heapOk && <p className="text-xs text-red-700">RAM ต้องเป็นจำนวนเต็ม {MIN_HEAP_MB}-{MAX_HEAP_MB} MB</p>}
+          <p id="heap-note" className={`text-xs ${heapChanged ? "text-amber-700" : "text-gray-500"}`}>
+            เปลี่ยน RAM แล้ว ระบบจะเขียน systemd unit ของ MID นี้ใหม่จากแม่แบบของ MidHub (unit ที่แก้เองบนเครื่องจะถูกทับ)
+          </p>
           <div><button type="submit" disabled={busy || !heapOk} className={`${btn} border-blue-600 bg-blue-600 text-white hover:bg-blue-700`}>
             {busy ? "กำลังบันทึก..." : "บันทึก"}</button></div>
         </form>
@@ -172,7 +186,8 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
           {rawFile === "config.xml" && <p className="text-xs text-gray-500">ค่า password แสดงเป็น ******** — ถ้าไม่แก้ ระบบจะคงค่าเดิมในไฟล์ไว้</p>}
           <div className="h-96 overflow-hidden rounded-lg border border-gray-300">
             <MonacoEditor height="100%" language={LANG[rawFile]} path={`${midName}/${rawFile}`} value={drafts[rawFile]}
-              onChange={(v) => setDrafts((d) => ({ ...d, [rawFile]: v ?? "" }))} options={{ minimap: { enabled: false }, scrollBeyondLastLine: false }} />
+              loading={EDITOR_LOADING}
+              onChange={(v) => { setSaved(false); setDrafts((d) => ({ ...d, [rawFile]: v ?? "" })) }} options={{ minimap: { enabled: false }, scrollBeyondLastLine: false }} />
           </div>
         </div>
       )}
@@ -195,8 +210,15 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
           <div className="mt-3 space-y-2">
             <p className="text-xs text-gray-500">ซ้าย = backup, ขวา = ไฟล์ปัจจุบัน (password ถูกปิดบัง)</p>
             <div className="h-80 overflow-hidden rounded-lg border border-gray-300">
+              {/* Keep the models alive across unmount (rollback clears `selected`): disposing them first makes Monaco
+                  log "TextModel got disposed before DiffEditorWidget model got reset". Paths are keyed by immutable
+                  content (backup id, current hash) because an existing model is reused as-is on the next mount. */}
               <DiffEditor height="100%" language={LANG[selected.file]} original={selected.content}
-                modified={data.files[selected.file].content} options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false } }} />
+                modified={data.files[selected.file].content} loading={EDITOR_LOADING}
+                originalModelPath={`diff/${midName}/backup/${selected.id}`}
+                modifiedModelPath={`diff/${midName}/current/${data.files[selected.file].hash}/${selected.file}`}
+                keepCurrentOriginalModel keepCurrentModifiedModel
+                options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false } }} />
             </div>
             <button type="button" disabled={busy} onClick={() => setConfirmRollback(true)}
               className={`${btn} border-red-300 text-red-700 hover:bg-red-50`}>Rollback เป็นเวอร์ชันนี้</button>
@@ -205,14 +227,14 @@ export function ConfigTab({ midName, canRestart, onRestart }: Props) {
       </section>
 
       {confirmRollback && selected && (
-        <ConfirmDialog title="Rollback ไฟล์นี้?" danger busy={busy} confirmLabel="Rollback"
+        <ConfirmDialog title="Rollback ไฟล์นี้?" danger busy={busy} confirmLabel="Rollback เลย"
           onCancel={() => setConfirmRollback(false)}
           onConfirm={() => void send(`${base}/backups/${encodeURIComponent(selected.id)}`, { method: "POST" }, () => canRestart && setAskRestart(true)).then(() => setConfirmRollback(false))}>
           ไฟล์ {selected.file} จะถูกแทนที่ด้วยเวอร์ชัน backup นี้ (เวอร์ชันปัจจุบันจะถูกเก็บเป็น backup ก่อน)
         </ConfirmDialog>
       )}
       {askRestart && (
-        <ConfirmDialog title="Restart เลยไหม?" confirmLabel="Restart" onCancel={() => setAskRestart(false)}
+        <ConfirmDialog title="Restart เลยไหม?" confirmLabel="Restart เลย" onCancel={() => setAskRestart(false)}
           onConfirm={() => { setAskRestart(false); onRestart() }}>
           บันทึกแล้ว การตั้งค่าใหม่จะมีผลหลัง restart MID (งานที่กำลังทำอยู่จะถูกขัดจังหวะ)
         </ConfirmDialog>

@@ -65,9 +65,18 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
     return () => { stop(); document.removeEventListener("visibilitychange", onVis) }
   }, [refresh])
 
+  const panelRef = useRef<HTMLDivElement>(null)
   const select = useCallback((name: string | null) => {
-    router.replace(name ? `${pathname}?mid=${encodeURIComponent(name)}` : pathname)
+    // scroll:false - Next would otherwise jump to the top, undoing the mobile scroll below.
+    router.replace(name ? `${pathname}?mid=${encodeURIComponent(name)}` : pathname, { scroll: false })
   }, [router, pathname])
+  // On a phone the panel sits below the list: bring it into view after a tap.
+  const pick = useCallback((name: string) => {
+    select(name)
+    if (window.matchMedia("(max-width: 767px)").matches) {
+      setTimeout(() => panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150)
+    }
+  }, [select])
 
   const current = mids?.find((m) => m.name === selected) ?? null
 
@@ -96,14 +105,14 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
             </button>
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-[18rem_1fr]">
-            <nav aria-label="MID" className="rounded-xl border border-gray-200 bg-white p-2">
-              <MidList mids={mids} selected={selected} onSelect={select} />
+          <div className="grid gap-4 md:grid-cols-[18rem_minmax(0,1fr)]">
+            <nav aria-label="MID" className="min-w-0 rounded-xl border border-gray-200 bg-white p-2">
+              <MidList mids={mids} selected={selected} onSelect={pick} />
             </nav>
-            <div className="rounded-xl border border-gray-200 bg-white p-5">
+            <div ref={panelRef} className="min-w-0 scroll-mt-4 rounded-xl border border-gray-200 bg-white p-4 sm:p-5">
               {current
                 ? <MidPanel key={current.name} mid={current} host={host} onChanged={() => void refresh()} />
-                : <p className="text-sm text-gray-500">เลือก MID จากรายการด้านซ้ายเพื่อดูรายละเอียด</p>}
+                : <p className="text-sm text-gray-500">เลือก MID จากรายการเพื่อดูรายละเอียด</p>}
             </div>
           </div>
         )}

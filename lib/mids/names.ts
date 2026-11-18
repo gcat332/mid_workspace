@@ -32,8 +32,7 @@ const ERRORS = {
 
 export type MidErrorCode = keyof typeof ERRORS
 
-/** quota_full text with the configured maximum (names.ts stays env-free for the helper; callers pass the number). */
-export const quotaFullMessage = (maxRunning: number): string => `รันครบ ${maxRunning} ตัวแล้ว ให้หยุดตัวอื่นก่อน`
+export { quotaFullMessage } from "./messages"
 
 export class MidError extends Error {
   readonly code: string
