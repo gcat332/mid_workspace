@@ -1,0 +1,58 @@
+"use client"
+
+import { useState } from "react"
+import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
+
+const API = "/midhub/api/mids/import"
+const NAME_RE = /^[a-z0-9][a-z0-9-]{1,39}$/
+
+export function ImportMidDialog({ onDone, onCancel }: { onDone: (name: string) => void; onCancel: () => void }) {
+  const [name, setName] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<ApiError | null>(null)
+  const valid = NAME_RE.test(name)
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!valid || busy) return
+    setBusy(true); setErr(null)
+    try {
+      const res = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) })
+      if (!res.ok) { setErr(await readApiError(res)); return }
+      onDone(name)
+    } catch {
+      setErr({ message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <form onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="import-title"
+        className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+        <h2 id="import-title" className="text-lg font-semibold text-gray-900">Import MID ที่มีอยู่</h2>
+        <p className="mt-1 text-sm text-gray-600">
+          ใส่ชื่อโฟลเดอร์ของ MID ที่อยู่ใน <code className="font-mono">/opt/midhub/mids/</code> แล้ว ระบบจะอ่านค่าจาก config.xml ให้เอง
+        </p>
+        <label className="mt-3 block text-sm text-gray-800">
+          ชื่อ MID
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value.trim())} placeholder="เช่น demo-mid-1"
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </label>
+        {name && !valid && (
+          <p className="mt-1 text-xs text-red-600">ใช้ได้เฉพาะ a-z, 0-9 และ - (2-40 ตัวอักษร ขึ้นต้นด้วยตัวอักษรหรือตัวเลข)</p>
+        )}
+        {err && <div className="mt-3"><ErrorNotice error={err} /></div>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onCancel} disabled={busy}
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50">ยกเลิก</button>
+          <button type="submit" disabled={!valid || busy}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            {busy ? "กำลัง Import..." : "Import"}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
