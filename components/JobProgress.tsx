@@ -5,6 +5,7 @@ import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { API_BASE, apiFetch, safeHttpUrl } from "@/lib/ui/api"
 import { ghostBtnCls } from "@/lib/ui/classes"
+import { createLatest } from "@/lib/ui/latest"
 import { jobStageLabel, parseProgress, type JournalEntry } from "@/lib/ui/wizard"
 
 type JobView = {
@@ -44,36 +45,64 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [busy, setBusy] = useState(false)
   const [conn, setConn] = useState(0) // bump to reconnect
+  const [targetErr, setTargetErr] = useState(false)
   const [target, setTarget] = useState<{ url: string | null; sn: string } | null>(null)
   const logRef = useRef<HTMLUListElement>(null)
 
   const reconnect = () => { setLines([]); setStreamErr(null); setConn((n) => n + 1) }
-  const loadJob = useCallback(async () => {
-    try {
-      const res = await apiFetch(`/jobs/${encodeURIComponent(jobId)}`)
-      if (!res.ok) { setLoadErr(await readApiError(res)); return null }
-      const j = (await res.json()) as JobView
-      setJob(j); setLoadErr(null)
-      return j
-    } catch {
-      setLoadErr(NET)
-      return null
-    }
-  }, [jobId])
+  const latest = useRef(createLatest())
+  const inflight = useRef(false)
+  const again = useRef(false)
+  const terminal = useRef(false)
+  const targetAsked = useRef(false)
 
   // After a successful install: where to validate (instance URL + the MID's name in ServiceNow).
   const loadTarget = useCallback(async (j: JobView) => {
     try {
       const res = await apiFetch("/mids")
-      const list = res.ok ? ((await res.json()) as { name: string; instanceUrl: string | null; midName: string | null }[]) : []
+      if (!res.ok) throw new Error("mids")
+      const list = (await res.json()) as { name: string; instanceUrl: string | null; midName: string | null }[]
       const m = list.find((x) => x.name === j.midName)
       setTarget({ url: safeHttpUrl(m?.instanceUrl ?? null), sn: m?.midName ?? j.params.snName ?? j.midName })
+      setTargetErr(false)
     } catch {
+      targetAsked.current = false
+      setTargetErr(true)
       setTarget({ url: null, sn: j.params.snName ?? j.midName })
     }
   }, [])
 
-  // Deferred one microtask so the effect body itself never sets state synchronously.
+  // At most one request in flight plus one trailing; a terminal status is never replaced by a non-terminal one
+  // (reconnect()/retry reset that, since a retry legitimately restarts the job).
+  const loadJob = useCallback(async () => {
+    if (inflight.current) { again.current = true; return }
+    inflight.current = true
+    try {
+      do {
+        again.current = false
+        const token = latest.current.next()
+        try {
+          const res = await apiFetch(`/jobs/${encodeURIComponent(jobId)}`)
+          if (!latest.current.isCurrent(token)) continue
+          if (!res.ok) { setLoadErr(await readApiError(res)); continue }
+          const j = (await res.json()) as JobView
+          if (!latest.current.isCurrent(token)) continue
+          if (terminal.current && ACTIVE.has(j.status)) continue
+          if (!ACTIVE.has(j.status)) terminal.current = true
+          setJob(j); setLoadErr(null)
+          if (j.status === "succeeded" && (j.kind === "install" || j.kind === "clone") && !targetAsked.current) {
+            targetAsked.current = true
+            void loadTarget(j)
+          }
+        } catch {
+          setLoadErr(NET)
+        }
+      } while (again.current)
+    } finally {
+      inflight.current = false
+    }
+  }, [jobId, loadTarget])
+
   useEffect(() => { void Promise.resolve().then(loadJob) }, [loadJob, conn])
 
   useEffect(() => {
@@ -87,7 +116,7 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
     }
     es.addEventListener("done", () => {
       es.close()
-      void loadJob().then((j) => { if (j?.status === "succeeded" && (j.kind === "install" || j.kind === "clone")) void loadTarget(j) })
+      void loadJob()
     })
     es.addEventListener("error", (ev: Event) => {
       es.close()
@@ -99,7 +128,7 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
       setStreamErr({ message })
     })
     return () => es.close()
-  }, [jobId, conn, loadJob, loadTarget])
+  }, [jobId, conn, loadJob])
 
   useEffect(() => {
     const el = logRef.current
@@ -125,10 +154,18 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
       setBusy(false)
     }
   }
+  const badReply: ApiError = { message: "เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง ระบบโหลดสถานะงานใหม่ให้แล้ว ลองอีกครั้ง" }
+  async function readJobId(res: Response): Promise<string | null> {
+    const b = (await res.json().catch(() => null)) as { jobId?: unknown } | null
+    return typeof b?.jobId === "string" && b.jobId ? b.jobId : null
+  }
   async function retry() {
     const res = await post(`/jobs/${encodeURIComponent(jobId)}/retry`)
     if (!res) return
-    const { jobId: id } = (await res.json()) as { jobId: string }
+    const id = await readJobId(res)
+    terminal.current = false // a retry legitimately moves a failed job back to running
+    latest.current.next() // drop any in-flight status response from before the retry
+    if (id === null) { setActionErr(badReply); void loadJob(); return }
     setJob((j) => (j ? { ...j, status: "running", error: null } : j))
     if (id !== jobId) onJobChange(id)
     else reconnect()
@@ -137,7 +174,8 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
     const res = await post(`/jobs/${encodeURIComponent(jobId)}/cancel`)
     setConfirmCancel(false)
     if (!res) return
-    const { jobId: id } = (await res.json()) as { jobId: string }
+    const id = await readJobId(res)
+    if (id === null) { setActionErr(badReply); void loadJob(); return }
     if (id !== jobId) onJobChange(id)
     else reconnect()
   }
@@ -159,6 +197,9 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
 
   return (
     <div className="space-y-4">
+      <div role="status" aria-live="polite" className="sr-only">
+        {job ? `${heading}${job.stage && active ? `: ${jobStageLabel(job.stage)}` : ""}${failed && job.error ? `: ${job.error}` : ""}` : ""}
+      </div>
       <div>
         <h3 className="text-base font-semibold text-gray-900 dark:text-neutral-100">{heading}</h3>
         {job && <p className="mt-0.5 text-sm text-gray-600">MID: <span className="font-mono">{job.midName}</span></p>}
@@ -220,6 +261,7 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
       {succeeded && isInstall && (
         <div className="space-y-3 rounded-lg border border-green-100 bg-green-100 px-3 py-3 text-sm text-green-800">
           <p>MID ติดตั้งและเชื่อมต่อแล้ว ตรวจสถานะ Validate ใน ServiceNow เพื่อให้ MID พร้อมใช้งาน</p>
+          {targetErr && <p role="alert" className="text-xs text-red-700">หาที่อยู่ instance เพื่อสร้างลิงก์ Validate ไม่ได้ เปิด ServiceNow แล้วค้นหา MID ชื่อ “{target?.sn}” ในรายการ MID Server เอง</p>}
           <div className="flex flex-wrap gap-2">
             {target?.url && (
               <a href={`${target.url}ecc_agent_list.do?sysparm_query=name=${encodeURIComponent(target.sn)}`} target="_blank" rel="noopener noreferrer"
@@ -237,7 +279,7 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose }: Props) {
 
       <div>
         <p className="mb-1 text-xs font-medium text-gray-600">บันทึกการทำงาน</p>
-        <ul ref={logRef} aria-label="บันทึกการทำงาน" className="max-h-48 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 font-mono text-xs">
+        <ul ref={logRef} tabIndex={0} aria-label="บันทึกการทำงาน" className="max-h-48 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 font-mono text-xs">
           {lines.length === 0 && <li className="text-gray-500">รอข้อมูล...</li>}
           {lines.map((l, i) => {
             const t = lineText(l)

@@ -125,19 +125,22 @@ export function InstanceStep({ isAdmin, state, onChange, onLabel }: Props) {
             const on = state.instance?.id === i.id
             return (
               <li key={i.id}>
-                <button type="button" role="radio" aria-checked={on} onClick={() => pick(i)}
-                  className={`w-full rounded-lg border px-3 py-2 text-left ${on ? "border-blue-500 bg-blue-50 ring-1 ring-blue-300" : "border-gray-200 hover:bg-gray-50"}`}>
+                <label className={`block cursor-pointer rounded-lg border px-3 py-2 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500 ${on ? "border-blue-500 bg-blue-50 ring-1 ring-blue-300" : "border-gray-200 hover:bg-gray-50"}`}>
+                  <input type="radio" name="wizard-instance" className="sr-only" checked={on} onChange={() => pick(i)} />
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${on ? "border-blue-600" : "border-gray-400"}`} aria-hidden>
+                      {on && <span className="h-2 w-2 rounded-full bg-blue-600" />}
+                    </span>
                     <span className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-neutral-100">{i.label}</span>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${i.hasPassword ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>
                       {i.hasPassword ? "มีรหัสแล้ว" : "ยังไม่มีรหัส"}
                     </span>
                   </span>
-                  <span className="mt-0.5 block break-all text-xs text-gray-600">{host(i.url)}</span>
-                  <span className="mt-0.5 block break-all text-xs text-gray-500">
+                  <span className="mt-0.5 block break-all pl-6 text-xs text-gray-600">{host(i.url)}</span>
+                  <span className="mt-0.5 block break-all pl-6 text-xs text-gray-500">
                     build: {i.buildstamp ?? "ยังไม่ทราบ"}{i.hasPassword ? ` · ทดสอบตอนบันทึก ${date(i.createdAt)}` : ""}
                   </span>
-                </button>
+                </label>
               </li>
             )
           })}

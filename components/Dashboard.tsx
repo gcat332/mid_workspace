@@ -87,8 +87,9 @@ export function Dashboard({ email, isAdmin }: { email: string; isAdmin: boolean 
   }, [select])
 
   // The wizard lives in the URL (?create=1&job=<id>) so a reload resumes the progress view.
-  const openWizard = useCallback(() => router.replace(`${pathname}?create=1`, { scroll: false }), [router, pathname])
-  const setWizardJob = useCallback((id: string) => router.replace(`${pathname}?create=1&job=${encodeURIComponent(id)}`, { scroll: false }), [router, pathname])
+  const keepMid = selected ? `mid=${encodeURIComponent(selected)}&` : ""
+  const openWizard = useCallback(() => router.replace(`${pathname}?${keepMid}create=1`, { scroll: false }), [router, pathname, keepMid])
+  const setWizardJob = useCallback((id: string) => router.replace(`${pathname}?${keepMid}create=1&job=${encodeURIComponent(id)}`, { scroll: false }), [router, pathname, keepMid])
   const closeWizard = useCallback(() => {
     void refresh()
     router.replace(selected ? `${pathname}?mid=${encodeURIComponent(selected)}` : pathname, { scroll: false })

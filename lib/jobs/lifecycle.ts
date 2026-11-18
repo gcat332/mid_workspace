@@ -14,7 +14,7 @@ export const NAME_TAKEN = "มี MID ชื่อนี้อยู่แล้
 const AUTO_CANCEL_MSG = "ยกเลิกอัตโนมัติ: MID ถูกสร้างใหม่"
 const NOT_TEXT = "ต้องเป็นข้อความ"
 const bad = (msg: string) => new MidError("invalid_request", 400, msg)
-const SN_NAME_RE = /^[A-Za-z0-9._-]{1,80}$/
+export const SN_NAME_RE = /^[A-Za-z0-9._-]{1,80}$/
 // RFC 1123 hostname; an all-numeric dotted string must additionally be a valid IPv4 (checked in validHost).
 const HOSTNAME_RE = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/
 const IPV4_LIKE = /^[0-9.]+$/

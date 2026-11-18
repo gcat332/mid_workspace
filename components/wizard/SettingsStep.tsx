@@ -57,7 +57,7 @@ export function SettingsStep({ state, extra, mids, onChange, onExtra, nameResult
         <label className={labelCls} htmlFor="w-name">ชื่อ MID (ชื่อโฟลเดอร์บนเครื่อง)</label>
         <div className="flex gap-2">
           <input id="w-name" data-autofocus className={`${inputCls} font-mono`} value={name} onChange={(e) => setName(e.target.value)}
-            placeholder="เช่น demo-mid-1" autoComplete="off" spellCheck={false} aria-describedby="w-name-msg" />
+            placeholder="เช่น demo-mid-1" autoComplete="off" spellCheck={false} aria-describedby="w-name-msg" aria-invalid={state.nameCheck === "invalid" || state.nameCheck === "taken" || state.nameCheck === "error"} />
           {state.nameCheck === "error" && <button type="button" onClick={() => { onNameResult(null); setRecheck((n) => n + 1) }} className={`${ghostBtnCls} shrink-0`}>ตรวจอีกครั้ง</button>}
         </div>
         <p id="w-name-msg" aria-live="polite" className="mt-1 min-h-4 text-xs">

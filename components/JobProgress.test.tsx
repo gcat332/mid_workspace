@@ -115,4 +115,79 @@ describe("JobProgress", () => {
     fireEvent.click(screen.getByText("เชื่อมต่อใหม่"))
     await waitFor(() => expect(FakeES.all.length).toBe(2))
   })
+
+  it("closes the EventSource on unmount and when the job id changes", async () => {
+    const { rerender, unmount } = render(<JobProgress {...props} />)
+    await screen.findByText("ดาวน์โหลดแพ็กเกจ MID")
+    const first = FakeES.all[0]
+    rerender(<JobProgress {...props} key="j2" jobId="j2" />)
+    expect(first.closed).toBe(true)
+    const second = FakeES.all[FakeES.all.length - 1]
+    expect(second.url).toContain("/jobs/j2/events")
+    unmount()
+    expect(second.closed).toBe(true)
+  })
+
+  it("a stale non-terminal status response never overwrites a terminal one (coalesced, out of order)", async () => {
+    const es = await mount()
+    const waiting: ((v: Response) => void)[] = []
+    ;(fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url.endsWith("/jobs/j1")) return new Promise<Response>((r) => waiting.push(r))
+      return json([])
+    })
+    act(() => es.emit({ type: "stage", stage: "extract" })) // starts request #1 (held)
+    act(() => { es.emit({ type: "stage", stage: "configure" }); es.fire("done", { status: "failed" }) }) // coalesced into one trailing
+    await waitFor(() => expect(waiting.length).toBe(1))
+    await act(async () => { waiting[0](new Response(JSON.stringify({ ...job, stage: "extract", status: "running" }), { headers: { "content-type": "application/json" } })) })
+    await waitFor(() => expect(waiting.length).toBe(2)) // exactly one trailing request, not three
+    await act(async () => { waiting[1](new Response(JSON.stringify({ ...job, stage: "extract", status: "failed", error: "boom" }), { headers: { "content-type": "application/json" } })) })
+    expect(await screen.findByText("ลองใหม่")).toBeTruthy()
+    // a late stage event triggers another load that still says running: terminal state must stay
+    ;(fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) =>
+      url.endsWith("/jobs/j1") ? json({ ...job, stage: "extract", status: "running" }) : json([]))
+    act(() => es.emit({ type: "stage", stage: "extract" }))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.getByText("ลองใหม่")).toBeTruthy()
+  })
+
+  it.each(["retry", "cancel"])("a %s reply without a jobId does not navigate to job=undefined", async (which) => {
+    const es = await mount()
+    job = { ...job, stage: "extract", status: "failed", error: "boom" }
+    act(() => es.fire("done", { status: "failed" }))
+    ;(fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? "GET" })
+      if (url.endsWith("/retry") || url.endsWith("/cancel")) return json({}, 202)
+      return json(job)
+    })
+    props.onJobChange.mockClear()
+    if (which === "retry") fireEvent.click(await screen.findByText("ลองใหม่"))
+    else {
+      fireEvent.click(await screen.findByText("ยกเลิกและลบ"))
+      const dlg = screen.getByRole("dialog")
+      fireEvent.click(Array.from(dlg.querySelectorAll("button")).find((b) => b.textContent === "ยกเลิกและลบ")!)
+    }
+    expect(await screen.findByText(/เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง/)).toBeTruthy()
+    expect(props.onJobChange).not.toHaveBeenCalled()
+    expect(calls.filter((c) => c.url.endsWith("/jobs/j1")).length).toBeGreaterThan(1) // current job reloaded
+  })
+
+  it("loads the Validate target when a GET shows succeeded even without an SSE done event", async () => {
+    job = { ...job, stage: "waitConnected", status: "succeeded" }
+    render(<JobProgress {...props} />)
+    expect(await screen.findByRole("link", { name: /Validate/ })).toBeTruthy()
+  })
+
+  it("shows a notice when the Validate target cannot be loaded", async () => {
+    job = { ...job, stage: "waitConnected", status: "succeeded" }
+    ;(fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) =>
+      url.endsWith("/jobs/j1") ? json(job) : json({ message: "no" }, 500))
+    render(<JobProgress {...props} />)
+    expect(await screen.findByText(/หาที่อยู่ instance/)).toBeTruthy()
+  })
+
+  it("announces stage changes in a polite live region", async () => {
+    await mount()
+    const live = document.querySelector('[aria-live="polite"]')!
+    expect(live.textContent).toContain("ดาวน์โหลดแพ็กเกจ MID")
+  })
 })

@@ -1,5 +1,6 @@
 // Pure step validation and helpers for the Create-MID wizard (no React, no server imports).
 import { MAX_HEAP_MB, MIN_HEAP_MB } from "@/lib/helper/protocol"
+import { MIN_FREE_BYTES } from "@/lib/mids/layout"
 import { MID_NAME_RE } from "@/lib/mids/name-regex"
 import type { HostView } from "./status-view"
 
@@ -12,7 +13,6 @@ export const SN_NAME_RE = /^[A-Za-z0-9._-]{1,80}$/
 
 export const DEFAULT_HEAP_MB = 1024
 export const DEFAULT_LOG_FILES = 3
-const MIN_FREE_BYTES = 2 * 1024 ** 3 // lib/mids/layout.ts MIN_FREE_BYTES
 const GIB = 1024 ** 3
 
 export type NameCheck = "idle" | "checking" | "available" | "taken" | "invalid" | "error"

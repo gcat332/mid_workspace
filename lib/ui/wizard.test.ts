@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { BUILDSTAMP_RE as SERVER_RE } from "@/lib/mids/buildstamp"
-import { BUILDSTAMP_RE, canProceed, effectiveBuildstamp, jobStageLabel, parseProgress, reviewChecks, type WizardState } from "./wizard"
+import { SN_NAME_RE as SERVER_SN } from "@/lib/jobs/lifecycle"
+import { MIN_FREE_BYTES as SERVER_MIN_FREE } from "@/lib/mids/layout"
+import { BUILDSTAMP_RE, SN_NAME_RE, canProceed, deriveNameCheck, effectiveBuildstamp, jobStageLabel, parseProgress, reviewChecks, type WizardState } from "./wizard"
 
 const GOOD = "washingtondc-12-08-2023__patch5-hotfix1-02-14-2024_02-23-2024_1115"
 const base: WizardState = {
@@ -113,5 +115,30 @@ describe("misc helpers", () => {
   it("jobStageLabel maps known stages and falls back to the raw name", () => {
     expect(jobStageLabel("fetchPackage")).toMatch(/ดาวน์โหลด/)
     expect(jobStageLabel("weird")).toBe("weird")
+  })
+})
+
+describe("deriveNameCheck", () => {
+  it("covers idle, invalid, checking, and answers only for the same name", () => {
+    expect(deriveNameCheck("", null)).toBe("idle")
+    expect(deriveNameCheck("A!", null)).toBe("invalid")
+    expect(deriveNameCheck("mid-a", null)).toBe("checking")
+    expect(deriveNameCheck("mid-a", { name: "mid-a", status: "available" })).toBe("available")
+    expect(deriveNameCheck("mid-a", { name: "mid-a", status: "taken" })).toBe("taken")
+    expect(deriveNameCheck("mid-a", { name: "mid-a", status: "error" })).toBe("error")
+    expect(deriveNameCheck("mid-ab", { name: "mid-a", status: "available" })).toBe("checking")
+    expect(deriveNameCheck("", { name: "mid-a", status: "available" })).toBe("idle")
+  })
+})
+
+describe("shared constants agree with the server", () => {
+  it("SN_NAME_RE accepts and rejects the same samples", () => {
+    for (const x of ["midhub-a", "a.b_c-1", "", "a b", "x".repeat(80), "x".repeat(81), "ไทย", "a/b"]) expect(SN_NAME_RE.test(x), x).toBe(SERVER_SN.test(x))
+  })
+  it("disk threshold is the server's MIN_FREE_BYTES", () => {
+    const host = { totalBytes: 1, availableBytes: 4 * GIB, running: 0, quotaUsed: 0, maxRunning: 3 }
+    const just = (b: number) => reviewChecks({ ...host, disk: { freeBytes: b, totalBytes: null, usage: null } }).some((c) => c.level === "block")
+    expect(just(SERVER_MIN_FREE - 1)).toBe(true)
+    expect(just(SERVER_MIN_FREE)).toBe(false)
   })
 })
