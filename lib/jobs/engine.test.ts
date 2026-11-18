@@ -324,13 +324,25 @@ describe("cancelJob", () => {
 })
 
 const tick = () => new Promise<void>((r) => setImmediate(r))
-async function until(cond: () => Promise<boolean>, n = 3000) {
-  for (let i = 0; i < n; i++) {
+// Bounded by wall-clock (setImmediate is never faked), not by an iteration count, so load can't starve it.
+async function until(cond: () => Promise<boolean>, ms = 15_000) {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
     if (await cond()) return
     await tick()
   }
   throw new Error("until: condition not met")
 }
+// stage whose run() signals once it has started; the engine registers timeout/heartbeat timers BEFORE calling run(),
+// so awaiting `started` is a deterministic point after which advancing fake timers is safe.
+const gatedStage = (name: string, g: { promise: Promise<void> }, started: { resolve: () => void }, timeoutMs?: number) => ({
+  name,
+  timeoutMs,
+  run: async () => {
+    started.resolve()
+    await g.promise
+  },
+})
 
 describe("review fixes", () => {
   it("never schedules the same job twice (resume racing create, duplicate resume)", async () => {
@@ -478,11 +490,10 @@ describe("review fixes", () => {
 
     it("heartbeat bumps updatedAt every 30s while a stage runs", async () => {
       const g = deferred()
-      eng.registerKind("install", [{ name: "a", run: () => g.promise }])
+      const started = deferred()
+      eng.registerKind("install", [gatedStage("a", g, started)])
       const job = await eng.createJob(alice, "install", "m-a", {})
-      await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "running")
-      await until(async () => (await journal(job.id)).some((e) => e.type === "stage"))
-      for (let i = 0; i < 50; i++) await tick() // let runStage register its interval
+      await started.promise
       const before = (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).updatedAt.getTime()
       await vi.advanceTimersByTimeAsync(30_000)
       await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).updatedAt.getTime() > before)
@@ -546,11 +557,11 @@ describe("review fixes", () => {
 
     it("zombie stage blocks createJob/retryJob/cancelJob for the MID until it settles", async () => {
       const g = deferred()
-      eng.registerKind("install", [{ name: "a", timeoutMs: 1000, run: () => g.promise }])
+      const started = deferred()
+      eng.registerKind("install", [gatedStage("a", g, started, 1000)])
       eng.registerKind("cancel_install", [{ name: "c", run: async () => undefined }])
       const job = await eng.createJob(alice, "install", "m-a", {})
-      await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "running")
-      for (let i = 0; i < 50; i++) await tick()
+      await started.promise
       await vi.advanceTimersByTimeAsync(1000)
       await vi.advanceTimersByTimeAsync(60_000)
       await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "failed")
@@ -568,10 +579,10 @@ describe("review fixes", () => {
 
     it("zombie guard expires after 10 minutes", async () => {
       const g = deferred()
-      eng.registerKind("install", [{ name: "a", timeoutMs: 1000, run: () => g.promise }])
+      const started = deferred()
+      eng.registerKind("install", [gatedStage("a", g, started, 1000)])
       const job = await eng.createJob(alice, "install", "m-a", {})
-      await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "running")
-      for (let i = 0; i < 50; i++) await tick()
+      await started.promise
       await vi.advanceTimersByTimeAsync(61_000)
       await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "failed")
       await eng.__idleForTests()
