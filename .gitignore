@@ -5,3 +5,10 @@ node_modules/
 .env*.local
 *.db
 data/
+.superpowers/
+data/
+*.db
+# generated prisma client / build artifacts
+*.tsbuildinfo
+next-env.d.ts
+/lib/generated/prisma

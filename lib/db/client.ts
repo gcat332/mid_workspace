@@ -1,0 +1,23 @@
+import { PrismaClient } from "@prisma/client"
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3"
+
+const globalForPrisma = globalThis as unknown as { prisma: PrismaClient }
+
+function createPrismaClient(): PrismaClient {
+  const adapter = new PrismaBetterSqlite3({
+    url: process.env.DATABASE_URL ?? "file:./data/dev.db",
+  })
+  return new PrismaClient({ adapter })
+}
+
+export const prisma = globalForPrisma.prisma ?? createPrismaClient()
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma
+
+let pragmasDone = false
+export async function initDbPragmas(): Promise<void> {
+  if (pragmasDone) return
+  await prisma.$executeRawUnsafe("PRAGMA journal_mode = WAL")
+  await prisma.$executeRawUnsafe("PRAGMA busy_timeout = 5000")
+  await prisma.$executeRawUnsafe("PRAGMA synchronous = NORMAL")
+  pragmasDone = true
+}

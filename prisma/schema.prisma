@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  passwordHash     String
+  role             String    @default("member") // admin | member
+  failedLoginCount Int       @default(0)
+  lockedAt         DateTime?
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+}
+
+model IdpConfig {
+  id           String   @id @default(cuid())
+  provider     String   @default("oidc")
+  label        String   @default("SSO")
+  enabled      Boolean  @default(false)
+  issuer       String   @default("")
+  clientId     String   @default("")
+  clientSecret String   @default("")
+  tenantId     String   @default("")
+  redirectUri  String   @default("")
+  scopes       String   @default("openid profile email")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model IpAllowlist {
+  id        String   @id @default(cuid())
+  cidr      String   @unique
+  note      String   @default("")
+  createdAt DateTime @default(now())
+}
+
+// Sign-in audit trail (same shape as AgentHub's AuthEvent).
+model AuthLog {
+  id        String   @id @default(cuid())
+  event     String // login_ok | login_refused | sso_ok | sso_failed | unlocked
+  reason    String   @default("")
+  email     String   @default("")
+  ip        String   @default("")
+  userAgent String   @default("")
+  detail    String   @default("")
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([email])
+}
+
+model Instance {
+  id             String   @id @default(cuid())
+  label          String
+  url            String   @unique
+  midUser        String?
+  midPasswordEnc String?
+  buildstamp     String?
+  createdBy      String
+  createdAt      DateTime @default(now())
+}
+
+model MidServer {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  instanceId  String?
+  dir         String
+  serviceName String
+  heapMb      Int       @default(1024)
+  version     String?
+  state       String    @default("installed")
+  createdBy   String
+  createdAt   DateTime  @default(now())
+  removedAt   DateTime?
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  midId       String
+  kind        String
+  stage       String
+  status      String
+  params      String
+  journalPath String
+  error       String?
+  createdBy   String
+  startedAt   DateTime?
+  finishedAt  DateTime?
+}
+
+model ConfigBackup {
+  id        String   @id @default(cuid())
+  midId     String
+  file      String
+  content   String
+  note      String
+  createdBy String
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id      String   @id @default(cuid())
+  at      DateTime @default(now())
+  userId  String?
+  email   String
+  action  String
+  midName String?
+  detail  String
+}
