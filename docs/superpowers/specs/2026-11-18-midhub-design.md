@@ -70,8 +70,11 @@ MID แต่ละตัว = systemd unit  midhub-mid-<name>.service  รั�
 |---|---|---|
 | `/home/bsmmidhub/midhub` | bsmmidhub | repo checkout = deployment (แบบเดียวกับ AgentHub) |
 | `/opt/midhub/mids/<name>/` | `midsvc:midhub`, setgid, g+rw | โฟลเดอร์ติดตั้ง MID (`<name>/agent/...`) |
-| `/opt/midhub/packages/<buildstamp>.zip` | bsmmidhub | cache ของ installer แยกตามเวอร์ชัน |
-| `/opt/midhub/archive/` | bsmmidhub | archive ตอน uninstall และ backup ก่อน upgrade |
+| `/opt/midhub/packages/<buildstamp>.zip` | bsmmidhub | cache ของ installer แยกตามเวอร์ชัน (เก็บเฉพาะเวอร์ชันที่ยังมี MID ใช้ ดู 8.1) |
+| `/opt/midhub/archive/` | bsmmidhub | archive ตอน uninstall และ backup ก่อน upgrade (เก็บเฉพาะไฟล์ที่แก้ได้ ดู 8.1) |
+| `/opt/midhub/db/` | bsmmidhub 0750 | SQLite ของ MidHub (ย้ายออกจาก repo ตอน deploy Phase 1) |
+| `/opt/midhub/jobs/<jobId>.jsonl` | bsmmidhub 0750 | journal ของ job (Phase 2) |
+| `/opt/midhub/releases/<buildstamp>/` | root, อ่านอย่างเดียว | release ที่แชร์ระหว่าง MID ด้วย hardlink (Phase 2b, ดู 8.1) |
 | `/run/midhub/helper.sock` | `root:bsmmidhub` 0660 | socket ของ helper |
 
 - user `bsmmidhub` อยู่ใน group `midhub` เพื่ออ่านและเขียนไฟล์ของ MID ได้โดยไม่ต้องใช้ root
@@ -94,7 +97,7 @@ MID แต่ละตัว = systemd unit  midhub-mid-<name>.service  รั�
 
 - `User=midsvc`, `MemoryMax = heapMb + 512M`, `Restart=on-failure`
 - **หลัง host reboot ให้เปิดเฉพาะ MID ที่รันอยู่ก่อน reboot** โดยสั่ง `systemctl enable` ตอน start และ `disable` ตอนผู้ใช้กด stop จำนวนที่เปิดอัตโนมัติจึงไม่เกิน 4 ตัวตามโควต้าอยู่แล้ว [ผู้ออกแบบ]
-- ExecStart ให้รัน wrapper ของ MID แบบ foreground [spike: ยืนยันชื่อ script และ argument เช่น `agent/bin/mid.sh console` และเช็คว่า auto-upgrade ของ MID ยังทำงานได้เมื่อ systemd เป็นผู้คุม process]
+- ExecStart = `agent/bin/mid.sh console` (Tanuki wrapper แบบ foreground) และ `UMask=0002` — **ยืนยันจาก spike 2026-11-18** (`docs/spike-mid-linux.md`): รันเป็น midsvc ได้, stop ด้วย SIGTERM ปิดเรียบร้อยใน ~5 วินาที ส่วน auto-upgrade ของ MID ใต้ systemd ยังไม่ได้ทดสอบ (ต้องรอ instance upgrade)
 - heap เริ่มต้น 1024 MB ตั้งผ่าน `wrapper-override.conf` [ผู้ออกแบบ]
 - ข้อสังเกตเรื่อง RAM: 4 × (1 GB + 0.5 GB) + AgentHub สูงสุด 6 GB เกิน RAM จริง แต่ปกติไม่ได้ใช้ถึงเพดานพร้อมกัน ให้ dashboard แสดง RAM ทั้งเครื่องและเตือนเมื่อ RAM ว่างต่ำกว่า 1 GB ก่อนสั่ง start
 
@@ -114,7 +117,7 @@ MID แต่ละตัว = systemd unit  midhub-mid-<name>.service  รั�
 ### 5.2 Wizard สร้าง MID [ผู้ใช้เลือกแบบ B ทีละขั้น]
 
 1. **Instance**: เลือกจาก demo instance ที่บันทึกไว้ หรือเพิ่มใหม่ (URL + MID user/password) แล้วกด **ทดสอบการเชื่อมต่อ** ต้องผ่านก่อนจึงไปต่อได้ ทดสอบโดยเรียก REST ด้วย user นั้น และถ้าตรวจได้ ให้ดึงเวอร์ชัน/buildstamp ของ instance มาเก็บไว้ด้วย
-2. **ตั้งค่า**: ชื่อ MID (ตรวจรูปแบบและไม่ซ้ำแบบ real-time) และตัวเลือก "Clone จาก MID ที่มีอยู่" ซึ่งคัดลอก `config.xml` (ยกเว้นชื่อ/credential), `wrapper-override.conf`, `extlib/` และ keystore ส่วน "ตั้งค่าขั้นสูง" ซ่อนไว้ (proxy, heap)
+2. **ตั้งค่า**: ชื่อ MID (ตรวจรูปแบบและไม่ซ้ำแบบ real-time) และตัวเลือก "Clone จาก MID ที่มีอยู่" ซึ่งคัดลอก `config.xml` (ยกเว้น url/ชื่อ/credential/`mid_sys_id`), `wrapper-override.conf` และ `extlib/` — **ไม่คัดลอก `agent/security/agent_keystore`** เพราะ spike พบว่า MID สร้างไฟล์นี้เองตอน start ครั้งแรกเป็นตัวตน/กุญแจเข้ารหัสของ MID แต่ละตัว ถ้าคัดลอกจะได้ MID สองตัวที่ใช้กุญแจเดียวกัน [ผู้ออกแบบ] ส่วน "ตั้งค่าขั้นสูง" ซ่อนไว้ (proxy, heap, จำนวนไฟล์ log)
 3. **ตรวจสอบ**: สรุปค่าที่กรอก, เช็ค disk ว่าง (≥ 2 GB), เช็คโควต้า 4 ตัว และเช็ค RAM ว่าง
 4. **ติดตั้ง**: แสดง progress รายขั้นพร้อม log สด ปิดหน้าไปแล้วกลับมาก็ยังตามต่อได้ เมื่อเสร็จ ให้บอกขั้นต่อไปให้ชัด เช่น "ไป Validate MID ใน instance" พร้อมลิงก์
 
@@ -174,20 +177,51 @@ MID แต่ละตัว = systemd unit  midhub-mid-<name>.service  รั�
 
 **Install / Clone**
 `precheck → fetchPackage → extract → configure → (clone: copyFiles) → fixOwnership → installUnit → start → waitConnected`
-- `fetchPackage`: ดาวน์โหลด Linux MID package ที่ตรงกับ buildstamp ของ instance แล้ว cache ไว้ ถ้าไม่มี internet หรือหาไม่เจอ ให้ผู้ใช้ upload zip เองแทน [spike: หา URL หรือ API ที่ได้ link ดาวน์โหลดจาก instance และเช็คว่า host ออก internet ได้หรือไม่]
-- `configure`: เขียน `config.xml` (url, mid.instance.username/password, name, proxy) และ `wrapper-override.conf` เองโดยตรง ไม่ใช้ installer แบบ interactive [spike: ยืนยันว่าแค่ไฟล์เหล่านี้กับ unit ของเราเพียงพอ หรือต้องใช้ `installer.sh -silent`]
-- `waitConnected`: รอจนใน log เห็นว่าเชื่อมต่อ instance ได้ (timeout 5 นาที) [spike: ข้อความใน log ที่ใช้ตรวจ]
+- `fetchPackage`: ดาวน์โหลด Linux MID package ที่ตรงกับ buildstamp ของ instance แล้ว cache ไว้ที่ `packages/<buildstamp>.zip` — **จาก spike**: host ออก `install.service-now.com:443` ได้ และ URL คือ `https://install.service-now.com/glide/distribution/builds/package/app-signed/mid/<YYYY>/<MM>/<DD>/mid.<buildstamp>.linux.x86-64.zip` โดย `<YYYY>/<MM>/<DD>` มาจากวันที่ชุดสุดท้าย (`MM-DD-YYYY`) ใน buildstamp และ buildstamp อ่านจาก `sys_properties.glide.war` (ตัด `glide-` และ `.zip`) [spike ✅]
+  - ถ้าอ่าน buildstamp จาก instance ไม่ได้ (เช่น user ที่มีแค่ role `mid_server` อ่าน `sys_properties` ไม่ได้) ให้ wizard เลือกจาก package ที่ cache ไว้ หรือให้กรอก buildstamp เอง (ตรวจรูปแบบ) **ตัดการ upload zip เองออกจาก v1** เพราะ host ออก internet ได้ และ zip ใหญ่ ~490 MB เกินที่ผ่าน proxy ได้ [ผู้ออกแบบ]
+- `extract`: แตก zip เป็น user ของแอป (bsmmidhub, group midhub) ลง `mids/<name>/` แล้วให้ helper `fixOwnership` เปลี่ยนเป็น `midsvc:midhub` — **จาก spike**: ไม่ต้องใช้ `installer.sh`/`configure.sh` เลย (installer ใช้แค่ sed แก้ config.xml แล้วสร้าง service ของตัวเอง ซึ่งเราไม่ต้องการ) ตรวจ entry ใน zip ก่อนแตก: ห้ามมี path ที่ออกนอกปลายทาง และห้ามมี symlink [spike ✅]
+- `configure`: เขียน `config.xml` (url, mid.instance.username/password, name, proxy) ด้วย `setParams`, heap ใน `wrapper-override.conf` และค่าจำนวนไฟล์ log (ดู 8.1) เองโดยตรง — proxy ใน template อยู่ในคอมเมนต์ จึงต้อง append element ใหม่ [spike ✅]
+- `waitConnected`: รอจนใน `agent/logs/agent0.log.0` มีบรรทัด `MID Server is connected to instance host:` ที่เกิด **หลัง** เวลาที่สั่ง start (timeout 5 นาที) [spike ✅]
 - ถ้าล้มเหลว: หยุดที่ stage นั้น แสดงสาเหตุและปุ่ม "ลองใหม่" (ทำต่อจาก stage เดิม) หรือ "ยกเลิกและลบ"
 
 **Upgrade (ด้วยมือ)**
 `precheck → fetchPackage → stop → backup(tar.gz) → extractToTemp → carryOver → swap → start → waitConnected` ถ้าล้มเหลวหลัง `swap` ให้ **rollback อัตโนมัติ** จาก backup แล้ว start ตัวเดิม
-- `carryOver`: `config.xml`, `wrapper-override.conf`, `extlib/`, keystore และไฟล์ที่ผู้ใช้เพิ่มเอง [spike: รายการไฟล์ที่ต้องพาไปให้ครบ]
+- `carryOver`: `config.xml`, `conf/wrapper-override.conf`, `extlib/`, `security/` (มี `agent_keystore` ที่ MID สร้างเอง) และไฟล์ที่ผู้ใช้เพิ่มเอง [spike: รายการเบื้องต้นจากสิ่งที่ MID สร้าง ยังต้องยืนยันกับ upgrade จริง]
 - auto-upgrade ปกติของ MID ยังเปิดอยู่ หน้าภาพรวมจะเตือนเมื่อเวอร์ชันไม่ตรงกับ instance เกิน 30 นาที [ผู้ออกแบบ]
 
 **Uninstall** (Admin เท่านั้น)
 `confirm(พิมพ์ชื่อ) → stop → removeUnit → archive(tar.gz ไป /opt/midhub/archive) → deleteDir → mark removed`
-- เก็บ archive 30 วันแล้วลบอัตโนมัติ [ผู้ออกแบบ]
+- archive เก็บเฉพาะไฟล์ที่แก้ได้ (ดู 8.1) และเก็บ 30 วันแล้วลบอัตโนมัติ [ผู้ออกแบบ]
 - ไม่ลบ record ของ MID ในฝั่ง instance (ต้องใช้สิทธิ์ admin ของ instance) แต่แสดงลิงก์ให้ไปลบเองพร้อมข้อความเตือน [ผู้ออกแบบ]
+- "ยกเลิกและลบ" ของ install ที่ล้มเหลวใช้ขั้นตอนเดียวกันแต่ไม่ทำ archive และ Member ที่สร้าง job นั้นกดเองได้ (เพราะ MID ยังไม่เคยใช้งาน) [ผู้ออกแบบ]
+
+### 8.1 การประหยัดพื้นที่ดิสก์ [ผู้ใช้ขอ · ผู้ออกแบบเสนอ]
+
+วัดจาก MID จริงตอน spike (build australia patch 7):
+
+| ส่วน | ขนาด |
+|---|---|
+| `agent/lib` | 431 MB |
+| `agent/jre` | 107 MB |
+| ส่วนอื่นตอนติดตั้งใหม่ | ~5 MB |
+| log สูงสุดตามค่า default (agent + security + wrapper อย่างละ 10 × 10 MB) | ~300 MB |
+| **รวมต่อ MID** | **~540 MB ตอนติดตั้ง, สูงสุด ~850 MB** |
+| zip ต่อเวอร์ชัน | ~470 MB |
+
+ข้อจำกัด: root fs เป็น ext4 (ไม่มี reflink) และ LVM ไม่มีพื้นที่ว่าง (VFree 0) จึงทำ volume XFS/btrfs แยกไม่ได้ถ้าไม่เพิ่มดิสก์
+
+**ทำใน Phase 2**
+1. **archive/backup เฉพาะไฟล์ที่แก้ได้**: `agent/config.xml`, `agent/conf/`, `agent/extlib/`, `agent/security/`, `agent/properties/`, `agent/logs/` — ไม่เก็บ `lib/`, `jre/`, `bin/` เพราะดึงจาก package ได้ (archive จาก ~500 MB เหลือไม่กี่ MB)
+2. **จำกัดจำนวนไฟล์ log ตั้งแต่ติดตั้ง** (ค่าเริ่มต้น 3, ปรับได้ 1–10 ใน "ตั้งค่าขั้นสูง"): `wrapper.logfile.maxfiles` ใน `conf/wrapper-override.conf` และ `com.service_now.mid.logging.MIDLogFileHandler.count` / `SecurityLogFileHandler.count` ใน `agent/properties/glide.properties` (log สูงสุด ~300 → ~90 MB ต่อ MID)
+3. **เก็บ package เฉพาะเวอร์ชันที่ยังมี MID (ที่ยังไม่ถูกลบ) หรือ job ที่ค้างอยู่ใช้** ลบที่เหลือหลัง install/uninstall สำเร็จ และตอน boot
+4. แสดงพื้นที่ที่ MidHub ใช้ (`/opt/midhub` แยก mids/packages/archive) และพื้นที่ว่างที่ top bar, precheck ยังต้องการ ≥ 2 GB
+
+**Phase 2b (หลัง spike ทดสอบ auto-upgrade ผ่าน)**
+5. **แชร์ release ด้วย hardlink**: แตก package ครั้งเดียวที่ `/opt/midhub/releases/<buildstamp>/` (root, อ่านอย่างเดียว) แล้วให้ helper op ใหม่ `linkRelease(name, buildstamp)` สร้าง hardlink ของ `agent/lib`, `agent/jre`, `agent/bin` เข้า MID (ไฟล์อื่น copy จริง) — MID ตัวที่ 2 เป็นต้นไปของ build เดียวกันใช้ ~10 MB + log แทน ~540 MB และ hardlink เป็นไฟล์ปกติภายในโฟลเดอร์ MID จึงไม่ชน sandbox ของแท็บไฟล์ (symlink จะชน)
+   - เงื่อนไข: ต้องยืนยันว่า auto-upgrade ของ MID **แทนที่ไฟล์** (ได้ inode ใหม่ → hardlink แยกเอง) ไม่ใช่เขียนทับในที่เดิม ถ้าเขียนทับจะล้มเพราะไฟล์เป็นของ root → ทางสำรองคือปิด auto-upgrade แล้วใช้ upgrade ของ MidHub (Phase 3)
+   - เปิดด้วย env `MIDHUB_SHARED_RELEASES=1` (ค่าเริ่มต้นปิด)
+
+**ไม่ทำ**: overlayfs (ต้อง mount ต่อ MID ทุกครั้งที่ start ซับซ้อนเกินคุ้มใน v1), ลบ jar ใน `lib/` ที่ดูไม่จำเป็น (ไม่ supported และ upgrade จะใส่กลับ)
 
 ## 9. Deploy [ผู้ออกแบบ]
 
@@ -201,7 +235,8 @@ MID แต่ละตัว = systemd unit  midhub-mid-<name>.service  รั�
 
 0. **Spike บนเครื่องจริง** (ทำด้วยมือ ไม่ต้องเขียนโค้ด): ติดตั้ง MID 1 ตัวโดยเขียนไฟล์ config เองและใช้ systemd unit ของเรา แล้วตอบทุกข้อที่มีป้าย [spike] ในเอกสารนี้ บันทึกผลลง `docs/spike-mid-linux.md`
 1. **แกนหลัก**: auth (local + SSO + users + IP allowlist), layout หน้าหลัก, helper (start/stop/restart + โควต้า), รายการและสถานะ, แท็บตั้งค่า, ไฟล์ และ Log, audit log ในช่วงนี้ให้ import MID ที่ติดตั้งด้วยมือจาก spike เข้ามาใช้ทดสอบ
-2. **วงจรชีวิต**: instance ที่บันทึกไว้, wizard install/clone, job engine และ uninstall
+2. **วงจรชีวิต**: instance ที่บันทึกไว้, wizard install/clone, job engine และ uninstall รวมการประหยัดดิสก์ข้อ 1–4 ใน 8.1
+   - 2b. แชร์ release ด้วย hardlink (8.1 ข้อ 5) หลังทดสอบ auto-upgrade
 3. **Upgrade**: เทียบเวอร์ชัน, manual upgrade และ rollback
 
 ## 11. เรื่องที่ให้ผู้ build ตัดสินใจเอง
