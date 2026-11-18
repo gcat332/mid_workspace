@@ -20,7 +20,7 @@ export type HostView = {
   running: number
   quotaUsed: number
   maxRunning: number
-  disk?: { freeBytes: number; totalBytes: number; usage: { mids: number; packages: number; archive: number } | null }
+  disk?: { freeBytes: number | null; totalBytes: number | null; usage: { mids: number; packages: number; archive: number } | null }
 }
 
 export type StatusView = { icon: "🟢" | "⚪" | "🟡" | "🔴"; label: string }

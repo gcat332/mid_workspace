@@ -34,3 +34,12 @@ it("returns memory, running, quotaUsed and maxRunning", async () => {
   expect(res.status).toBe(200)
   expect(await res.json()).toEqual({ totalBytes: 8000, availableBytes: 3000, running: 2, quotaUsed: 3, maxRunning: 4, disk })
 })
+
+it("still returns RAM/slots with disk null when disk status is degraded", async () => {
+  const { diskStatus } = await import("@/lib/mids/packages")
+  vi.mocked(diskStatus).mockRejectedValueOnce(new Error("boom"))
+  const { GET } = await import("./route")
+  const res = await GET()
+  expect(res.status).toBe(200)
+  expect(await res.json()).toMatchObject({ totalBytes: 8000, running: 2, disk: null })
+})

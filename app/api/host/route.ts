@@ -8,7 +8,7 @@ import { readHostMemory, readSlotUsage } from "@/lib/mids/status"
 export async function GET() {
   try {
     await requireUser()
-    const [mem, slots, disk] = await Promise.all([readHostMemory(), readSlotUsage(), diskStatus()])
+    const [mem, slots, disk] = await Promise.all([readHostMemory(), readSlotUsage(), diskStatus().catch(() => null)])
     return NextResponse.json({ ...mem, running: slots.running, quotaUsed: slots.quotaUsed, maxRunning: env.maxRunning, disk })
   } catch (e) {
     return handleRouteError(e)

@@ -26,7 +26,7 @@ export function DashboardToolbar({ host, mids, onImport }: Props) {
             {q.text}
           </span>
           <span className="min-w-0 text-sm text-gray-700">RAM: MID ใช้ {formatBytes(midRam)} / ทั้งเครื่อง {formatBytes(host.totalBytes)} (ว่าง {formatBytes(host.availableBytes)})</span>
-          {host.disk && (
+          {host.disk && host.disk.freeBytes !== null && (
             <span
               title={host.disk.usage ? `MID ${formatBytes(host.disk.usage.mids)} · แพ็กเกจ ${formatBytes(host.disk.usage.packages)} · archive ${formatBytes(host.disk.usage.archive)}` : "ไม่สามารถอ่านการใช้พื้นที่แยกตามโฟลเดอร์ได้"}
               className={`rounded-full px-3 py-1 text-sm font-medium ${host.disk.freeBytes < MIN_FREE_BYTES ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}`}

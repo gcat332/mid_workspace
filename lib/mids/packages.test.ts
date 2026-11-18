@@ -4,7 +4,13 @@ import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { afterAll, beforeAll, beforeEach, expect, it } from "vitest"
+import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest"
+
+const duHook = vi.hoisted(() => ({ fn: null as null | ((real: (...a: unknown[]) => unknown, args: unknown[]) => unknown) }))
+vi.mock("node:child_process", async (orig) => {
+  const real = await orig<typeof import("node:child_process")>()
+  return { ...real, execFile: (...a: unknown[]) => (duHook.fn ? duHook.fn(real.execFile as never, a) : (real.execFile as never as (...x: unknown[]) => unknown)(...a)) }
+})
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "midhub-pkg-"))
 const root = path.join(dir, "root")
@@ -18,7 +24,7 @@ const BS4 = "australia-02-11-2026__patch4-10-10-2026_10-12-2026_0100"
 const body = Buffer.alloc(300_000, 7)
 
 let hits = 0
-let mode: "ok" | "short" | "404" | "slow" | "redirect-bad" = "ok"
+let mode: "ok" | "short" | "404" | "slow" | "slow-once" | "redirect-bad" | "redirect-apex" | "redirect-port" = "ok"
 let server: http.Server
 let base: string
 const urlFor = (b: string) => `${base}/${b}.zip`
@@ -29,6 +35,9 @@ beforeAll(async () => {
     hits++
     if (mode === "404") { res.writeHead(404).end(); return }
     if (mode === "redirect-bad") { res.writeHead(302, { location: "http://127.0.0.1:1/x" }).end(); return }
+    if (mode === "redirect-apex") { res.writeHead(302, { location: "https://service-now.com/x" }).end(); return }
+    if (mode === "redirect-port") { res.writeHead(302, { location: "https://a.service-now.com:8443/x" }).end(); return }
+    if (mode === "slow-once") { if (hits === 1) { res.writeHead(200, { "content-length": String(body.length) }); res.write(body.subarray(0, 10)); return } }
     if (mode === "short") { res.writeHead(200, { "content-length": String(body.length) }); res.write(body.subarray(0, 1000)); setTimeout(() => res.destroy(), 20); return }
     if (mode === "slow") { res.writeHead(200, { "content-length": String(body.length) }); res.write(body.subarray(0, 10)); return }
     res.writeHead(200, { "content-length": String(body.length) })
@@ -48,7 +57,9 @@ beforeEach(() => {
   hits = 0
   mode = "ok"
   fs.rmSync(path.join(root, "packages"), { recursive: true, force: true })
-  delete (globalThis as Record<string, unknown>).__midhubDiskCache
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("midhub.packages.du")]
+  duHook.fn = null
+  server?.closeAllConnections()
 })
 
 const pkgDir = () => path.join(root, "packages")
@@ -148,15 +159,116 @@ it("gcPackages never deletes a package being downloaded", async () => {
   await pr
 })
 
-it("diskStatus reports free/total and du usage (0 for missing dirs), cached", async () => {
+const until = async <T>(f: () => Promise<T | null>): Promise<T> => {
+  for (let i = 0; i < 100; i++) {
+    const v = await f()
+    if (v) return v
+    await new Promise((r) => setTimeout(r, 30))
+  }
+  throw new Error("until")
+}
+
+it("diskStatus: cold cache returns statfs at once with usage null, refreshes in background, then caches", async () => {
   const { diskStatus } = await import("./packages")
   fs.mkdirSync(path.join(root, "mids"), { recursive: true })
   fs.writeFileSync(path.join(root, "mids", "f"), Buffer.alloc(50_000))
-  const d = await diskStatus()
-  expect(d.freeBytes).toBeGreaterThan(0)
-  expect(d.totalBytes).toBeGreaterThanOrEqual(d.freeBytes)
-  expect(d.usage!.mids).toBeGreaterThanOrEqual(50_000)
-  expect(d.usage!.archive).toBe(0)
+  const first = await diskStatus()
+  expect(first.freeBytes).toBeGreaterThan(0)
+  expect(first.totalBytes).toBeGreaterThanOrEqual(first.freeBytes!)
+  expect(first.usage).toBeNull()
+  const d = await until(async () => (await diskStatus()).usage)
+  expect(d.mids).toBeGreaterThanOrEqual(50_000)
+  expect(d.archive).toBe(0)
   fs.writeFileSync(path.join(root, "mids", "g"), Buffer.alloc(500_000))
-  expect((await diskStatus()).usage!.mids).toBe(d.usage!.mids)
+  expect((await diskStatus()).usage!.mids).toBe(d.mids)
+})
+
+it("a slow du does not delay diskStatus and is not spawned twice concurrently", async () => {
+  const { diskStatus } = await import("./packages")
+  fs.mkdirSync(path.join(root, "mids"), { recursive: true })
+  let running = 0
+  let maxRunning = 0
+  let spawned = 0
+  duHook.fn = (real, args) => {
+    spawned++
+    running++
+    maxRunning = Math.max(maxRunning, running)
+    const cb = args[args.length - 1] as (...x: unknown[]) => void
+    setTimeout(() => (real as (...x: unknown[]) => unknown)(...args.slice(0, -1), (...r: unknown[]) => { running--; cb(...r) }), 500)
+    return undefined
+  }
+  const t0 = Date.now()
+  const rs = await Promise.all([diskStatus(), diskStatus(), diskStatus()])
+  expect(Date.now() - t0).toBeLessThan(300)
+  expect(rs.every((r) => r.usage === null && r.freeBytes! > 0)).toBe(true)
+  await diskStatus()
+  expect(spawned).toBe(1) // only "mids" exists; one du, shared by all callers
+  expect(maxRunning).toBe(1)
+  await until(async () => (await diskStatus()).usage)
+})
+
+it("waiter aborting rejects promptly while the owner keeps downloading", async () => {
+  mode = "slow"
+  const { ensurePackage } = await import("./packages")
+  const owner = ensurePackage(BS, { urlFor }).catch((e) => e)
+  await new Promise((r) => setTimeout(r, 80))
+  const ac = new AbortController()
+  const w = ensurePackage(BS, { urlFor, signal: ac.signal })
+  setTimeout(() => ac.abort(new Error("cancelled")), 50)
+  const t0 = Date.now()
+  await expect(w).rejects.toThrow("cancelled")
+  expect(Date.now() - t0).toBeLessThan(1000)
+  expect(fs.existsSync(path.join(pkgDir(), `${BS}.zip.part`))).toBe(true) // owner still going
+  expect(hits).toBe(1)
+  server.closeAllConnections()
+  await owner
+})
+
+it("owner aborting hands the download to a live waiter, which completes", async () => {
+  mode = "slow-once"
+  const { ensurePackage, packagePath } = await import("./packages")
+  const oc = new AbortController()
+  const owner = ensurePackage(BS, { urlFor, signal: oc.signal })
+  const ownerRes = owner.catch((e) => e)
+  await new Promise((r) => setTimeout(r, 80))
+  const w = ensurePackage(BS, { urlFor })
+  setTimeout(() => oc.abort(new Error("owner-cancelled")), 50)
+  expect(((await ownerRes) as Error).message).toBe("owner-cancelled")
+  expect(await w).toBe(packagePath(BS))
+  expect(fs.readFileSync(packagePath(BS)).equals(body)).toBe(true)
+})
+
+it("a waiter receives progress callbacks", async () => {
+  const { ensurePackage } = await import("./packages")
+  const owner = ensurePackage(BS, { urlFor })
+  const seen: number[] = []
+  await ensurePackage(BS, { urlFor, onProgress: (d) => seen.push(d) })
+  await owner
+  expect(seen.at(-1)).toBe(body.length)
+})
+
+it("redirects to the apex domain or a non-default port are rejected", async () => {
+  const { ensurePackage } = await import("./packages")
+  mode = "redirect-apex"
+  await expect(ensurePackage(BS, { urlFor })).rejects.toMatchObject({ code: "package_download" })
+  mode = "redirect-port"
+  await expect(ensurePackage(BS, { urlFor })).rejects.toMatchObject({ code: "package_download" })
+})
+
+it("a final path that is a symlink is not treated as a cached package", async () => {
+  const { ensurePackage, packagePath } = await import("./packages")
+  fs.mkdirSync(pkgDir(), { recursive: true })
+  fs.writeFileSync(path.join(dir, "elsewhere"), "x")
+  fs.symlinkSync(path.join(dir, "elsewhere"), packagePath(BS))
+  await ensurePackage(BS, { urlFor })
+  expect(hits).toBe(1)
+})
+
+it("gcPackages continues after a per-entry rm failure", async () => {
+  const { gcPackages, packagePath } = await import("./packages")
+  fs.mkdirSync(pkgDir(), { recursive: true })
+  fs.mkdirSync(packagePath(BS2) + ".part") // rm without recursive fails on a directory
+  fs.utimesSync(packagePath(BS2) + ".part", new Date(0), new Date(0))
+  fs.writeFileSync(packagePath(BS3), "z")
+  expect(await gcPackages()).toEqual([`${BS3}.zip`])
 })
