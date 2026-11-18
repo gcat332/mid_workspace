@@ -1,4 +1,5 @@
 import { cookies } from "next/headers"
+import { prisma } from "@/lib/db/client"
 import { verifyToken, SESSION_COOKIE, type SessionPayload } from "@/lib/auth/jwt"
 
 const jsonResponse = (error: string, status: number): Response =>
@@ -7,7 +8,18 @@ const jsonResponse = (error: string, status: number): Response =>
 export async function getSessionUser(): Promise<SessionPayload | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value
   if (!token) return null
-  return verifyToken(token)
+  const claims = await verifyToken(token)
+  if (!claims) return null
+  // The JWT only proves who signed in; role and standing come from the DB so a delete, lock,
+  // demote or password reset takes effect immediately rather than when the token expires.
+  const user = await prisma.user.findUnique({
+    where: { id: claims.userId },
+    select: { email: true, role: true, lockedAt: true, sessionsValidAfter: true },
+  })
+  if (!user || user.lockedAt) return null
+  if (user.sessionsValidAfter && (claims.authAt ?? 0) < Math.floor(user.sessionsValidAfter.getTime() / 1000)) return null
+  const role = user.role === "admin" ? "admin" : "member"
+  return { userId: claims.userId, email: user.email, role, authAt: claims.authAt }
 }
 
 /** Throws a 401 Response when not signed in. Callers: `catch (e) { return responseOrRethrow(e) }`. */

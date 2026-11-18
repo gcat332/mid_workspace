@@ -11,7 +11,9 @@ const create = vi.fn(async ({ data, select }: Args) => pick({ id: "u3", lockedAt
 const update = vi.fn(async ({ data, select }: Args) => pick({ ...row, ...data }, select))
 const del = vi.fn(async () => row)
 const count = vi.fn(async () => 2)
-vi.mock("@/lib/db/client", () => ({ prisma: { user: { findMany, findUnique, create, update, delete: del, count } } }))
+const userModel = { findMany, findUnique, create, update, delete: del, count }
+const transaction = vi.fn(async (fn: (tx: { user: typeof userModel }) => unknown) => fn({ user: userModel }))
+vi.mock("@/lib/db/client", () => ({ prisma: { user: userModel, $transaction: transaction } }))
 
 let role: "admin" | "member" | null = "admin"
 vi.mock("@/lib/auth/helpers", async (orig) => ({
@@ -25,7 +27,7 @@ vi.mock("@/lib/auth/helpers", async (orig) => ({
 
 beforeEach(() => {
   role = "admin"
-  for (const m of [create, update, del, findUnique, count]) m.mockClear()
+  for (const m of [create, update, del, findUnique, count, transaction]) m.mockClear()
   findUnique.mockResolvedValue(null); count.mockResolvedValue(2)
 })
 
@@ -137,4 +139,48 @@ it("can delete or demote an admin when another admin remains", async () => {
   expect((await PATCH(json("PATCH", { role: "member" }), ctx("u9"))).status).toBe(200)
   expect((await DELETE(json("DELETE"), ctx("u9"))).status).toBe(200)
   expect(del).toHaveBeenCalledWith({ where: { id: "u9" } })
+})
+
+it("PATCH {unlock:true} alone clears the lock only", async () => {
+  const { PATCH } = await import("./[id]/route")
+  findUnique.mockResolvedValue({ id: "u2", role: "member" })
+  expect((await PATCH(json("PATCH", { unlock: true }), ctx("u2"))).status).toBe(200)
+  expect(update.mock.calls[0][0].data).toEqual({ lockedAt: null, failedLoginCount: 0 })
+})
+
+it("PATCH rejects an invalid role and an empty body", async () => {
+  const { PATCH } = await import("./[id]/route")
+  expect((await PATCH(json("PATCH", { role: "root" }), ctx("u2"))).status).toBe(400)
+  expect((await PATCH(json("PATCH", {}), ctx("u2"))).status).toBe(400)
+  expect(update).not.toHaveBeenCalled()
+})
+
+it("POST with password:\"\" is SSO-only", async () => {
+  const { POST } = await import("./route")
+  expect((await POST(json("POST", { email: "s@x.com", role: "member", password: "" }))).status).toBe(201)
+  expect(String(create.mock.calls[0][0].data.passwordHash)).toMatch(/^\$2[aby]\$/)
+})
+
+it("password reset for another user ends their sessions; self reset does not", async () => {
+  const { PATCH } = await import("./[id]/route")
+  findUnique.mockResolvedValue({ id: "u2", role: "member" })
+  await PATCH(json("PATCH", { password: "newpassword" }), ctx("u2"))
+  expect(update.mock.calls[0][0].data.sessionsValidAfter).toBeInstanceOf(Date)
+  await PATCH(json("PATCH", { password: "newpassword" }), ctx("u1"))
+  expect(update.mock.calls[1][0].data.sessionsValidAfter).toBeUndefined()
+})
+
+it("the last-admin check and the write run inside one transaction", async () => {
+  const { PATCH, DELETE } = await import("./[id]/route")
+  findUnique.mockResolvedValue({ id: "u9", role: "admin" })
+  await PATCH(json("PATCH", { role: "member" }), ctx("u9"))
+  await DELETE(json("DELETE"), ctx("u9"))
+  expect(transaction).toHaveBeenCalledTimes(2)
+  // Neither guard may touch the DB outside the transaction callback.
+  transaction.mockClear(); count.mockClear(); findUnique.mockClear()
+  transaction.mockImplementationOnce(async () => "last-admin" as never)
+  const res = await DELETE(json("DELETE"), ctx("u9"))
+  expect(res.status).toBe(400)
+  expect(count).not.toHaveBeenCalled()
+  expect(findUnique).not.toHaveBeenCalled()
 })

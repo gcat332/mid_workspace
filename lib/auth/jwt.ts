@@ -8,6 +8,8 @@ export interface SessionPayload {
   userId: string
   email: string
   role: "admin" | "member"
+  /** Login time (epoch seconds). Preserved across sliding refreshes so a refresh cannot launder an old session. */
+  authAt?: number
 }
 
 export const SESSION_COOKIE = "midhub_session"
@@ -16,7 +18,7 @@ export const SESSION_TOKEN_ISSUER = "bsm-midhub/session"
 export const IDLE_TIMEOUT_SECONDS = 4 * 60 * 60
 
 export async function signToken(payload: SessionPayload): Promise<string> {
-  return new jose.SignJWT({ ...payload })
+  return new jose.SignJWT({ ...payload, authAt: payload.authAt ?? Math.floor(Date.now() / 1000) })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuer(SESSION_TOKEN_ISSUER)
     .setIssuedAt()
@@ -39,7 +41,8 @@ export async function verifyToken(token: string): Promise<SessionPayload | null>
     ) {
       return null
     }
-    return { userId: payload.userId, email: payload.email, role: payload.role }
+    const authAt = typeof payload.authAt === "number" ? payload.authAt : (payload.iat ?? 0)
+    return { userId: payload.userId, email: payload.email, role: payload.role, authAt }
   } catch {
     return null
   }

@@ -9,9 +9,12 @@ import { isAllowed, clientIpFrom } from "@/lib/net/ip-allowlist"
 // request.nextUrl.pathname excludes basePath ("/midhub"), so these are basePath-relative.
 const PUBLIC_PATHS = new Set(["/login", "/api/auth/login", "/api/auth/idp", "/api/auth/oidc/start", "/api/auth/oidc/callback"])
 
+// This gate is JWT-only (it runs on the edge, no DB). Revocation (deleted/locked/demoted user, password
+// reset) is enforced by getSessionUser()/require*() in lib/auth/helpers.ts, which every API route and
+// admin page goes through. authAt is carried over so sliding never extends a revoked session's validity.
 // Re-mint the session cookie so its 4 h idle lifetime slides forward on every authenticated request.
 async function slideSession(res: NextResponse, payload: SessionPayload): Promise<void> {
-  const token = await signToken({ userId: payload.userId, email: payload.email, role: payload.role })
+  const token = await signToken({ userId: payload.userId, email: payload.email, role: payload.role, authAt: payload.authAt })
   res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions())
 }
 

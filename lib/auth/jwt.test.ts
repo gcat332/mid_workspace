@@ -10,7 +10,7 @@ describe("jwt", () => {
   const p = { userId: "u1", email: "a@b.c", role: "admin" as const }
 
   it("round-trips a session payload", async () => {
-    expect(await verifyToken(await signToken(p))).toEqual(p)
+    expect(await verifyToken(await signToken(p))).toMatchObject(p)
   })
   it("rejects a foreign issuer", async () => {
     expect(await verifyToken(await sign(p, "ai-workspace/session"))).toBeNull()

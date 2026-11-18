@@ -22,6 +22,8 @@ export function UsersManager({ myId }: { myId: string }) {
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<"admin" | "member">("member")
   const [password, setPassword] = useState("")
+  const [pwTarget, setPwTarget] = useState<User | null>(null)
+  const [newPw, setNewPw] = useState("")
   const [err, setErr] = useState("")
   const [reload, setReload] = useState(0)
   const load = () => setReload((n) => n + 1)
@@ -55,10 +57,11 @@ export function UsersManager({ myId }: { myId: string }) {
   }
   const patch = (u: User, body: unknown, fallback: string) => call(`${API}/${u.id}`, json("PATCH", body), fallback)
 
-  async function setPw(u: User) {
-    const pw = window.prompt(`ตั้งรหัสผ่านใหม่ให้ ${u.email} (อย่างน้อย 8 ตัวอักษร)`)
-    if (!pw) return
-    await patch(u, { password: pw }, "ตั้งรหัสผ่านไม่สำเร็จ เซิร์ฟเวอร์ขัดข้อง กรุณาลองใหม่อีกครั้ง")
+  async function submitPw() {
+    if (!pwTarget) return
+    if (newPw.length < 8) { setErr("รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร"); return }
+    const ok = await patch(pwTarget, { password: newPw }, "ตั้งรหัสผ่านไม่สำเร็จ เซิร์ฟเวอร์ขัดข้อง กรุณาลองใหม่อีกครั้ง")
+    if (ok) { setPwTarget(null); setNewPw("") }
   }
   async function changeRole(u: User, next: "admin" | "member") {
     if (!window.confirm(`เปลี่ยนสิทธิ์ ${u.email} เป็น ${next}?`)) return
@@ -86,6 +89,15 @@ export function UsersManager({ myId }: { myId: string }) {
           placeholder="รหัสผ่าน (ไม่บังคับ — เว้นว่าง = SSO เท่านั้น)" aria-label="รหัสผ่าน" className={`${input} flex-1 min-w-[200px]`} />
         <button onClick={() => void add()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">เพิ่ม</button>
       </div>
+      {pwTarget && (
+        <div className="flex flex-wrap items-center gap-2 mb-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <span className="text-sm text-gray-700">ตั้งรหัสผ่านใหม่ให้ {pwTarget.email}</span>
+          <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} autoComplete="new-password"
+            placeholder="อย่างน้อย 8 ตัวอักษร" aria-label="รหัสผ่านใหม่" className={`${input} flex-1 min-w-[180px]`} />
+          <button onClick={() => void submitPw()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">บันทึก</button>
+          <button onClick={() => { setPwTarget(null); setNewPw("") }} className="text-sm text-gray-600 hover:underline">ยกเลิก</button>
+        </div>
+      )}
       {err && <p role="alert" className="text-sm text-red-600 mb-2">{err}</p>}
       <div className="rounded-xl border border-gray-200 bg-white overflow-x-auto">
         <table className="w-full text-sm">
@@ -109,7 +121,7 @@ export function UsersManager({ myId }: { myId: string }) {
                     <button className="text-blue-600 hover:underline"
                       onClick={() => void patch(u, { unlock: true }, "ปลดล็อกไม่สำเร็จ เซิร์ฟเวอร์ขัดข้อง กรุณาลองใหม่อีกครั้ง")}>ปลดล็อก</button>
                   )}
-                  <button className="text-blue-600 hover:underline" onClick={() => void setPw(u)}>ตั้งรหัสผ่าน</button>
+                  <button className="text-blue-600 hover:underline" onClick={() => { setPwTarget(u); setNewPw(""); setErr("") }}>ตั้งรหัสผ่าน</button>
                   {u.id !== myId && (
                     <>
                       <button className="text-blue-600 hover:underline"

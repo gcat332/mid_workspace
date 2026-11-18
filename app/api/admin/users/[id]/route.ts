@@ -15,7 +15,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
   try { me = await requireAdmin() } catch (e) { return responseOrRethrow(e) }
   const { id } = await params
   const b = (await req.json().catch(() => ({}))) as { role?: unknown; unlock?: unknown; password?: unknown }
-  const data: { role?: string; lockedAt?: null; failedLoginCount?: number; passwordHash?: string } = {}
+  const data: { role?: string; lockedAt?: null; failedLoginCount?: number; passwordHash?: string; sessionsValidAfter?: Date } = {}
   if (b.role !== undefined) {
     if (b.role !== "admin" && b.role !== "member") return err("สิทธิ์ต้องเป็น admin หรือ member", 400)
     data.role = b.role
@@ -24,16 +24,24 @@ export async function PATCH(req: Request, { params }: Ctx) {
   if (b.password !== undefined) {
     if (typeof b.password !== "string" || b.password.length < 8) return err(PASSWORD_MIN_ERROR, 400)
     data.passwordHash = await hashPassword(b.password)
+    if (id !== me.userId) data.sessionsValidAfter = new Date() // ends that user's existing sessions
   }
   if (Object.keys(data).length === 0) return err("ไม่มีข้อมูลที่ต้องแก้ไข", 400)
 
   if (data.role === "member" && id === me.userId) return err(SELF, 400)
-  const target = await prisma.user.findUnique({ where: { id }, select: { id: true, role: true } })
-  if (!target) return err("ไม่พบผู้ใช้", 404)
-  if (data.role === "member" && target.role === "admin" && (await prisma.user.count({ where: { role: "admin" } })) <= 1) {
-    return err(LAST_ADMIN, 400)
-  }
-  const user = await prisma.user.update({ where: { id }, data, select: USER_SELECT })
+  // Count-and-write in one transaction (SQLite serializes writers) so two concurrent demotes/deletes
+  // cannot both pass the last-admin check.
+  const result = await prisma.$transaction(async (tx) => {
+    const target = await tx.user.findUnique({ where: { id }, select: { id: true, role: true } })
+    if (!target) return "missing" as const
+    if (data.role === "member" && target.role === "admin" && (await tx.user.count({ where: { role: "admin" } })) <= 1) {
+      return "last-admin" as const
+    }
+    return tx.user.update({ where: { id }, data, select: USER_SELECT })
+  })
+  if (result === "missing") return err("ไม่พบผู้ใช้", 404)
+  if (result === "last-admin") return err(LAST_ADMIN, 400)
+  const user = result
   return NextResponse.json(user)
 }
 
@@ -42,11 +50,14 @@ export async function DELETE(_req: Request, { params }: Ctx) {
   try { me = await requireAdmin() } catch (e) { return responseOrRethrow(e) }
   const { id } = await params
   if (id === me.userId) return err(SELF, 400)
-  const target = await prisma.user.findUnique({ where: { id }, select: { id: true, role: true } })
-  if (!target) return err("ไม่พบผู้ใช้", 404)
-  if (target.role === "admin" && (await prisma.user.count({ where: { role: "admin" } })) <= 1) {
-    return err(LAST_ADMIN, 400)
-  }
-  await prisma.user.delete({ where: { id } })
+  const result = await prisma.$transaction(async (tx) => {
+    const target = await tx.user.findUnique({ where: { id }, select: { id: true, role: true } })
+    if (!target) return "missing" as const
+    if (target.role === "admin" && (await tx.user.count({ where: { role: "admin" } })) <= 1) return "last-admin" as const
+    await tx.user.delete({ where: { id } })
+    return "ok" as const
+  })
+  if (result === "missing") return err("ไม่พบผู้ใช้", 404)
+  if (result === "last-admin") return err(LAST_ADMIN, 400)
   return NextResponse.json({ ok: true })
 }

@@ -14,6 +14,8 @@ model User {
   failedLoginCount Int       @default(0)
   lockedAt         DateTime?
   lastLoginAt      DateTime?
+  // Session tokens whose login time (authAt) is earlier than this are rejected (password reset, demote).
+  sessionsValidAfter DateTime?
   createdAt        DateTime  @default(now())
 }
 
