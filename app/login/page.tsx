@@ -1,18 +1,41 @@
 "use client"
 
-import { useEffect, useState, type FormEvent } from "react"
+import { Suspense, useEffect, useState, type FormEvent } from "react"
+import { useSearchParams } from "next/navigation"
+
+// Only these codes (from the SSO routes) are ever shown; anything else gets the generic text.
+const SSO_ERRORS: Record<string, string> = {
+  not_registered: "บัญชีนี้ยังไม่ได้รับสิทธิ์ใช้ MidHub กรุณาติดต่อ Admin",
+  locked: "บัญชีถูกล็อก กรุณาติดต่อผู้ดูแลระบบเพื่อปลดล็อก",
+  state: "เซสชัน SSO หมดอายุหรือไม่ถูกต้อง กรุณาลองเข้าสู่ระบบด้วย SSO ใหม่อีกครั้ง",
+  disabled: "SSO ยังไม่เปิดใช้งาน กรุณาติดต่อ Admin",
+  misconfigured: "SSO ตั้งค่าไม่ครบ กรุณาติดต่อ Admin",
+  token: "แลกโทเคนกับ IdP ไม่สำเร็จ กรุณาติดต่อ Admin ให้ตรวจ client secret และ redirect URI",
+  no_email: "ไม่พบอีเมลในโปรไฟล์ SSO กรุณาติดต่อ Admin",
+}
+const SSO_ERROR_FALLBACK = "เข้าสู่ระบบด้วย SSO ไม่สำเร็จ กรุณาลองใหม่อีกครั้งหรือติดต่อ Admin"
+
 
 export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
+  )
+}
+
+function LoginForm() {
+  const errCode = useSearchParams().get("error")
   const [idp, setIdp] = useState<{ enabled: boolean; label: string }>({ enabled: false, label: "SSO" })
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [error, setError] = useState<string | null>(() =>
-    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("error"),
+  const [error, setError] = useState<string | null>(
+    errCode ? (Object.hasOwn(SSO_ERRORS, errCode) ? SSO_ERRORS[errCode] : SSO_ERROR_FALLBACK) : null,
   )
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    // Built in Task 3; a failure or 404 simply means SSO is off.
+    // A failure simply means SSO is off.
     fetch("/midhub/api/auth/idp")
       .then((r) => (r.ok ? r.json() : null))
       .then((s) => { if (s?.enabled) setIdp({ enabled: true, label: s.label ?? "SSO" }) })
