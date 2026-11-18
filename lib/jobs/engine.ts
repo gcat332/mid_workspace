@@ -15,13 +15,49 @@ export type JobCtx = {
   signal: AbortSignal
 }
 // Every stage must be safe to run again after a crash (idempotent).
-export type Stage = { name: string; run(ctx: JobCtx): Promise<void> }
+export type Stage = { name: string; run(ctx: JobCtx): Promise<void>; /** default 30 min */ timeoutMs?: number }
 export type KindHooks = {
   onSuccess?(ctx: JobCtx): Promise<void>
   onFailure?(ctx: JobCtx, err: unknown): Promise<void>
 }
 
 const MAX_CONCURRENT = 2
+const DEFAULT_STAGE_TIMEOUT_MS = 30 * 60_000
+const ABORT_GRACE_MS = 60_000
+const HEARTBEAT_MS = 30_000
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+// Best-effort journal write: a journal failure must never strand a committed job.
+async function tryJournal(id: string, entry: object): Promise<void> {
+  try {
+    await appendJournal(id, entry)
+  } catch (e) {
+    console.error("[jobs] journal write failed", id, e)
+  }
+}
+
+// DB write that must not be lost: retry once after 1s, then log loudly.
+async function writeOnce(label: string, id: string, fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn()
+    return
+  } catch {
+    await sleep(1000)
+  }
+  try {
+    await fn()
+  } catch (e) {
+    console.error(`[jobs] CRITICAL: could not persist ${label} for job ${id}; job may appear stuck`, e)
+  }
+}
+
+export function redact(s: string): string {
+  return s
+    .replace(/(pass(?:word|wd)?|pwd)(\s*[=:]\s*)("[^"]*"|'[^']*'|\S+)/gi, "$1$2***")
+    .replace(/(authorization\s*:\s*)[^\n]*/gi, "$1***")
+    .replace(/\b(Basic|Bearer)\s+[A-Za-z0-9+/=._~-]{6,}/g, "$1 ***")
+    .slice(0, 500)
+}
 const STATE_KEY = Symbol.for("midhub.jobEngine")
 
 interface EngineState {
@@ -79,12 +115,12 @@ function assertNoSecrets(v: unknown): void {
   }
 }
 
-function parseParams(text: string): Record<string, unknown> {
+function parseParams(text: string): Record<string, unknown> | null {
   try {
     const v = JSON.parse(text)
-    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null
   } catch {
-    return {}
+    return null
   }
 }
 
@@ -144,9 +180,11 @@ export async function createJob(user: SessionPayload, kind: JobKind, midName: st
 }
 
 export async function retryJob(user: SessionPayload, id: string): Promise<JobRow> {
-  void user // any authenticated user may retry (Global Constraints)
   const job = await prisma.job.findUnique({ where: { id } })
   if (!job) throw new MidError("job_not_found")
+  if (user.role !== "admin" && !((job.kind === "install" || job.kind === "clone") && job.createdBy === user.userId)) {
+    throw new MidError("forbidden")
+  }
   if (job.status !== "failed") throw new MidError("conflict")
   kindOrThrow(job.kind as JobKind)
   const row = await withMidLock(job.midName, async () => {
@@ -159,8 +197,8 @@ export async function retryJob(user: SessionPayload, id: string): Promise<JobRow
     if (res.count !== 1) throw new MidError("conflict")
     return prisma.job.findUniqueOrThrow({ where: { id } })
   })
-  await appendJournal(id, { type: "retry", attempt: row.attempt, stage: row.stage })
   enqueue(id)
+  await tryJournal(id, { type: "retry", attempt: row.attempt, stage: row.stage })
   return row
 }
 
@@ -176,7 +214,7 @@ export async function cancelJob(user: SessionPayload, id: string): Promise<JobRo
     const res = await prisma.job.updateMany({ where: { id, status: "queued" }, data: { status: "cancelled", finishedAt: new Date() } })
     if (res.count !== 1) throw new MidError("job_running")
     state().queue = state().queue.filter((q) => q !== id)
-    await appendJournal(id, { type: "cancelled", by: user.userId })
+    await tryJournal(id, { type: "cancelled", by: user.userId })
     return prisma.job.findUniqueOrThrow({ where: { id } })
   }
 
@@ -192,39 +230,41 @@ export async function cancelJob(user: SessionPayload, id: string): Promise<JobRo
         await tx.job.update({ where: { id }, data: { status: "cancelled", finishedAt: new Date() } })
       })
     })
-    await appendJournal(id, { type: "cancelled", by: user.userId, cleanupJob: created.id })
     enqueue(created.id)
+    await tryJournal(id, { type: "cancelled", by: user.userId, cleanupJob: created.id })
     return created
   }
 
   // failed uninstall / cancel_install: nothing to clean up; admin just closes the job.
   if (!isAdmin) throw new MidError("forbidden")
-  await prisma.job.update({ where: { id }, data: { status: "cancelled", finishedAt: new Date() } })
-  await appendJournal(id, { type: "cancelled", by: user.userId })
+  await withMidLock(job.midName, async () => {
+    const res = await prisma.job.updateMany({ where: { id, status: "failed" }, data: { status: "cancelled", finishedAt: new Date() } })
+    if (res.count !== 1) throw new MidError("conflict")
+  })
+  await tryJournal(id, { type: "cancelled", by: user.userId })
   return prisma.job.findUniqueOrThrow({ where: { id } })
 }
 
 export async function resumeJobs(): Promise<number> {
-  const st = state()
   const rows = await prisma.job.findMany({ where: { status: { in: ACTIVE } }, orderBy: { updatedAt: "asc" }, select: { id: true } })
   let n = 0
-  for (const r of rows) {
-    if (st.running.has(r.id) || st.queue.includes(r.id)) continue
-    enqueue(r.id)
-    n++
-  }
+  for (const r of rows) if (enqueue(r.id)) n++
   return n
 }
 
-function enqueue(id: string): void {
+// Returns false when the id is already queued or running (never schedule a job twice).
+function enqueue(id: string): boolean {
   const st = state()
+  if (st.running.has(id) || st.queue.includes(id)) return false
   st.queue.push(id)
   pump(st)
+  return true
 }
 
 function pump(st: EngineState): void {
   while (st.running.size < MAX_CONCURRENT && st.queue.length) {
     const id = st.queue.shift() as string
+    if (st.running.has(id)) continue
     st.running.add(id)
     const p: Promise<void> = execute(st, id)
       .catch((e) => console.error("[jobs] runner error", id, e))
@@ -237,43 +277,91 @@ function pump(st: EngineState): void {
   }
 }
 
+const ACTIVE_STATUS = { in: ACTIVE }
+
+// Runs one stage with a timeout, abort signal, heartbeat and a hard stop if it ignores the abort.
+async function runStage(st: EngineState, stage: Stage, job: JobRow, params: Record<string, unknown>): Promise<void> {
+  const ac = new AbortController()
+  const onAbort = () => ac.abort()
+  st.abort.signal.addEventListener("abort", onAbort)
+  if (st.abort.signal.aborted) ac.abort()
+  const ctx: JobCtx = {
+    job,
+    params,
+    signal: ac.signal,
+    log: (msg, level = "info") => appendJournal(job.id, { type: "log", level, msg }),
+  }
+  const timers: ReturnType<typeof setTimeout>[] = []
+  const heartbeat = setInterval(() => {
+    prisma.job.updateMany({ where: { id: job.id, status: "running" }, data: { updatedAt: new Date() } }).catch(() => undefined)
+  }, HEARTBEAT_MS)
+  let hardStop!: (e: unknown) => void
+  const stopped = new Promise<never>((_, rej) => (hardStop = rej))
+  timers.push(
+    setTimeout(() => {
+      ac.abort()
+      void tryJournal(job.id, { type: "log", level: "warn", msg: `stage ${stage.name} timed out; aborting` })
+      timers.push(
+        setTimeout(
+          () => hardStop(new MidError("stage_timeout", undefined, `ขั้นตอน ${stage.name} ใช้เวลานานเกินกำหนด งานถูกหยุด กด ลองใหม่ หรือแจ้ง Admin`)),
+          ABORT_GRACE_MS,
+        ),
+      )
+    }, stage.timeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS),
+  )
+  const run = stage.run(ctx)
+  run.catch(() => undefined) // a late settlement after the hard stop is ignored
+  try {
+    await Promise.race([run, stopped])
+  } finally {
+    clearInterval(heartbeat)
+    timers.forEach(clearTimeout)
+    st.abort.signal.removeEventListener("abort", onAbort)
+  }
+}
+
 async function execute(st: EngineState, id: string): Promise<void> {
   let job = await prisma.job.findUnique({ where: { id } })
   if (!job || !ACTIVE.includes(job.status)) return
   const k = st.kinds.get(job.kind as JobKind)
   if (!k) {
-    await failJob(job, new MidError("internal", undefined, undefined, `job kind "${job.kind}" is not registered`), undefined)
+    await failJob(job, new MidError("internal", undefined, undefined, `job kind "${job.kind}" is not registered`))
     return
   }
   const params = parseParams(job.params)
+  if (!params) {
+    await failJob(job, new MidError("internal", undefined, undefined, "params ไม่ถูกต้อง"))
+    return
+  }
   let idx = k.stages.findIndex((s) => s.name === job!.stage)
-  if (idx < 0) idx = 0
-  const mkCtx = (j: JobRow): JobCtx => ({
-    job: j,
-    params,
-    signal: st.abort.signal,
-    log: (msg, level = "info") => appendJournal(j.id, { type: "log", level, msg }),
-  })
-  let ctx = mkCtx(job)
+  if (idx < 0) {
+    await failJob(job, new MidError("internal", undefined, undefined, `ไม่รู้จักขั้นตอนที่บันทึกไว้ "${job.stage}"`))
+    return
+  }
+  let ctx: JobCtx = { job, params, signal: st.abort.signal, log: async () => undefined }
   try {
     for (; idx < k.stages.length; idx++) {
       const stage = k.stages[idx]
-      // Awaited before run(): a crash mid-stage resumes at this stage.
-      job = await prisma.job.update({
-        where: { id },
-        data: { stage: stage.name, status: "running", startedAt: job.startedAt ?? new Date() },
+      // Awaited CAS before run(): a crash mid-stage resumes at this stage, and a cancelled job is never revived.
+      const res = await prisma.job.updateMany({
+        where: { id, status: ACTIVE_STATUS },
+        data: { stage: stage.name, status: "running", ...(job.startedAt ? {} : { startedAt: new Date() }) },
       })
-      ctx = mkCtx(job)
-      await appendJournal(id, { type: "stage", stage: stage.name })
-      await stage.run(ctx)
+      if (res.count !== 1) return
+      job = await prisma.job.findUniqueOrThrow({ where: { id } })
+      await tryJournal(id, { type: "stage", stage: stage.name })
+      ctx = { job, params, signal: st.abort.signal, log: (msg, level = "info") => appendJournal(id, { type: "log", level, msg }) }
+      await runStage(st, stage, job, params)
     }
     await k.hooks.onSuccess?.(ctx)
   } catch (err) {
     await failJob(job, err, k.hooks.onFailure ? (e) => k.hooks.onFailure!(ctx, e) : undefined)
     return
   }
-  await prisma.job.update({ where: { id }, data: { status: "succeeded", finishedAt: new Date(), error: null } })
-  await appendJournal(id, { type: "done" }).catch(() => undefined)
+  await writeOnce("success", id, async () => {
+    const r = await prisma.job.updateMany({ where: { id, status: "running" }, data: { status: "succeeded", finishedAt: new Date(), error: null } })
+    if (r.count === 1) await tryJournal(id, { type: "done" })
+  })
 }
 
 async function failJob(job: JobRow, err: unknown, onFailure?: (e: unknown) => Promise<void>): Promise<void> {
@@ -281,13 +369,22 @@ async function failJob(job: JobRow, err: unknown, onFailure?: (e: unknown) => Pr
     err instanceof MidError
       ? err
       : new MidError("internal", undefined, undefined, err instanceof Error ? err.message : String(err))
-  await prisma.job.update({ where: { id: job.id }, data: { status: "failed", error: me.message, finishedAt: new Date() } })
-  await appendJournal(job.id, { type: "error", code: me.code, message: me.message, detail: me.detail }).catch(() => undefined)
+  const detail = me.detail === undefined ? undefined : redact(me.detail)
+  let changed = true
+  await writeOnce("failure", job.id, async () => {
+    const r = await prisma.job.updateMany({
+      where: { id: job.id, status: ACTIVE_STATUS },
+      data: { status: "failed", error: me.message, finishedAt: new Date() },
+    })
+    changed = r.count === 1
+  })
+  if (!changed) return
+  await tryJournal(job.id, { type: "error", code: me.code, message: me.message, detail })
   if (onFailure) {
     try {
       await onFailure(err)
     } catch (e) {
-      await appendJournal(job.id, { type: "log", level: "error", msg: `onFailure hook failed: ${e instanceof Error ? e.message : String(e)}` }).catch(() => undefined)
+      await tryJournal(job.id, { type: "log", level: "error", msg: redact(`onFailure hook failed: ${e instanceof Error ? e.message : String(e)}`) })
     }
   }
 }

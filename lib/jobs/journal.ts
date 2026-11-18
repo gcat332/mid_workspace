@@ -25,7 +25,7 @@ export function stripSecrets(v: unknown): unknown {
 export async function appendJournal(jobId: string, entry: object): Promise<void> {
   const file = journalPath(jobId)
   await fs.promises.mkdir(env.jobsDir, { recursive: true, mode: 0o750 })
-  const line = JSON.stringify({ t: new Date().toISOString(), ...(stripSecrets(entry) as object) })
+  const line = JSON.stringify({ ...(stripSecrets(entry) as object), t: new Date().toISOString() })
   await fs.promises.appendFile(file, line + "\n", { mode: 0o640 })
 }
 

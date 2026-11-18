@@ -1,4 +1,4 @@
-import { it, expect, vi, beforeAll, afterAll, beforeEach, describe } from "vitest"
+import { it, expect, vi, beforeAll, afterAll, beforeEach, afterEach, describe } from "vitest"
 import { execFileSync } from "node:child_process"
 import { mkdtempSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -320,5 +320,174 @@ describe("cancelJob", () => {
     gate.resolve()
     await eng.__idleForTests()
     await expect(eng.cancelJob(admin, job.id)).rejects.toMatchObject({ code: "conflict" })
+  })
+})
+
+const tick = () => new Promise<void>((r) => setImmediate(r))
+async function until(cond: () => Promise<boolean>, n = 3000) {
+  for (let i = 0; i < n; i++) {
+    if (await cond()) return
+    await tick()
+  }
+  throw new Error("until: condition not met")
+}
+
+describe("review fixes", () => {
+  it("never schedules the same job twice (resume racing create, duplicate resume)", async () => {
+    const gates = [deferred(), deferred(), deferred()]
+    let started = 0
+    eng.registerKind("install", [{ name: "a", run: async () => { await gates[started++].promise } }])
+    const [j] = await Promise.all([eng.createJob(alice, "install", "m-a", {}), eng.resumeJobs()])
+    await until(async () => started >= 1)
+    expect(await eng.resumeJobs()).toBe(0) // already running
+    await tick()
+    expect(started).toBe(1)
+    // queued duplicate: fill both slots, third queued, resume must not re-queue it
+    await eng.createJob(alice, "install", "m-b", {})
+    const third = await eng.createJob(alice, "install", "m-c", {})
+    await until(async () => started === 2)
+    expect(await eng.resumeJobs()).toBe(0)
+    gates.forEach((g) => g.resolve())
+    await eng.__idleForTests()
+    expect(started).toBe(3)
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: third.id } })).status).toBe("succeeded")
+    expect(j.id).toBeTruthy()
+  })
+
+  async function blockJournal(id: string) {
+    const fs = await import("node:fs")
+    fs.rmSync(jn.journalPath(id), { force: true })
+    fs.mkdirSync(jn.journalPath(id)) // appendFile now fails with EISDIR
+  }
+
+  it("journal failure during retry does not strand the job", async () => {
+    simpleKind("install", { name: "b", times: 1 })
+    const job = await eng.createJob(alice, "install", "m-a", {})
+    await eng.__idleForTests()
+    await blockJournal(job.id)
+    const err = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    await eng.retryJob(alice, job.id)
+    await eng.__idleForTests()
+    err.mockRestore()
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("succeeded")
+  })
+
+  it("journal failure during cancel_install creation does not strand the new job", async () => {
+    simpleKind("install", { name: "a", times: 5 })
+    simpleKind("cancel_install")
+    const job = await eng.createJob(alice, "install", "m-a", {})
+    await eng.__idleForTests()
+    await blockJournal(job.id)
+    const err = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const c = await eng.cancelJob(alice, job.id)
+    await eng.__idleForTests()
+    err.mockRestore()
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: c.id } })).status).toBe("succeeded")
+  })
+
+  it("retry authorisation: member only own install/clone; admin any", async () => {
+    simpleKind("install", { name: "a", times: 1 })
+    simpleKind("uninstall", { name: "a", times: 1 })
+    const own = await eng.createJob(alice, "install", "m-a", {})
+    const un = await eng.createJob(alice, "uninstall", "m-b", {})
+    await eng.__idleForTests()
+    await expect(eng.retryJob(bob, own.id)).rejects.toMatchObject({ code: "forbidden" })
+    await expect(eng.retryJob(alice, un.id)).rejects.toMatchObject({ code: "forbidden" })
+    await expect(eng.retryJob(alice, own.id)).resolves.toBeTruthy()
+    await expect(eng.retryJob(admin, un.id)).resolves.toBeTruthy()
+    await eng.__idleForTests()
+  })
+
+  it("cancel landing between read and stage write: no stage runs, job stays cancelled", async () => {
+    simpleKind("install")
+    const job = await eng.createJob(alice, "install", "m-a", {})
+    await eng.__idleForTests()
+    await prisma.job.update({ where: { id: job.id }, data: { status: "queued", stage: "a" } })
+    calls = []
+    const orig = prisma.job.findUnique.bind(prisma.job)
+    const spy = vi.spyOn(prisma.job, "findUnique").mockImplementationOnce(((args: never) => {
+      const r = orig(args)
+      return r.then(async (row) => {
+        await prisma.job.update({ where: { id: job.id }, data: { status: "cancelled" } })
+        return row
+      })
+    }) as never)
+    expect(await eng.resumeJobs()).toBe(1)
+    await eng.__idleForTests()
+    spy.mockRestore()
+    expect(calls).toEqual([])
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("cancelled")
+  })
+
+  it("corrupt params and unknown recorded stage fail visibly", async () => {
+    simpleKind("install")
+    const j1 = await eng.createJob(alice, "install", "m-a", {})
+    await eng.__idleForTests()
+    await prisma.job.update({ where: { id: j1.id }, data: { status: "queued", stage: "a", params: "{oops" } })
+    const j2 = await eng.createJob(alice, "install", "m-b", {})
+    await eng.__idleForTests()
+    await prisma.job.update({ where: { id: j2.id }, data: { status: "queued", stage: "zzz" } })
+    calls = []
+    await eng.resumeJobs()
+    await eng.__idleForTests()
+    const r1 = await prisma.job.findUniqueOrThrow({ where: { id: j1.id } })
+    const r2 = await prisma.job.findUniqueOrThrow({ where: { id: j2.id } })
+    expect([r1.status, r2.status]).toEqual(["failed", "failed"])
+    expect(calls).toEqual([])
+    expect(((await journal(j1.id)).find((e) => e.type === "error") as JE).detail).toContain("params ไม่ถูกต้อง")
+    expect(r2.stage).toBe("zzz")
+  })
+
+  it("redacts secrets in error detail and caps at 500 chars", async () => {
+    eng.registerKind("install", [{ name: "a", run: async () => { throw new Error("fail password=hunter2 Authorization: Basic dXNlcjpwYXNz " + "x".repeat(900)) } }])
+    const job = await eng.createJob(alice, "install", "m-a", {})
+    await eng.__idleForTests()
+    const d = ((await journal(job.id)).find((e) => e.type === "error") as JE).detail as string
+    expect(d).not.toContain("hunter2")
+    expect(d).not.toContain("dXNlcjpwYXNz")
+    expect(d.length).toBeLessThanOrEqual(500)
+  })
+
+  describe("stage timeout (fake timers)", () => {
+    beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] }))
+    afterEach(() => vi.useRealTimers())
+
+    it("aborts at timeoutMs, hard-fails 60s later, frees the slot, ignores late settlement", async () => {
+      const g = deferred()
+      let sig: AbortSignal | undefined
+      eng.registerKind("install", [{ name: "a", timeoutMs: 1000, run: async (ctx) => { sig = ctx.signal; await g.promise } }])
+      const job = await eng.createJob(alice, "install", "m-a", {})
+      await until(async () => !!sig)
+      expect(sig!.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(sig!.aborted).toBe(true)
+      expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("running")
+      await vi.advanceTimersByTimeAsync(60_000)
+      await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "failed")
+      const row = await prisma.job.findUniqueOrThrow({ where: { id: job.id } })
+      expect(row.error).toContain("ขั้นตอน a ใช้เวลานานเกินกำหนด")
+      await until(async () => (await journal(job.id)).some((e) => e.type === "error"))
+      const j = await journal(job.id)
+      expect(j.find((e) => e.type === "error")!.code).toBe("stage_timeout")
+      expect(j.some((e) => e.level === "warn")).toBe(true)
+      g.resolve() // late settlement must not revive it
+      await tick()
+      await eng.__idleForTests()
+      expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("failed")
+    })
+
+    it("heartbeat bumps updatedAt every 30s while a stage runs", async () => {
+      const g = deferred()
+      eng.registerKind("install", [{ name: "a", run: () => g.promise }])
+      const job = await eng.createJob(alice, "install", "m-a", {})
+      await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "running")
+      await until(async () => (await journal(job.id)).some((e) => e.type === "stage"))
+      for (let i = 0; i < 50; i++) await tick() // let runStage register its interval
+      const before = (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).updatedAt.getTime()
+      await vi.advanceTimersByTimeAsync(30_000)
+      await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).updatedAt.getTime() > before)
+      g.resolve()
+      await eng.__idleForTests()
+    })
   })
 })

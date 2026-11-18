@@ -35,7 +35,8 @@ const ERRORS = {
   job_active: [409, "MID นี้มีงานที่กำลังทำอยู่ รอให้เสร็จหรือยกเลิกก่อน"],
   job_running: [409, "งานกำลังทำงานอยู่ ยกเลิกไม่ได้ในตอนนี้"],
   job_not_found: [404, "ไม่พบงานที่ระบุ รีเฟรชหน้าแล้วลองใหม่"],
-  forbidden: [403, "ไม่มีสิทธิ์ทำรายการนี้ ติดต่อ Admin"],
+  forbidden: [403, "ต้องเป็น Admin จึงจะทำรายการนี้ได้"], // same text as FORBIDDEN_MESSAGE in lib/auth/helpers.ts
+  stage_timeout: [504, "ขั้นตอนนี้ใช้เวลานานเกินกำหนด งานถูกหยุด กด ลองใหม่ หรือแจ้ง Admin"],
   conflict: [409, "การดำเนินการนี้ขัดแย้งกับสถานะปัจจุบัน รีเฟรชหน้าแล้วลองใหม่"],
 } as const satisfies Record<string, readonly [number, string]>
 
