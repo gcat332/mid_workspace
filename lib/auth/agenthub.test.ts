@@ -171,6 +171,13 @@ describe("signInFromAgentHub", () => {
     expect(arg.update.lastLoginAt).toBeInstanceOf(Date)
   })
 
+  it("recordLogin: false (Agent API) does not touch lastLoginAt", async () => {
+    await signInFromAgentHub("Bot@X.com", { recordLogin: false })
+    const arg = upsert.mock.calls[0][0] as unknown as { create: Record<string, unknown>; update: Record<string, unknown> }
+    expect(arg.update).toEqual({ role: "admin" })
+    expect(arg.create).not.toHaveProperty("lastLoginAt")
+  })
+
   it("first sign-in race: a unique-constraint error on the upsert falls back to the row the other request created", async () => {
     upsert.mockRejectedValueOnce(Object.assign(new Error("Unique constraint failed"), { code: "P2002" }))
     const s = await signInFromAgentHub("Race@X.com")

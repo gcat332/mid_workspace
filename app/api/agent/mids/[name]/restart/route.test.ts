@@ -4,7 +4,10 @@ const SECRET = "Rs8-restart-route-agent-secret-" + "s".repeat(20)
 vi.mock("@/lib/env", () => ({ env: { agentSecret: "Rs8-restart-route-agent-secret-" + "s".repeat(20) } }))
 vi.mock("@/lib/db/client", () => ({
   prisma: {
-    user: { findUnique: async () => ({ id: "u1", email: "alice@x.com", role: "member", lockedAt: null }) },
+    user: {
+      findUnique: async () => ({ lockedAt: null }),
+      upsert: async () => ({ id: "u1", email: "alice@x.com" }),
+    },
     ipAllowlist: { findMany: async () => [] },
   },
 }))
@@ -36,6 +39,7 @@ const H: Record<string, string> = {
   host: "127.0.0.1:3100",
   "x-midhub-agent-secret": SECRET,
   "x-midhub-actor-email": "alice@x.com",
+  "x-midhub-actor-role": "admin",
   "x-midhub-session-id": "task-9",
   "x-midhub-session-instances": A,
 }

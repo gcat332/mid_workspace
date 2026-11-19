@@ -1,7 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto"
-import { prisma } from "@/lib/db/client"
 import { env } from "@/lib/env"
-import { isLocked } from "@/lib/auth/lockout"
+import { signInFromAgentHub } from "@/lib/auth/agenthub"
 import type { SessionPayload } from "@/lib/auth/jwt"
 import { normalizeInstanceUrl } from "@/lib/instances/url"
 import { blockedClientIp, ipBlockedResponse } from "@/lib/net/ip-gate"
@@ -79,7 +78,7 @@ export function parseSessionInstances(raw: string | null): string[] {
 
 /**
  * Authenticates an AgentHub -> MidHub call (spec 5, 5.1). Order: feature off -> 404, secret -> 401,
- * IP allowlist -> 403 ip_blocked, loopback-only -> 403, then the actor from the DB (checked on every request, never cached).
+ * IP allowlist -> 403 ip_blocked, loopback-only -> 403, then the actor: AgentHub must vouch for an admin via X-MidHub-Actor-Role, and the user is upserted as admin (locked -> 403). Checked on every request, never cached.
  * The secret value is never logged or put into any error.
  */
 export async function authenticateAgent(req: Request): Promise<AgentCaller> {
@@ -100,16 +99,24 @@ export async function authenticateAgent(req: Request): Promise<AgentCaller> {
     throw new MidError("agent_auth", 400, "AgentHub ส่ง X-MidHub-Session-Id ไม่ถูกต้อง ตรวจการตั้งค่าฝั่ง AgentHub")
   }
 
-  const email = (req.headers.get("x-midhub-actor-email") ?? "").trim().toLowerCase()
-  const user = email && email.length <= 254
-    ? await prisma.user.findUnique({ where: { email }, select: { id: true, email: true, role: true, lockedAt: true } })
-    : null
-  if (!user || isLocked(user.lockedAt)) {
-    throw new MidError("agent_user", 403, `ผู้ใช้ ${email.slice(0, 254) || "(ไม่ระบุ)"} ยังไม่มีสิทธิ์ใช้ MidHub ให้ Admin เพิ่มในหน้า Users`)
+  const email = (req.headers.get("x-midhub-actor-email") ?? "").trim().toLowerCase().slice(0, 254)
+  // AgentHub sends the actor's role read from its own DB on this request (never from the JWT). Only exactly "admin" passes.
+  if (!email || req.headers.get("x-midhub-actor-role") !== "admin") {
+    throw new MidError("agent_user", 403, `ต้องเป็น admin ของ AgentHub (บัญชี ${email || "(ไม่ระบุ)"})`)
+  }
+  let user: SessionPayload
+  try {
+    // Upserts the admin (a first-time actor has never opened MidHub); no session, cookie or auth.login audit row.
+    user = await signInFromAgentHub(email, { recordLogin: false })
+  } catch (e) {
+    if (e instanceof MidError && e.code === "account_locked") {
+      throw new MidError("agent_user", 403, `บัญชี ${email} ถูกล็อกใน MidHub ให้ Admin ปลดล็อกในหน้า Users`)
+    }
+    throw e
   }
   return {
     // ahAt: AgentHub vouches for the actor on this very request (server-to-server, no MidHub session involved).
-    user: { userId: user.id, email: user.email, role: user.role === "admin" ? "admin" : "member", ahAt: Math.floor(Date.now() / 1000) },
+    user: { userId: user.userId, email: user.email, role: "admin", ahAt: user.ahAt },
     taskId,
     sessionInstances: parseSessionInstances(req.headers.get("x-midhub-session-instances")),
   }

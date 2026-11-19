@@ -74,21 +74,23 @@ function networkCause(err: unknown): string {
 
 /**
  * Turns a confirmed AgentHub admin into a MidHub session: upserts the user as admin (records last sign-in) and
- * returns the payload to sign. A MidHub lock still wins over AgentHub: throws MidError("account_locked").
+ * returns the payload to sign. `recordLogin: false` (Agent API) skips lastLoginAt; callers write the auth.login audit row themselves. A MidHub lock still wins over AgentHub: throws MidError("account_locked").
  */
-export async function signInFromAgentHub(email: string): Promise<SessionPayload> {
+export async function signInFromAgentHub(email: string, opts: { recordLogin?: boolean } = {}): Promise<SessionPayload> {
+  const recordLogin = opts.recordLogin ?? true
   const addr = email.toLowerCase()
   const existing = await prisma.user.findUnique({ where: { email: addr }, select: { lockedAt: true } })
   if (existing && isLocked(existing.lockedAt)) throw new MidError("account_locked")
   const now = new Date()
-  const update = { role: "admin", lastLoginAt: now }
+  // Agent API calls (recordLogin: false) are not sign-ins: they must not touch lastLoginAt.
+  const update = recordLogin ? { role: "admin", lastLoginAt: now } : { role: "admin" }
   let user: { id: string; email: string }
   try {
     user = await prisma.user.upsert({
       where: { email: addr },
       update,
       // passwordHash is NOT NULL in the schema; "" never matches anything and there is no password login anyway.
-      create: { email: addr, role: "admin", passwordHash: "", lastLoginAt: now },
+      create: { email: addr, role: "admin", passwordHash: "", ...(recordLogin ? { lastLoginAt: now } : {}) },
       select: { id: true, email: true },
     })
   } catch (e) {

@@ -5,10 +5,16 @@ const fakeEnv = vi.hoisted(() => ({ agentSecret: "Zq7-distinct-secret-value-Zq7-
 vi.mock("@/lib/env", () => ({ env: fakeEnv }))
 let dbUser: { id: string; email: string; role: string; lockedAt: Date | null } | null = null
 const findUnique = vi.fn(async (...args: unknown[]) => (void args, dbUser))
+const upsert = vi.fn(async (a: { where: { email: string }; create: { role: string; email: string }; update: Record<string, unknown> }) => {
+  if (dbUser) { dbUser = { ...dbUser, role: "admin" }; return { id: dbUser.id, email: dbUser.email } }
+  dbUser = { id: "new1", email: a.create.email, role: a.create.role, lockedAt: null }
+  return { id: "new1", email: a.create.email }
+})
+const update = vi.fn()
 let cidrs: string[] = []
 vi.mock("@/lib/db/client", () => ({
   prisma: {
-    user: { findUnique: (a: unknown) => findUnique(a) },
+    user: { findUnique: (a: unknown) => findUnique(a), upsert: (a: never) => upsert(a), update: (a: unknown) => update(a) },
     ipAllowlist: { findMany: async () => cidrs.map((cidr) => ({ cidr })) },
   },
 }))
@@ -21,6 +27,7 @@ const hdrs = (over: Record<string, string | null> = {}) => {
     host: "127.0.0.1:3100",
     "x-midhub-agent-secret": SECRET,
     "x-midhub-actor-email": "Alice@X.com",
+    "x-midhub-actor-role": "admin",
     "x-midhub-session-id": "task-1",
     "x-midhub-session-instances": "",
     ...over,
@@ -36,6 +43,8 @@ beforeEach(() => {
   fakeEnv.agentSecret = SECRET
   dbUser = { id: "u1", email: "alice@x.com", role: "member", lockedAt: null }
   findUnique.mockClear()
+  upsert.mockClear()
+  update.mockClear()
   cidrs = []
 })
 
@@ -96,12 +105,11 @@ describe("authenticateAgent", () => {
     expect(await fail(req({ "x-forwarded-for": "127.0.0.1", host: "10.4.150.142" }))).toMatchObject({ code: "agent_auth", status: 403 })
   })
   it("no secret value in the serialized body of any error response", async () => {
-    dbUser = null
     const cases = [
       req({ "x-midhub-agent-secret": "bad" }),
       req({ "x-forwarded-for": "1.2.3.4" }),
       req({ host: "10.4.150.142" }),
-      req(), // agent_user (no such account)
+      req({ "x-midhub-actor-role": "user" }), // agent_user (not an AgentHub admin)
       req({ "x-midhub-session-id": null }),
     ]
     const statuses: number[] = []
@@ -114,28 +122,49 @@ describe("authenticateAgent", () => {
     }
     expect(statuses).toEqual([401, 403, 403, 403, 400])
   })
-  it("unknown, missing-email or locked actor -> 403 agent_user", async () => {
-    dbUser = null
-    expect(await fail(req())).toMatchObject({ code: "agent_user", status: 403 })
-    dbUser = { id: "u1", email: "alice@x.com", role: "member", lockedAt: null }
+  const ROLE_MSG = "ต้องเป็น admin ของ AgentHub (บัญชี alice@x.com)"
+  it("missing, user or wrong-case role -> 403 agent_user, nothing written", async () => {
+    for (const role of [null, "user", "Admin", "ADMIN", "member", ""]) {
+      const e = await fail(req({ "x-midhub-actor-role": role }))
+      expect(e).toMatchObject({ code: "agent_user", status: 403, message: ROLE_MSG })
+    }
+    expect(upsert).not.toHaveBeenCalled()
+    expect(findUnique).not.toHaveBeenCalled()
+  })
+  it("missing email -> 403 agent_user", async () => {
     expect(await fail(req({ "x-midhub-actor-email": null }))).toMatchObject({ code: "agent_user", status: 403 })
-    dbUser = { id: "u1", email: "alice@x.com", role: "member", lockedAt: new Date() }
-    const e = await fail(req())
-    expect(e).toMatchObject({ code: "agent_user", status: 403 })
-    expect(e!.message).toBe("ผู้ใช้ alice@x.com ยังไม่มีสิทธิ์ใช้ MidHub ให้ Admin เพิ่มในหน้า Users")
   })
-  it("a lock never expires on its own (admin lock, no password lockout any more)", async () => {
-    dbUser = { id: "u1", email: "alice@x.com", role: "member", lockedAt: new Date(Date.now() - 3600_000) }
-    expect(await fail(req())).toMatchObject({ code: "agent_user", status: 403 })
+  it("admin with an unknown email -> ok and the user is created as admin (never opened MidHub)", async () => {
+    dbUser = null
+    const c = await authenticateAgent(req())
+    expect(c.user).toEqual({ userId: "new1", email: "alice@x.com", role: "admin", ahAt: expect.any(Number) })
+    expect(upsert).toHaveBeenCalledTimes(1)
+    const arg = upsert.mock.calls[0][0]
+    expect(arg.create).toMatchObject({ email: "alice@x.com", role: "admin" })
+    expect(arg.create).not.toHaveProperty("lastLoginAt")
+    expect(arg.update).toEqual({ role: "admin" })
   })
-  it("role and identity come from the DB; email is lowercased for the lookup; checked every call", async () => {
-    dbUser = { id: "u9", email: "alice@x.com", role: "admin", lockedAt: null }
+  it("admin with a locked MidHub user -> 403 agent_user (a lock never expires on its own)", async () => {
+    for (const lockedAt of [new Date(), new Date(Date.now() - 3600_000)]) {
+      dbUser = { id: "u1", email: "alice@x.com", role: "admin", lockedAt }
+      expect(await fail(req())).toMatchObject({ code: "agent_user", status: 403 })
+    }
+    expect(upsert).not.toHaveBeenCalled()
+  })
+  it("a MidHub member row is promoted to admin by the upsert; identity comes from the DB row, checked every call", async () => {
+    dbUser = { id: "u9", email: "alice@x.com", role: "member", lockedAt: null }
     const c = await authenticateAgent(req())
     expect(c.user).toEqual({ userId: "u9", email: "alice@x.com", role: "admin", ahAt: expect.any(Number) })
     expect(c.taskId).toBe("task-1")
     expect(findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { email: "alice@x.com" } }))
     await authenticateAgent(req())
     expect(findUnique).toHaveBeenCalledTimes(2)
+  })
+  it("wrong secret beats a bad role: 401", async () => {
+    expect(await fail(req({ "x-midhub-agent-secret": "bad", "x-midhub-actor-role": "user" }))).toMatchObject({ code: "agent_auth", status: 401 })
+  })
+  it("a bad session id beats the role check: 400", async () => {
+    expect(await fail(req({ "x-midhub-session-id": null, "x-midhub-actor-role": "user" }))).toMatchObject({ code: "agent_auth", status: 400 })
   })
   it("missing/bad session id -> agent_auth", async () => {
     expect(await fail(req({ "x-midhub-session-id": null }))).toMatchObject({ code: "agent_auth" })

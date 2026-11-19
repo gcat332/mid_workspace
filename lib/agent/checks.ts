@@ -52,7 +52,7 @@ export function evaluateChecks(caller: AgentCaller, mid: MidFacts): Check[] {
   const ready = busy ? fail("mid_ready", busy) : ok("mid_ready")
 
   return [
-    ok("user_registered"), // auth already rejected unregistered/locked actors
+    ok("user_registered"), // auth already rejected non-admin (AgentHub) and locked actors
     caller.sessionInstances.length > 0
       ? ok("session_instance")
       : fail("session_instance", "session นี้ยังไม่มี instance: ตั้ง SN_INSTANCE_URL ใน .env หรือสร้างโปรเจกต์ด้วย snow-init"),

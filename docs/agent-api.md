@@ -29,7 +29,8 @@ Every request must carry all of these (missing or invalid = rejected before anyt
 | Header | Value |
 |---|---|
 | `X-MidHub-Agent-Secret` | `MIDHUB_AGENT_SECRET` (same value in both systems, >= 32 chars) |
-| `X-MidHub-Actor-Email` | email of the AgentHub user who started the run (lowercase). Must be a MidHub user and not locked |
+| `X-MidHub-Actor-Email` | email of the AgentHub user who started the run (lowercase). Need not have opened MidHub before: MidHub creates or updates the account as admin on the first call. A locked MidHub account is refused |
+| `X-MidHub-Actor-Role` | the actor's role from AgentHub's own DB (`User.role`) at request time, never from the JWT. Must be exactly `admin` (case-sensitive); anything else or missing is refused |
 | `X-MidHub-Session-Id` | AgentHub `taskId` (parent taskId for a sub-task). Required, non-empty after trimming, <= 128 chars, printable ASCII without spaces (characters 0x21-0x7e only); recorded in the audit log |
 | `X-MidHub-Session-Instances` | optional, comma-separated `https://<x>.service-now.com/` URLs the session works with (server-side computed by AgentHub, never from the agent). Invalid entries are dropped. Empty = `session_instance` check fails |
 
@@ -48,7 +49,7 @@ Rules:
 | Client IP not in the MidHub IP allowlist | 403 | `ip_blocked` (body also has `ip`) |
 | `Host` or forwarding headers not loopback (call came via Caddy/proxy) | 403 | `agent_auth` |
 | `X-MidHub-Session-Id` missing/empty/invalid | 400 | `agent_auth` |
-| Actor email unknown, empty or account locked | 403 | `agent_user` |
+| `X-MidHub-Actor-Role` missing or not exactly `admin` (message: "ต้องเป็น admin ของ AgentHub (บัญชี <email>)"), actor email empty, or the actor's MidHub account is locked | 403 | `agent_user` |
 
 Through Caddy `/midhub/api/agent/*` is answered 404 by design (see `deploy/README.md`).
 
@@ -60,7 +61,7 @@ audit entry. A check object is `{ "id", "ok", "message"? }` (`message` only when
 
 | id | Passes when | Message when failing (Thai) |
 |---|---|---|
-| `user_registered` | actor has an unlocked MidHub account (always ok once authenticated) | - |
+| `user_registered` | actor is an AgentHub admin with an unlocked MidHub account (always ok once authenticated; otherwise `agent_user` 403 before the checklist: "ต้องเป็น admin ของ AgentHub") | - |
 | `session_instance` | the session instance set is non-empty | `session นี้ยังไม่มี instance: ตั้ง SN_INSTANCE_URL ใน .env หรือสร้างโปรเจกต์ด้วย snow-init` |
 | `instance_match` | the MID's instance is in the session set | `session นี้ทำงานกับ <hosts> แต่ MID นี้ต่อ <host> เลือก MID ที่ต่อ instance ของ session หรือเพิ่ม instance นั้นใน .env` (variants when the MID's instance is unknown or its config.xml disagrees with MidHub's record) |
 | `agent_access` | the per-MID "allow AgentHub" switch is on (default off) | `MID นี้ยังไม่เปิดให้ AgentHub แก้ ให้เปิดในหน้า MidHub แท็บภาพรวม` |
@@ -84,6 +85,7 @@ and the direct loopback form for debugging (not available to the agent; needs th
 curl -s \
   -H "X-MidHub-Agent-Secret: $MIDHUB_AGENT_SECRET" \
   -H "X-MidHub-Actor-Email: you@example.com" \
+  -H "X-MidHub-Actor-Role: admin" \
   -H "X-MidHub-Session-Id: debug-1" \
   -H "X-MidHub-Session-Instances: https://dev12345.service-now.com/" \
   "http://127.0.0.1:3100/midhub/api/agent/<path>"
@@ -224,7 +226,7 @@ curl -s -X POST -H "Authorization: Bearer $AGENT_MIDHUB_TOKEN" \
 | `not_found` | 404 | feature off (secret unset), or unknown MID / file / path |
 | `agent_auth` | 401 / 403 / 400 | bad secret (401); not loopback Host/forwarding headers (403); bad session id (400) |
 | `ip_blocked` | 403 | client IP not in the MidHub IP allowlist |
-| `agent_user` | 403 | actor email has no (or a locked) MidHub account |
+| `agent_user` | 403 | actor is not an AgentHub admin (`X-MidHub-Actor-Role` missing or not `admin`), or has a locked MidHub account |
 | `agent_check_failed` | 403 | checklist failed; body has `checks` |
 | `invalid_name` | 400 | MID name syntax |
 | (405, no body code) | 405 | method not supported on the route (e.g. PUT on `mids`, GET on `restart`) |
