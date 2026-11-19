@@ -1,4 +1,6 @@
 import type { ReactNode } from "react"
+import Link from "next/link"
+import { appVersion } from "@/package.json"
 import { NavLinks } from "@/components/NavLinks"
 import { ProfileMenu } from "@/components/ProfileMenu"
 import { BASE_PATH } from "@/lib/ui/api"
@@ -29,6 +31,9 @@ export function AppChrome({ user, children }: { user: { email: string; role: str
         <NavLinks isAdmin={isAdmin} />
       </nav>
       <div className="flex-1 min-w-0">{children}</div>
+      <footer className="shrink-0 px-4 py-1.5 text-center text-xs text-gray-400 bg-white border-t border-gray-200 dark:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-500">
+        © 2026 BSM MIDHub · <Link href="/changelog" title="View changelog" className="font-medium text-blue-600 underline underline-offset-2 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">v{appVersion}</Link> · Built by Kasira C. · <a href="mailto:kasira_c@mfec.co.th" className="hover:text-gray-600 dark:hover:text-neutral-300">kasira_c@mfec.co.th</a>
+      </footer>
     </div>
   )
 }

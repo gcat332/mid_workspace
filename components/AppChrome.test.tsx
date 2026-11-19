@@ -6,6 +6,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/", useRouter: () => ({ 
 vi.mock("./ProfileMenu", () => ({ ProfileMenu: () => null }))
 
 import { AppChrome } from "./AppChrome"
+import pkg from "../package.json"
 
 afterEach(cleanup)
 
@@ -31,5 +32,19 @@ describe("AppChrome header (matches AgentHub)", () => {
     expect(nav.className).toContain("gap-5 md:gap-7 px-4 md:px-8")
     expect(c.querySelector("header")!.className).not.toContain("max-md:hidden")
     expect(nav.className).not.toContain("max-md:hidden")
+  })
+})
+
+describe("AppChrome footer", () => {
+  it("shows the copyright, a changelog link with the app version, and stays visible on phones", () => {
+    const c = render(<AppChrome user={{ email: "a@b.c", role: "admin" }}>x</AppChrome>).container
+    const footer = c.querySelector("footer")!
+    expect(footer.textContent).toContain("© 2026 BSM MIDHub")
+    expect(footer.textContent).toContain("Built by Kasira C.")
+    expect(footer.className).not.toContain("max-md:hidden")
+    const link = Array.from(footer.querySelectorAll("a")).find((a) => a.textContent === "v0.3.0")!
+    expect(link.getAttribute("href")).toBe("/changelog")
+    expect(pkg.appVersion).toBe("0.3.0")
+    expect(footer.querySelector("a[href^='mailto:']")).not.toBeNull()
   })
 })
