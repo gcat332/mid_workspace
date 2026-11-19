@@ -137,6 +137,14 @@ else
   man "$NODE_BIN or $APP_DIR/node_modules not found — verify the Node version matches the build"
 fi
 
+# ── Gate 6b: app listens on loopback only (never directly on the LAN) ──────────
+hdr "Gate 6b — $SERVICE listens on 127.0.0.1:$PORT only"
+listen=$(ss -Hltn "sport = :$PORT" 2>/dev/null | awk '{print $4}' | sort -u | tr '\n' ' ')
+if [ -z "$listen" ]; then no "nothing listens on :$PORT"
+elif echo "$listen" | grep -qvE '^(127\.0\.0\.1|\[::1\]|\[::ffff:127\.0\.0\.1\]):'"$PORT"' ?$' && [ "$(echo $listen | tr ' ' '\n' | grep -cvE '^(127\.0\.0\.1|\[::1\]):')" != "0" ]; then
+  no "listens on: $listen — reachable from the LAN, bypassing Caddy. Fix: ExecStart … next start -H 127.0.0.1 -p $PORT, then sudo deploy/install.sh"
+else ok "listens on: $listen"; fi
+
 # ── Gate 7: app answers on loopback ───────────────────────────────────────────
 hdr "Gate 7 — app answers on loopback"
 c=$(code "http://127.0.0.1:$PORT/midhub/login")

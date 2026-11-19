@@ -19,7 +19,7 @@ Environment=NEXT_TELEMETRY_DISABLED=1
 Environment=CHECKPOINT_DISABLE=1
 # Apply pending migrations (idempotent). Repo-local prisma binary, never npx.
 ExecStartPre=@APP_DIR@/node_modules/.bin/prisma migrate deploy
-ExecStart=/usr/bin/node @APP_DIR@/node_modules/next/dist/bin/next start
+ExecStart=/usr/bin/node @APP_DIR@/node_modules/next/dist/bin/next start -H 127.0.0.1 -p 3100
 Restart=on-failure
 # SIGTERM on stop makes node exit 143; that is a clean stop, not a failure.
 SuccessExitStatus=143
