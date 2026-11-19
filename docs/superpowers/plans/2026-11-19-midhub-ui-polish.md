@@ -260,7 +260,63 @@ lines). New small pure modules carry the testable logic: `lib/ui/log-highlight.t
   typographic ellipsis `…` in `Loading…` and `Saving…`. Run the full suite: PASS. Run `tsc` and `eslint` clean.
 - [ ] **Step 4: Commit** `style(copy): English Title Case UI labels per the AgentHub standard`.
 
-### Task 5: Visual check and deploy (orchestrator)
+### Task 5: Footer with version link + Changelog page (user request, added after approval)
+
+**Files:**
+- Create:
+  - `CHANGELOG.md` (repo root)
+  - `lib/ui/changelog.ts` and `lib/ui/changelog.test.ts`, ported from AgentHub's
+    `/home/bsmagenthub/ai_workspace/lib/ui/changelog.ts` and `.test.ts` (read-only reference)
+  - `components/ChangelogBody.tsx` and `components/ChangelogView.tsx`, ported from AgentHub's components of the same
+    name
+  - `app/changelog/page.tsx`
+- Modify:
+  - `package.json`: add `"appVersion": "0.3.0"`; add deps `react-markdown@^10.1.0` and `remark-gfm@^4.0.1` (same as
+    AgentHub) via `npm install`, so `package-lock.json` updates;
+  - `components/AppChrome.tsx` (footer).
+
+**Interfaces:**
+- Produces:
+  - `parseChangelog`, `parseVersionNames`, `buildTree`, `countReleases`, `Entry` and `Node`, with the same
+    signatures as AgentHub's;
+  - `ChangelogView({ file, title })`.
+
+- [ ] **Step 1: Port the parser tests** into `lib/ui/changelog.test.ts`. Run: FAIL (module missing).
+- [ ] **Step 2: Port `lib/ui/changelog.ts`.** Run: PASS.
+- [ ] **Step 3: Write `CHANGELOG.md`.**
+  - Use AgentHub's format: title `# Changelog — BSM MIDHub`, the type-tags paragraph, `## Release names`, then
+    `## vX.Y.Z — \`[tag]\`` entries, newest first. Write it from `git log main` and this plan.
+  - Release names:
+    - `v0.1 — Foundation`;
+    - `v0.1.0 — MID Server Manager`: create/import/start/stop/restart/uninstall, config/files/logs tabs, admin pages,
+      root helper, deploy pipeline;
+    - `v0.2 — AgentHub Bridge`;
+    - `v0.2.0 — Agent API`: น้อง Java edits MID files, per-MID AgentHub switch;
+    - `v0.2.1 — AgentHub Sign-in`: AgentHub admins only, no local login;
+    - `v0.2.2 — Behind AgentHub Proxy`: domain path via AgentHub's /midhub route, relative redirects, CSRF via
+      X-Forwarded-Host;
+    - `v0.2.3 \`[bug]\``: the F5 WAF rejects PATCH, so saves are sent as POST and an HTML reply shows as an error;
+    - `v0.3 — Polish`;
+    - `v0.3.0 \`[style]\``: header like AgentHub, full width, English labels, dark log view, file browser, this
+      changelog.
+  - Bodies are concise bullet lists. Thai or English prose is fine, but stay consistent with AgentHub's English.
+- [ ] **Step 4: Footer and page tests.** In `components/AppChrome.test.tsx`, the footer contains `© 2026 BSM MIDHub`
+  and a link with text `v0.3.0` whose href is `/changelog`, rendered through next/link, so the basePath applies.
+  Add a `ChangelogView` render test with a small fixture file: the latest version shows with a `Latest` chip.
+  Run: FAIL.
+- [ ] **Step 5: Implement.**
+  - **Footer:** copy AgentHub's footer markup and classes exactly. The text is
+    `© 2026 BSM MIDHub · v{appVersion} · Built by Kasira C. · <mailto link as in AgentHub>`. Keep it visible on phones
+    (no `max-md:hidden`). The version link uses `next/link` to `/changelog`.
+  - **Page:** `app/changelog/page.tsx` is a server page. It checks the session like `app/page.tsx`
+    (`getSessionUser`, redirect to `/login`) and renders `ChangelogView file="CHANGELOG.md" title="Changelog"`
+    inside `AppChrome`.
+  - **ChangelogView:** read the file from `process.cwd()` as AgentHub does. Inline the `Badge`/`TONES`/`cardCls` it
+    needs; MidHub has no such module.
+  - Run the full suite, `tsc` and `eslint`: PASS.
+- [ ] **Step 6: Commit** `feat: footer with version link and /changelog page`.
+
+### Task 6: Visual check and deploy (orchestrator)
 
 - [ ] **Step 1: Run the build locally.** Start `npm run build && next start` on a spare loopback port with:
   - a temporary DB and `MIDHUB_ROOT` that hold one fake MID (with `agent/` files and a 1,000-line `agent0.log.0`);
