@@ -189,6 +189,19 @@ Always re-run `install.sh` after `npm run helper:build`: restarting `bsm-midhub-
 old root-owned copy (on purpose - the helper never runs code from the app checkout). `install.sh` restarts the
 helper itself when the copy changed. Restarting the helper does not stop running MIDs (they are their own units).
 
+### Phase 2 upgrade notes (Phase 1 -> Phase 2 lifecycle jobs)
+
+- Re-run `scripts/deploy.sh`: `install.sh` now also requires `/usr/bin/unzip`, `/usr/bin/zipinfo`, `/usr/bin/tar` and creates
+  `/opt/midhub/jobs` (job journals, bsmmidhub 0750) and `/opt/midhub/staging` (private extraction area, bsmmidhub 0700; must be
+  on the same filesystem as `/opt/midhub/mids`, otherwise extract fails with EXDEV).
+- The `phase2_jobs` migration needs an empty `Job` table (see section 3).
+- Installs download the MID package (~488 MB) from `install.service-now.com:443` into `/opt/midhub/packages`; keep ~3 GB
+  free per install. The instance credentials must be able to read `sys_properties` `glide.war` for the buildstamp; if they
+  cannot, set the buildstamp by hand in Admin > Instances.
+- Set MID user/password on instances created by an import (they have none) before installing.
+- Imported MIDs have no `version`, so the package cache GC does not keep their build's package.
+- Known blocker as of 2026-11-19: the signed package is rejected at extract (`docs/spike-mid-linux.md`, "Phase 2 verification").
+
 ## 8. Rollback / uninstall
 
     sudo systemctl disable --now bsm-midhub bsm-midhub-helper
