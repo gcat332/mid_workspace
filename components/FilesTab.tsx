@@ -12,7 +12,7 @@ import { API_BASE, apiFetch, apiUpload } from "@/lib/ui/api"
 import { cardCls, ghostBtnCls, inputCls, labelCls } from "@/lib/ui/classes"
 import { joinPath as join, toggle, type Entry, type TreeRow, type TreeState } from "@/lib/ui/file-tree"
 
-type Open = { path: string; content: string; hash: string; draft: string; readOnly: boolean }
+type Open = { path: string; content: string; hash: string; draft: string; readOnly: boolean; config: boolean }
 type NameDialog = { kind: "rename"; row: TreeRow } | { kind: "mkdir" } | { kind: "newFile" }
 type Upload = { name: string; index: number; count: number; percent: number }
 
@@ -45,7 +45,8 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   const [err, setErr] = useState<ApiError | null>(null)
   const [modalErr, setModalErr] = useState<ApiError | null>(null)
   const [saved, setSaved] = useState(false)
-  const [confirmClose, setConfirmClose] = useState(false)
+  /** Unsaved-changes confirm before leaving the editor: "close", or "config" (then switch to the Configuration tab). */
+  const [confirmClose, setConfirmClose] = useState<"close" | "config" | null>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState<Open | null>(null)
   const [menu, setMenu] = useState<{ row: TreeRow; x: number; y: number } | null>(null)
@@ -121,7 +122,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
       return
     }
     setTarget(parentOf(row.path))
-    if (!row.entry.secret) void openFile(row.path, row.entry.readOnly)
+    if (!row.entry.secret) void openFile(row.path, row.entry.readOnly, row.entry.config)
   }
 
   /** `onErr` decides where a failure is shown (the open dialog, or the page) so it never appears twice. */
@@ -138,7 +139,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   const json = (method: string, body: object) => () =>
     apiFetch(base, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
 
-  async function openFile(path: string, readOnly: boolean) {
+  async function openFile(path: string, readOnly: boolean, config = false) {
     setErr(null)
     try {
       const res = await apiFetch(`${base}?path=${encodeURIComponent(path)}&content=1`)
@@ -146,7 +147,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
       const j = (await res.json()) as { content: string; hash: string }
       setSaved(false)
       setSelected(path)
-      setOpen({ path, content: j.content, hash: j.hash, draft: j.content, readOnly })
+      setOpen({ path, content: j.content, hash: j.hash, draft: j.content, readOnly, config })
     } catch { setErr(NETWORK) }
   }
 
@@ -166,11 +167,17 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
 
   async function reloadOpen() {
     if (!open) return
-    const { path, readOnly } = open
+    const { path, readOnly, config } = open
     setOpen(null)
-    await openFile(path, readOnly)
+    await openFile(path, readOnly, config)
   }
-  const closeEditor = () => { setOpen(null); setErr(null); setSaved(false); setConfirmClose(false) }
+  const closeEditor = () => { setOpen(null); setErr(null); setSaved(false); setConfirmClose(null) }
+  /** Leave the editor; with unsaved changes the confirm asks first. `then` runs once it has closed. */
+  function leaveEditor(then: "close" | "config") {
+    if (open && open.draft !== open.content) { setConfirmClose(then); return }
+    closeEditor()
+    if (then === "config") onOpenConfig()
+  }
 
   /** Ask the overwrite confirm for one file; resolves with the answer. */
   const askOverwrite = (f: File) => new Promise<boolean>((resolve) => { overwriteAnswer.current = resolve; setOverwrite(f) })
@@ -302,7 +309,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
 
         {!rootErr && (
           <FileTree state={tree} selected={selected} dragOver={dragOver}
-            onRowClick={onRowClick} onMenu={(row, x, y) => setMenu({ row, x, y })} dropProps={(dir) => dropHandlers(dir, dir)} />
+            onRowClick={onRowClick} onMenu={(row, x, y) => setMenu({ row, x, y })} onOpenConfig={onOpenConfig} dropProps={(dir) => dropHandlers(dir, dir)} />
         )}
         <p className="border-t border-gray-100 px-3 py-1.5 text-xs text-gray-400 dark:border-neutral-700 dark:text-neutral-500">
           ลากไฟล์มาวางบนโฟลเดอร์เพื่ออัปโหลด (สูงสุด 50 MB ต่อไฟล์)
@@ -312,7 +319,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
       {menu && (
         <FileContextMenu x={menu.x} y={menu.y} entry={menu.row.entry} downloadHref={downloadHref(menu.row.path)}
           writeDisabled={busy || !!busyReason} onClose={() => setMenu(null)}
-          onOpen={() => void openFile(menu.row.path, menu.row.entry.readOnly)}
+          onOpen={() => void openFile(menu.row.path, menu.row.entry.readOnly, menu.row.entry.config)}
           onRename={() => startName({ kind: "rename", row: menu.row }, menu.row.entry.name)}
           onDelete={() => setDeleting(menu.row)}
           onOpenConfig={onOpenConfig} />
@@ -324,11 +331,13 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
           downloadHref={downloadHref(open.path)}
           onChange={(v) => { setSaved(false); setOpen((o) => (o ? { ...o, draft: v } : o)) }}
           onSave={() => void save()}
-          onClose={() => (open.draft !== open.content ? setConfirmClose(true) : closeEditor())}
+          onClose={() => leaveEditor("close")}
+          onOpenConfig={open.config ? () => leaveEditor("config") : undefined}
           onReload={() => void reloadOpen()} />
       )}
       {confirmClose && (
-        <ConfirmDialog title="Close Without Saving?" danger confirmLabel="Close" onCancel={() => setConfirmClose(false)} onConfirm={closeEditor}>
+        <ConfirmDialog title="Close Without Saving?" danger confirmLabel="Close" onCancel={() => setConfirmClose(null)}
+          onConfirm={() => { const then = confirmClose; closeEditor(); if (then === "config") onOpenConfig() }}>
           มีการแก้ไขที่ยังไม่บันทึก ถ้าปิดตอนนี้ การแก้ไขจะหาย
         </ConfirmDialog>
       )}

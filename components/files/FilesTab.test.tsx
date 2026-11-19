@@ -176,6 +176,56 @@ describe("FilesTab editor", () => {
   })
 })
 
+describe("FilesTab config files", () => {
+  it("config rows show an always-visible Edit in Configuration button; other rows do not", async () => {
+    const { container, onOpenConfig } = await setup()
+    await expandAgent()
+    const cfg = container.querySelector('[data-row="agent/config.xml"]') as HTMLElement
+    const btn = within(cfg).getByRole("button", { name: "Edit in Configuration" })
+    expect(btn.className).not.toMatch(/opacity-0/)
+    expect(within(container.querySelector('[data-row="agent/x.xml"]') as HTMLElement).queryByRole("button", { name: "Edit in Configuration" })).toBeNull()
+    fireEvent.click(btn)
+    expect(onOpenConfig).toHaveBeenCalledTimes(1)
+    expect(calls.some((c) => c.content)).toBe(false) // did not open the raw editor
+  })
+
+  it("the editor header offers Edit in Configuration for a config file, closing straight away when clean", async () => {
+    const { onOpenConfig } = await setup()
+    await expandAgent()
+    fireEvent.click(row(/^config\.xml/))
+    const dlg = await screen.findByRole("dialog", { name: "agent/config.xml" })
+    fireEvent.click(within(dlg).getByRole("button", { name: "Edit in Configuration" }))
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "agent/config.xml" })).toBeNull())
+    expect(onOpenConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it("with unsaved changes it asks first: cancel keeps the editor, confirm closes and switches tab", async () => {
+    const { onOpenConfig } = await setup()
+    await expandAgent()
+    fireEvent.click(row(/^config\.xml/))
+    const dlg = await screen.findByRole("dialog", { name: "agent/config.xml" })
+    fireEvent.change(await within(dlg).findByRole("textbox", { name: "editor" }), { target: { value: "edited" } })
+    fireEvent.click(within(dlg).getByRole("button", { name: "Edit in Configuration" }))
+    let confirm = await screen.findByRole("dialog", { name: "Close Without Saving?" })
+    fireEvent.click(within(confirm).getAllByRole("button")[0]) // Cancel
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Close Without Saving?" })).toBeNull())
+    expect(onOpenConfig).not.toHaveBeenCalled()
+    expect(screen.getByRole("dialog", { name: "agent/config.xml" })).toBeTruthy()
+
+    fireEvent.click(within(dlg).getByRole("button", { name: "Edit in Configuration" }))
+    confirm = await screen.findByRole("dialog", { name: "Close Without Saving?" })
+    fireEvent.click(within(confirm).getByRole("button", { name: "Close" }))
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "agent/config.xml" })).toBeNull())
+    expect(onOpenConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it("a non-config file's editor has no Edit in Configuration", async () => {
+    await setup()
+    const { dlg } = await openNotes()
+    expect(within(dlg).queryByRole("button", { name: "Edit in Configuration" })).toBeNull()
+  })
+})
+
 describe("FilesTab row menu", () => {
   const menuItems = () => within(screen.getByRole("menu")).queryAllByRole("menuitem").map((m) => m.textContent)
 

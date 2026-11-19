@@ -32,6 +32,8 @@ type Props = {
   onClose: () => void
   /** Re-read the file after a stale (409) save. */
   onReload: () => void
+  /** Set for a `config` file: leave the editor (dirty check first) and switch to the Configuration tab. */
+  onOpenConfig?: () => void
 }
 
 const hdrBtn = "inline-flex items-center gap-1 rounded px-2.5 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:text-neutral-300 dark:hover:bg-neutral-700"
@@ -83,6 +85,7 @@ export function FileEditorModal(p: Props) {
           {p.readOnly && (
             <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-neutral-700 dark:text-neutral-300" title="ไฟล์นี้แก้ไขไม่ได้">Read-only</span>
           )}
+          {p.onOpenConfig && <button type="button" onClick={p.onOpenConfig} className={`${hdrBtn} text-blue-600 dark:text-blue-400`}>Edit in Configuration</button>}
           <a href={p.downloadHref} className={hdrBtn}><IconDownload className="h-3.5 w-3.5" />Download</a>
           {!p.readOnly && (
             <button type="button" disabled={!canSave} onClick={p.onSave} className="btn-primary inline-flex items-center gap-1 px-3 py-1 text-xs font-medium">

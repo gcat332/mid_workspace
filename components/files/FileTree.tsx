@@ -18,6 +18,8 @@ type Props = {
   onRowClick: (row: TreeRow) => void
   /** Open the row's menu at viewport position (x, y). */
   onMenu: (row: TreeRow, x: number, y: number) => void
+  /** Switch to the Configuration tab (the always-visible link on `config` rows). */
+  onOpenConfig: () => void
   /** Drop handlers for a folder row (upload into that folder). */
   dropProps: (dir: string) => DropHandlers
 }
@@ -32,7 +34,7 @@ const pad = (depth: number) => 6 + depth * 14
 const muted = "text-xs text-gray-400 dark:text-neutral-500"
 
 /** AgentHub-style explorer rows: chevron + icon + name, metadata on sm+, and a "⋯" menu button per row. */
-export function FileTree({ state, selected, dragOver, onRowClick, onMenu, dropProps }: Props) {
+export function FileTree({ state, selected, dragOver, onRowClick, onMenu, onOpenConfig, dropProps }: Props) {
   const rows = visibleRows(state)
   const root = state.children[""]
   if (root === undefined || root === "loading") return <p className={`px-3 py-2 ${muted}`}>Loading…</p>
@@ -62,6 +64,10 @@ export function FileTree({ state, selected, dragOver, onRowClick, onMenu, dropPr
                 <span className="truncate">{entry.name}</span>
                 {entry.readOnly && <span role="img" aria-label="Read-only" title="อ่านอย่างเดียว (แก้ไขไม่ได้)" className="shrink-0 text-xs">🔒</span>}
               </button>
+              {entry.config && (
+                <button type="button" onClick={onOpenConfig} title="แก้ไขไฟล์นี้ในแท็บ Configuration"
+                  className="ml-1 shrink-0 whitespace-nowrap rounded px-1 text-xs text-blue-600 hover:underline dark:text-blue-400">Edit in Configuration</button>
+              )}
               {!isDir && <span className={`hidden w-20 shrink-0 text-right tabular-nums sm:inline ${muted}`}>{formatSize(entry.size)}</span>}
               <span className={`hidden w-44 shrink-0 text-right tabular-nums sm:inline ${muted}`}>{entry.mtime ? new Date(entry.mtime).toLocaleString("th-TH") : ""}</span>
               <button type="button" aria-label={`More Actions: ${entry.name}`} title="More Actions" aria-haspopup="menu"
