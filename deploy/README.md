@@ -200,7 +200,8 @@ helper itself when the copy changed. Restarting the helper does not stop running
   cannot, set the buildstamp by hand in Admin > Instances.
 - Set MID user/password on instances created by an import (they have none) before installing.
 - Imported MIDs have no `version`, so the package cache GC does not keep their build's package.
-- Known blocker as of 2026-11-19: the signed package is rejected at extract (`docs/spike-mid-linux.md`, "Phase 2 verification").
+- Known blocker as of 2026-11-19 (`08d3718`): the helper unit's `User=root` + `NoNewPrivileges` + `ProtectKernelModules` leaves the
+  helper without CAP_SETUID on systemd 255, so `fixOwnership` fails (`docs/spike-mid-linux.md`, "Phase 2 verification", Bug 4).
 
 ## 8. Rollback / uninstall
 

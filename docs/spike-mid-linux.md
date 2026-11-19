@@ -55,55 +55,50 @@ by a human (it is a write to the instance).
 
 ## Phase 2 verification (2026-11-19)
 
-Run on the production deployment (`/home/bsmmidhub/midhub`, commit `6646724`, `bsm-midhub` + `bsm-midhub-helper`
-active, Caddy at `https://10.4.150.142/midhub`) through the HTTP API as the admin (plan Task 12, Steps 2-6).
-**Result: BLOCKED at the first install.** The real (signed) MID package is rejected by the extract stage, so
-install, clone, resume, the AgentHub file/upload checks and the uninstall of installed MIDs could not be verified.
-`spike1` was not touched and stayed Up throughout.
+Run on the production deployment (`/home/bsmmidhub/midhub`, `bsm-midhub` + `bsm-midhub-helper`, Caddy at
+`https://10.4.150.142/midhub`) through the HTTP API as the admin (plan Task 12, Steps 2-6). spike1 was not touched
+and stayed Up throughout.
+
+**Status: BLOCKED (second run, after fixes at `08d3718`).** Extract now passes, but every install/clone stops at
+`fixOwnership` (Bug 4 below). Clone, resume, the AgentHub file/upload checks and uninstall of a running MID are
+still unverified.
 
 ### Deviations
 
 - Instance `mfecplcdemo4` already existed (created by the spike1 import, without credentials). Its MID user/password were
   set with `PATCH /api/instances/<id>` using the **admin account** of the instance (no `mid_server`-only user exists
-  yet; a human still has to create one and replace the credentials in Admin > Instances).
+  yet; a human has to create one and replace the credentials in Admin > Instances).
 - Driven through the API (curl, admin cookie), not the browser UI; the admin is allowed to act as a member.
 
 ### Results
 
 | Step | Result |
 |---|---|
-| Instance credentials | ✅ `PATCH` 200 in 0.9 s; connection test passed; `buildstamp` **readable** (`glide.war` via `sys_properties`, admin creds) = `australia-02-11-2026__patch7w42-10-08-2026_10-13-2026_1248`. Not tested with a `mid_server`-only user. |
-| 2. Install `p2test` | ❌ `fetchPackage` **downloaded** the package (cache was empty: `/opt/midhub/packages` had been recreated, the spike's zip was gone): 488,425,848 bytes in ~46 s from `install.service-now.com`, progress logged every 5 %. `extract` then failed in < 0.1 s with `ไฟล์ MID ไม่ถูกต้องหรือไม่ปลอดภัย...` (see bug below). Retry resumed at `extract` (attempt 1) and failed the same way, so the failure is deterministic. Nothing was left in `staging/` or `mids/`. |
-| 3. Clone | ⛔ not run (needs an installed MID) |
-| 4. Resume after `systemctl restart bsm-midhub` | ⛔ not run (every install fails at extract, and the package is now cached so `fetchPackage` is instant) |
-| 5a/5b. Agent API checklist | ✅ on the failed `p2test` record: `GET agent/mids` lists all five checks; before: `agent_access`+`mid_ready` failed; `PATCH /api/mids/p2test {agentAccess:true}` 200; after: only `mid_ready` failed; with session instance `https://other.service-now.com` -> `instance_match` failed; per-MID route -> 403 `agent_check_failed` and an `agent.check_failed` audit row (`via`, `taskId`, `sessionInstances`, no secret). Auth: wrong secret 401, non-loopback `Host` 403 `agent_auth`, non-loopback `X-Forwarded-For` 403, `/midhub/api/agent/mids` via Caddy 404. |
-| 5c/5d/5e. Files, 50 MiB load check, 413, restart | ⛔ not run: every file route runs the checklist first, so it needs a `mid_ready` MID (spike1 must not be modified). The 413 / 429 checks sit behind the checklist too. |
-| 6. Uninstall | ✅ for the failed `p2test` (no dir, no unit): wrong `confirmName` -> 400; job `stop -> removeUnit -> archive ("ไม่พบโฟลเดอร์ MID ข้ามการสำรอง") -> deleteDir -> markRemoved` succeeded in 0.6 s; no archive (nothing to archive), no `/opt/midhub/mids/p2test`, no unit. The package was kept, but only because the failed install job still references its buildstamp: spike1's `version` is NULL (import does not set it), so `gcPackages` would not keep it for spike1. |
-| Instance records | `ecc_agent` (read-only GET): only `midhub-spike1` (Up, validated=false). No `midhub-p2*` records were created. |
+| Instance credentials | ✅ `PATCH` 200 in 0.9 s; `buildstamp` **readable** with admin creds (`glide.war`) = `australia-02-11-2026__patch7w42-10-08-2026_10-13-2026_1248`. Not tested with a `mid_server`-only user. |
+| 2. Install `p2test` (run 1, `6646724`) | ❌ `fetchPackage` downloaded 488,425,848 B in ~46 s (cache was empty); `extract` failed (Bug 1), shown as `internal` (Bug 2). |
+| 2. Install `p2test` (run 2, `08d3718`) | ❌ package **reused** from cache (`fetchPackage` < 0.1 s); `extract` ✅ 7.6 s (signed zip accepted); `copyFiles`/`configure` ✅; `fixOwnership` failed after 8 s: `fix_ownership_failed`, detail `chmod -R failed (code 127): setpriv: setresuid failed: Operation not permitted` (Bug 4). The failed-job error now carries its real code and detail, so Bug 2 and Bug 3 are fixed. Reviving the name auto-cancelled the previous lifecycle's failed job, as designed. |
+| 3. Clone, 4. Resume | ⛔ not run (need a working install) |
+| 5a/5b. Agent API checklist (run 1) | ✅ on the failed `p2test` record: five checks; `agent_access` toggled by `PATCH /api/mids/p2test`; other session instance -> `instance_match` failed, 403 `agent_check_failed`, `agent.check_failed` audit row without the secret. Wrong secret 401, non-loopback `Host`/`X-Forwarded-For` 403, via Caddy 404. `usable:true` not reachable (`mid_ready`). |
+| 5c-5e. Files, 4 x 50 MiB load, 413, restart | ⛔ not run (need a `mid_ready` MID; the size/busy checks sit behind the checklist) |
+| 6. Uninstall | ✅ (run 1) for a failed `p2test` without dir/unit: wrong `confirmName` 400; job succeeded in 0.6 s, no archive (nothing to archive). Uninstall of a real MID not yet verified. |
+| Instance records | `ecc_agent` (read-only GET): only `midhub-spike1` (Up, validated=false); no `midhub-p2*` records yet. |
 
-### Bug: signed MID package always rejected by `checkListing` (blocks every install)
+### Bug history (brief)
 
-- `lib/mids/extract.ts` `checkListing` parses `zipinfo` long lines with `^([-dlcbps?][-rwxsStT]{9})\s+...`.
-  The app-signed package (`PACKAGE_URL_RECIPE` above) has 3 `META-INF/*` entries (`MANIFEST.MF`, `GENERAL_.SF`,
-  `GENERAL_.RSA`) stored with FAT host attributes; `zipinfo` prints their mode as `-rw----` (7 chars), so those lines
-  do not match. The parsed count is 1142 vs 1145 names, which throws `zip_invalid("listing mismatch")`.
-- The official unsigned package of the same build (`.../package/mid/2026/10/13/mid.<buildstamp>.linux.x86-64.zip`,
-  488,278,604 bytes) has no `META-INF` and identical `agent/` entries (same 1142 names, sizes, CRC-32 and modes), so
-  it would pass. Swapping the cached package for it was not done (data change on production, not approved).
-- Unit tests use synthetic zips, so they did not catch it.
-
-### Bug (likely): stage errors lose their code and detail in the production build
-
-The job journal records `code: "internal"`, message `ตัวช่วยระบบทำงานผิดพลาด...` and detail = the `zip_invalid` message,
-instead of `code: "zip_invalid"` with detail `listing mismatch`. `failJob` (`lib/jobs/engine.ts`) wraps any error that is not
-`instanceof MidError` as `internal`. The production `.next` bundle contains two separate `MidError` classes
-(`chunks/lib_mids_names_ts_*.js` and `chunks/lib_http_route_ts_*.js`), so `instanceof` fails across chunks. Effect: users get the
-generic "helper failed" text plus advice to delete the package and re-download, which would not help, and the real cause is lost.
+1. Fixed in `33971b9`: `checkListing` rejected the signed package (FAT-attribute `META-INF/*` entries print a 7-char mode in `zipinfo`, giving "listing mismatch").
+2. Fixed in `33971b9`/`08d3718`: two `MidError` classes in the production bundle made `failJob` report every stage error as `internal` without its detail.
+3. Fixed in `33971b9`/`08d3718`: helper chown/chmod failures were reported as `systemctl_failed` without detail.
+4. **Open, blocks every install/clone:** the helper unit (`deploy/bsm-midhub-helper.service`) combines `User=root`,
+   `NoNewPrivileges=yes` and `ProtectKernelModules=yes`. Under systemd 255 (255.4-1ubuntu8.18) that combination starts the
+   service **without CAP_SETUID**: live helper `CapEff=000001fffffeff7f` (bit 7 clear), `CapInh=0000000000200100`. So the
+   `setpriv --reuid=midsvc` step of `fixOwnership` fails. Reproduced outside MidHub:
+   `systemd-run --wait --pipe -p User=root -p NoNewPrivileges=yes -p PrivateTmp=yes -p ProtectKernelModules=yes setpriv --reuid=midsvc --regid=midhub --clear-groups id`
+   -> `setpriv: setresuid failed: Operation not permitted`. Dropping `User=root` (or `ProtectKernelModules`, or `NoNewPrivileges`)
+   keeps CAP_SETUID. This is very likely also the cause of the spike1 import's `fixOwnership` failure. The earlier probe passed only
+   because it left out `User=root`.
 
 ### Other observations
 
-- spike1 import (06:56): audit `mid.import` has `fixOwnership: "failed: systemctl_failed"`; the app log only has the generic
-  message (detail dropped). A `setpriv --reuid=midsvc` no-op in a `NoNewPrivileges=yes` transient unit works, and spike1's tree is
-  fully `midsvc:midhub`, group-rw, with no symlinks. Likely cause (not confirmed): `chmod -R` racing files the running MID
-  creates or deletes. The helper reports chown/chmod failures under the code `systemctl_failed`.
-- A failed install job of a removed MID keeps its buildstamp in `gcPackages`' keep set indefinitely.
+- Imported MIDs get `version = NULL`, so `gcPackages` does not keep the package an imported MID runs.
+- A failed install job keeps its buildstamp in the GC keep set until the name is reused (then it is auto-cancelled).
+- The package cache did not survive the deploy (spike zip gone), so the first install downloads ~488 MB.
