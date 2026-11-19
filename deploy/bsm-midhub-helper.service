@@ -8,7 +8,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+# No `User=root` on purpose: root is the default for system units, and on systemd 255 an explicit
+# User=root combined with NoNewPrivileges + ProtectKernelModules starts the process WITHOUT
+# CAP_SETUID, so `setpriv --reuid=midsvc` (fixOwnership) fails with "setresuid failed".
+# deploy/golive-gates.sh checks the running helper still has CAP_SETUID/CAP_SETGID.
 Environment=NODE_ENV=production
 Environment=MIDHUB_ROOT=/opt/midhub
 Environment=MIDHUB_MAX_RUNNING=4

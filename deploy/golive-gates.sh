@@ -74,6 +74,18 @@ else
   no "$HELPER_LIB missing. Fix: sudo deploy/install.sh"
 fi
 
+# ── Gate 3b: helper keeps CAP_SETUID/CAP_SETGID (fixOwnership drops to midsvc via setpriv) ─
+hdr "Gate 3b — $HELPER_SERVICE has CAP_SETUID and CAP_SETGID"
+hpid=$(systemctl show -p MainPID --value "$HELPER_SERVICE" 2>/dev/null)
+capeff=$(sed -n 's/^CapEff:[[:space:]]*//p' "/proc/${hpid:-0}/status" 2>/dev/null)
+if [ -n "$capeff" ] && [ "${hpid:-0}" != "0" ]; then
+  # CAP_SETGID = bit 6, CAP_SETUID = bit 7
+  if (( (16#$capeff & 0xC0) == 0xC0 )); then ok "CapEff $capeff includes SETUID+SETGID"
+  else no "CapEff $capeff lacks SETUID/SETGID — every install fails at fixOwnership. Fix: no explicit User=root in $HELPER_SERVICE.service (see the unit comment), then sudo deploy/install.sh"; fi
+else
+  no "cannot read $HELPER_SERVICE capabilities (MainPID '${hpid:-}')"
+fi
+
 # ── Gate 4: fs.protected_hardlinks ────────────────────────────────────────────
 hdr "Gate 4 — fs.protected_hardlinks=1 (helper chown -R over MID trees depends on it)"
 ph=$(sysctl -n fs.protected_hardlinks 2>/dev/null)
