@@ -8,6 +8,9 @@ vi.mock("./ProfileMenu", () => ({ ProfileMenu: () => null }))
 import { AppChrome } from "./AppChrome"
 import pkg from "../package.json"
 
+import pkg2 from "../package.json"
+vi.stubEnv("NEXT_PUBLIC_APP_VERSION", pkg2.appVersion)
+
 afterEach(cleanup)
 
 describe("AppChrome header (matches AgentHub)", () => {
@@ -15,15 +18,18 @@ describe("AppChrome header (matches AgentHub)", () => {
 
   it("uses AgentHub's header spacing", () => {
     const c = setup()
+    const word = c.querySelector("header span.font-bold")!
+    expect(word.className).toContain("whitespace-nowrap")
+    expect(word.className).toContain("shrink-0")
     const header = c.querySelector("header")!
-    expect(header.className).toContain("px-5")
+    expect(header.className).toContain("px-3 sm:px-5")
     expect(header.className).not.toContain("gap-2")
     for (const img of Array.from(c.querySelectorAll("img"))) {
       expect(img.className).toContain("h-7")
       expect(img.className).toContain("-mt-1.5")
     }
     expect(c.querySelector("header span.w-px")!.className).toContain("mx-2")
-    expect(c.querySelector("header span.font-bold")!.className).toContain("text-2xl md:text-[31px] leading-8 md:leading-9")
+    expect(c.querySelector("header span.font-bold")!.className).toContain("text-xl sm:text-2xl md:text-[31px] leading-8 md:leading-9")
   })
 
   it("uses AgentHub's nav spacing and stays visible on phones", () => {
@@ -44,7 +50,7 @@ describe("AppChrome footer", () => {
     expect(footer.className).not.toContain("max-md:hidden")
     const link = Array.from(footer.querySelectorAll("a")).find((a) => a.textContent === "v0.3.0")!
     expect(link.getAttribute("href")).toBe("/changelog")
-    expect(pkg.appVersion).toBe("0.3.0")
+    expect(process.env.NEXT_PUBLIC_APP_VERSION).toBe(pkg.appVersion)
     expect(footer.querySelector("a[href^='mailto:']")).not.toBeNull()
   })
 })

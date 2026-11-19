@@ -78,14 +78,14 @@ export function FileEditorModal(p: Props) {
           <h2 id="file-editor-title" className="min-w-0 flex-1 truncate font-mono text-sm text-gray-700 dark:text-neutral-200">{p.path}</h2>
           {p.dirty && (
             <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
-              <span aria-hidden="true" className="text-amber-500">●</span>Unsaved changes
+              <span aria-hidden="true" className="text-amber-500">●</span>Unsaved Changes
             </span>
           )}
           {p.saved && !p.dirty && <span role="status" className="text-xs text-emerald-700 dark:text-emerald-400">Saved</span>}
           {p.readOnly && (
             <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-neutral-700 dark:text-neutral-300" title="ไฟล์นี้แก้ไขไม่ได้">Read-only</span>
           )}
-          {p.onOpenConfig && <button type="button" onClick={p.onOpenConfig} className={`${hdrBtn} text-blue-600 dark:text-blue-400`}>Edit in Configuration</button>}
+          {p.onOpenConfig && <button type="button" onClick={p.onOpenConfig} className={`${hdrBtn.replace("text-gray-600 ", "")} text-blue-600 dark:text-blue-400`}>Edit in Configuration</button>}
           <a href={p.downloadHref} className={hdrBtn}><IconDownload className="h-3.5 w-3.5" />Download</a>
           {!p.readOnly && (
             <button type="button" disabled={!canSave} onClick={p.onSave} className="btn-primary inline-flex items-center gap-1 px-3 py-1 text-xs font-medium">

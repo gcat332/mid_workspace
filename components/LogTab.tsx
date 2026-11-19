@@ -47,20 +47,26 @@ function marked(piece: string, start: number, ranges: [number, number][]): React
   return out
 }
 
-const Row = memo(function Row({ n, text, q }: { n: number; text: string; q: string }) {
+// The line body is memoised by (text, q) only; the row number is rendered outside it so appends don't re-render every body.
+const LineBody = memo(function LineBody({ text, q }: { text: string; q: string }) {
   const ranges = matchRanges(text, q)
-  const tokens = tokenizeLogLine(text)
-  const spans = tokens.map((t, i) => {
-    const start = tokens.slice(0, i).reduce((n, x) => n + x.text.length, 0)
-    return <span key={i} data-kind={t.kind} className={KIND_COLOR[t.kind]}>{marked(t.text, start, ranges)}</span>
-  })
+  const spans: React.ReactNode[] = []
+  let start = 0 // running token offset (linear, not a slice+reduce per token)
+  for (const [i, t] of tokenizeLogLine(text).entries()) {
+    spans.push(<span key={i} data-kind={t.kind} className={KIND_COLOR[t.kind]}>{marked(t.text, start, ranges)}</span>)
+    start += t.text.length
+  }
+  return <span className="whitespace-pre-wrap break-all">{spans.length ? spans : " "}</span>
+})
+
+function Row({ n, text, q }: { n: number; text: string; q: string }) {
   return (
     <div data-row className="grid grid-cols-[3.5rem_minmax(0,1fr)] hover:bg-white/5">
       <span data-gutter className="select-none pr-3 text-right text-[#858585]">{n}</span>
-      <span className="whitespace-pre-wrap break-all">{spans.length ? spans : " "}</span>
+      <LineBody text={text} q={q} />
     </div>
   )
-})
+}
 
 export function LogTab({ midName }: { midName: string }) {
   const [file, setFile] = useState<(typeof FILES)[number]["id"]>("main")
@@ -166,14 +172,14 @@ export function LogTab({ midName }: { midName: string }) {
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        <select aria-label="Log file" value={file} onChange={(e) => switchFile(e.target.value as typeof file)} className={ctl}>
+        <select aria-label="Log File" value={file} onChange={(e) => switchFile(e.target.value as typeof file)} className={ctl}>
           {FILES.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
         </select>
-        <select aria-label="Log level" value={level} onChange={(e) => setLevel(e.target.value)} className={ctl}>
+        <select aria-label="Log Level" value={level} onChange={(e) => setLevel(e.target.value)} className={ctl}>
           {LEVELS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
         </select>
         <input type="search" aria-label="Search" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)}
-          className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
+          className="min-w-[10rem] flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
         <button type="button" onClick={togglePause} aria-pressed={paused} className={ctl}>{paused ? "Follow" : "Pause"}</button>
         {paused && newWhilePaused > 0 && (
           <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">{newWhilePaused.toLocaleString()} new lines</span>
@@ -184,7 +190,7 @@ export function LogTab({ midName }: { midName: string }) {
         </span>
       </div>
       {err && <div className="mt-3"><ErrorNotice error={err} /></div>}
-      <div ref={box} tabIndex={0} aria-label="Log content"
+      <div ref={box} tabIndex={0} aria-label="Log Content"
         className="mt-3 h-[max(32rem,calc(100svh-22rem))] overflow-auto rounded-lg border border-neutral-700 bg-[#1e1e1e] py-2 font-mono text-[12.5px] leading-5 text-[#d4d4d4]">
         {shown.length === 0 && <p className="px-3 text-[#858585]">{status === "missing" ? "ไม่พบไฟล์ log (MID อาจยังไม่เคยรัน)" : "ยังไม่มีบรรทัดที่ตรงเงื่อนไข"}</p>}
         {shown.map((l, i) => <Row key={l.id} n={i + 1} text={l.text} q={q} />)}

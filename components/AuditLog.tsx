@@ -95,7 +95,7 @@ export function AuditLog() {
         </label>
         <label className="text-sm text-gray-700">
           <span className="mb-1 block">User</span>
-          <input className={input} value={user} maxLength={100} onChange={(e) => setUser(e.target.value)} placeholder="Part of email" />
+          <input className={input} value={user} maxLength={100} onChange={(e) => setUser(e.target.value)} placeholder="Part of Email" />
         </label>
       </div>
       {error && <div className="mb-3"><ErrorNotice error={error} /></div>}

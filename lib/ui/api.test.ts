@@ -71,4 +71,10 @@ describe("apiUpload", () => {
     FakeXHR.last!.onerror?.()
     await expect(p).rejects.toThrow()
   })
+  it("rejects (never hangs) when building the Response throws, e.g. status 0", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeXHR)
+    const p = apiUpload("/mids/m1/files", new FormData(), () => {})
+    FakeXHR.last!.respond(0, "", "text/plain")
+    await expect(p).rejects.toThrow()
+  })
 })

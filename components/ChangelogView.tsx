@@ -29,7 +29,7 @@ function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
 type Style = { label: string; icon: string; tone: Tone }
 const TAG_STYLE: Record<string, Style> = {
   feature:  { label: "Feature",  icon: "✨", tone: "blue" },
-  bug:      { label: "Bug fix",  icon: "🐛", tone: "amber" },
+  bug:      { label: "Bug Fix",  icon: "🐛", tone: "amber" },
   style:    { label: "Style",    icon: "🎨", tone: "purple" },
   security: { label: "Security", icon: "🔒", tone: "red" },
   chore:    { label: "Chore",    icon: "🔧", tone: "gray" },

@@ -1,6 +1,5 @@
 import type { ReactNode } from "react"
 import Link from "next/link"
-import { appVersion } from "@/package.json"
 import { NavLinks } from "@/components/NavLinks"
 import { ProfileMenu } from "@/components/ProfileMenu"
 import { BASE_PATH } from "@/lib/ui/api"
@@ -8,11 +7,13 @@ import { BASE_PATH } from "@/lib/ui/api"
 // Authenticated app chrome, modelled on AgentHub's: top header (MFEC logo + "BSM MIDHub" wordmark, profile
 // menu) and a section-tab row. Unlike AgentHub it stays visible on phones (MidHub is used on mobile).
 // The logos are AgentHub's own PNGs (public/); the wordmark is text. basePath is /midhub, so <img> needs it spelled out.
+// Injected at build time by next.config.ts (only the version, not the whole package.json).
 export function AppChrome({ user, children }: { user: { email: string; role: string }; children: ReactNode }) {
   const isAdmin = user.role === "admin"
+  const appVersion = process.env.NEXT_PUBLIC_APP_VERSION
   return (
     <div className="min-h-svh flex flex-col bg-gray-50 dark:bg-neutral-900">
-      <header className="relative shrink-0 flex items-center px-5 py-1.5 bg-white border-b border-gray-200 shadow-sm dark:bg-neutral-800 dark:border-neutral-700">
+      <header className="relative shrink-0 flex items-center px-3 sm:px-5 py-1.5 bg-white border-b border-gray-200 shadow-sm dark:bg-neutral-800 dark:border-neutral-700">
         {/* Logo swaps by theme via CSS: black on light, white on dark. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={`${BASE_PATH}/logo-mfec-black.png`} alt="MFEC" className="h-7 w-auto self-center -mt-1.5 dark:hidden" />
@@ -20,7 +21,7 @@ export function AppChrome({ user, children }: { user: { email: string; role: str
         <img src={`${BASE_PATH}/logo-mfec-white.png`} alt="MFEC" className="h-7 w-auto self-center -mt-1.5 hidden dark:block" />
         <span className="self-center h-6 w-px bg-gray-200 dark:bg-neutral-700 mx-2" />
         {/* The BSM gradient is AgentHub's sanctioned brand-identity gradient. */}
-        <span className="relative -top-px text-2xl md:text-[31px] leading-8 md:leading-9 font-bold tracking-tight text-gray-900 dark:text-neutral-50">
+        <span className="relative -top-px shrink-0 whitespace-nowrap text-xl sm:text-2xl md:text-[31px] leading-8 md:leading-9 font-bold tracking-tight text-gray-900 dark:text-neutral-50">
           <span className="bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 bg-clip-text text-transparent">BSM</span> <span className="text-blue-600 dark:text-blue-400">MIDHub</span>
         </span>
         <div className="ml-auto">
@@ -32,7 +33,7 @@ export function AppChrome({ user, children }: { user: { email: string; role: str
       </nav>
       <div className="flex-1 min-w-0">{children}</div>
       <footer className="shrink-0 px-4 py-1.5 text-center text-xs text-gray-400 bg-white border-t border-gray-200 dark:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-500">
-        © 2026 BSM MIDHub · <Link href="/changelog" title="View changelog" className="font-medium text-blue-600 underline underline-offset-2 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">v{appVersion}</Link> · Built by Kasira C. · <a href="mailto:kasira_c@mfec.co.th" className="hover:text-gray-600 dark:hover:text-neutral-300">kasira_c@mfec.co.th</a>
+        © 2026 BSM MIDHub · <Link href="/changelog" title="View Changelog" className="font-medium text-blue-600 underline underline-offset-2 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">v{appVersion}</Link> · Built by Kasira C. · <a href="mailto:kasira_c@mfec.co.th" className="hover:text-gray-600 dark:hover:text-neutral-300">kasira_c@mfec.co.th</a>
       </footer>
     </div>
   )

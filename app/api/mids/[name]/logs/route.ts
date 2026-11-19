@@ -112,6 +112,7 @@ export async function GET(req: Request, ctx: Ctx) {
                     sendLines(chunk); chunk = []; bytes = 0
                     // Let the client drain before the next chunk, or the whole window would sit in the queue at once.
                     while (!ac.signal.aborted && (controller.desiredSize ?? 1) <= 0) await new Promise((r) => setTimeout(r, 20))
+                    stalledSince = 0 // the client drained: a slow-but-healthy link must not be cut 10 s after the first frame
                   }
                   chunk.push(l); bytes += b
                 }

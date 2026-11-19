@@ -80,6 +80,21 @@ it("closes a client that stops reading (stalled > 10 s)", async () => {
   } finally { vi.useRealTimers() }
 })
 
+it("does not cut a slow-but-healthy client while the paced initial frames drain (stall timer resets)", async () => {
+  vi.useFakeTimers()
+  try {
+    stalled.mode = "replay-big"
+    const res = await get("?file=main")
+    const rd = res.body!.pipeThrough(new TextDecoderStream()).getReader()
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(6000)
+      await rd.read() // one read every 6 s: slow, but always draining
+      expect(stalled.signal?.aborted).toBe(false)
+    }
+    await rd.cancel().catch(() => {})
+  } finally { vi.useRealTimers() }
+})
+
 it("closes a client whose queue exceeds ~1 MB immediately", async () => {
   stalled.mode = "flood"
   const res = await get("?file=main")

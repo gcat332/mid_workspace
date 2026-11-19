@@ -46,6 +46,7 @@ export function apiUpload(path: string, body: FormData, onProgress: (percent: nu
     xhr.upload.onprogress = (e) => { if (e.lengthComputable && e.total > 0) onProgress(Math.round((e.loaded / e.total) * 100)) }
     xhr.onerror = xhr.onabort = xhr.ontimeout = () => reject(new TypeError("upload failed"))
     xhr.onload = () => {
+      try {
       const type = xhr.getResponseHeader("content-type") ?? ""
       const empty = [204, 205, 304].includes(xhr.status)
       const raw = new Response(empty ? null : xhr.responseText, { status: xhr.status, headers: type ? { "content-type": type } : {} })
@@ -57,6 +58,7 @@ export function apiUpload(path: string, body: FormData, onProgress: (percent: nu
         }
         resolve(res)
       }, reject)
+      } catch (e) { reject(e) }
     }
     xhr.send(body)
   })

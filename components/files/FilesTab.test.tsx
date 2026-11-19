@@ -113,13 +113,13 @@ describe("FilesTab editor", () => {
     await setup()
     const { dlg, editor } = await openNotes()
     expect(monaco.options).toEqual({ fontSize: 14, wordWrap: "on", minimap: { enabled: true }, scrollBeyondLastLine: false, automaticLayout: true, readOnly: false })
-    expect(within(dlg).queryByText("Unsaved changes")).toBeNull()
+    expect(within(dlg).queryByText("Unsaved Changes")).toBeNull()
     fireEvent.change(editor, { target: { value: "hello world" } })
-    expect(within(dlg).getByText("Unsaved changes").textContent).toContain("●")
+    expect(within(dlg).getByText("Unsaved Changes").textContent).toContain("●")
     ctrlS(editor)
     await within(dlg).findByText("Saved")
     expect(sent("PUT").map((c) => c.body)).toEqual([{ path: "notes.txt", content: "hello world", baseHash: "h1" }])
-    expect(within(dlg).queryByText("Unsaved changes")).toBeNull()
+    expect(within(dlg).queryByText("Unsaved Changes")).toBeNull()
   })
 
   it("Ctrl+S sends nothing without changes", async () => {
