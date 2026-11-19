@@ -108,8 +108,16 @@ describe("authenticateAgent", () => {
   it("a spoofed loopback XFF with a public Host is still refused", async () => {
     expect(await fail(req({ "x-forwarded-for": "127.0.0.1", host: "10.4.150.142" }))).toMatchObject({ code: "agent_auth", status: 403 })
   })
-  // AgentHub's Next rewrite (/midhub/:path* -> 127.0.0.1:3100, changeOrigin) makes Host loopback and the XFF
-  // loopback too when the client sent none, so only X-Forwarded-Host tells it apart from AgentHub's own fetch.
+  // Deployed AgentHub proxy: the browser's Host and the F5's client IP pass through, so the loopback Host and XFF
+  // checks refuse it on their own (and AgentHub strips the secret header before this is even reached).
+  it("refuses the deployed AgentHub proxy shape (Host = browser host, XFF = client IP) -> 403 agent_auth", async () => {
+    const e = await fail(req({ host: "dev-agenthub.mfec.co.th", "x-forwarded-host": "dev-agenthub.mfec.co.th", "x-forwarded-for": "10.20.30.40" }))
+    expect(e).toMatchObject({ code: "agent_auth", status: 403 })
+    expect(await fail(req({ host: "dev-agenthub.mfec.co.th", "x-forwarded-for": "10.6.141.20" }))).toMatchObject({ code: "agent_auth", status: 403 })
+    expect(findUnique).not.toHaveBeenCalled()
+  })
+  // Hypothetical real Next rewrite (/midhub/:path* -> 127.0.0.1:3100, changeOrigin; not what AgentHub runs): Host
+  // loopback and XFF loopback when the client sent none, so only X-Forwarded-Host tells it apart from AgentHub's own fetch.
   it("refuses a request forwarded through AgentHub's rewrite (X-Forwarded-Host = browser host) -> 403 agent_auth", async () => {
     for (const xfh of ["dev-agenthub.mfec.co.th", "evil.com", "127.0.0.1:3000", "localhost:3100", "", "127.0.0.1:3100, dev-agenthub.mfec.co.th"]) {
       const e = await fail(req({ "x-forwarded-host": xfh, "x-forwarded-for": "::ffff:127.0.0.1" }))

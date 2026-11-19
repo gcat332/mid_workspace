@@ -44,11 +44,12 @@ const unauthenticated = (): NextResponse =>
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 
 /**
- * The host the browser addressed: the first X-Forwarded-Host value, else Host. Behind AgentHub's Next rewrite
- * (changeOrigin) Host is the loopback target 127.0.0.1:3100 and X-Forwarded-Host the browser's host; Caddy sends
- * both as the browser's host. MidHub listens on loopback only, so only a local proxy can set the header (Caddy
- * and the rewrite both overwrite a client-sent one, and a browser cannot add it to a cross-origin request
- * without a CORS preflight that MidHub never grants).
+ * The host the browser addressed: the first X-Forwarded-Host value, else Host. Deployed AgentHub (hand-written
+ * /midhub proxy route) passes the browser's Host through unchanged and a client X-Forwarded-Host too, so both are
+ * the browser's host (or Next fills in a copy of Host); Caddy sends both as the browser's host. Only if AgentHub
+ * switched to a real Next rewrite would Host be 127.0.0.1:3100 with X-Forwarded-Host carrying the browser's host,
+ * which this also handles. Why trusting the header is safe: a browser cannot add it to a cross-origin request
+ * without a CORS preflight, which MidHub never grants.
  */
 function browserHost(req: NextRequest): string {
   const fwd = req.headers.get("x-forwarded-host")?.split(",")[0].trim()

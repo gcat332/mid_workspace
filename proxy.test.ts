@@ -385,8 +385,15 @@ describe("CSRF origin check on unsafe API methods (M1)", () => {
     expect((await unsafe("POST", { "sec-fetch-site": "none" })).status).toBe(200)
     expect((await unsafe("POST", {})).status).toBe(200)
   })
-  // Behind AgentHub's Next rewrite (/midhub/:path* -> http://127.0.0.1:3100/midhub/:path*, changeOrigin) Host is
-  // the loopback target and X-Forwarded-Host carries the browser's host.
+  // Deployed AgentHub proxy (app/midhub/[[...path]]/route.ts): Host = the browser's host, X-Forwarded-For = the client.
+  it("deployed AgentHub shape: Host = browser host, XFF = client IP; Origin = that host passes, a foreign one 403s", async () => {
+    const deployed = { host: "dev-agenthub.mfec.co.th", "x-forwarded-for": "10.20.30.40" }
+    expect((await unsafe("POST", { ...deployed, origin: "https://dev-agenthub.mfec.co.th" })).status).toBe(200)
+    expect((await unsafe("POST", { ...deployed, "x-forwarded-host": "dev-agenthub.mfec.co.th", origin: "https://dev-agenthub.mfec.co.th" })).status).toBe(200)
+    expect((await unsafe("POST", { ...deployed, origin: "https://evil.example" })).status).toBe(403)
+  })
+  // Hypothetical real Next rewrite (/midhub/:path* -> http://127.0.0.1:3100/midhub/:path*, changeOrigin): Host is
+  // the loopback target and X-Forwarded-Host carries the browser's host. AgentHub does not run this today.
   it("rewrite shape: Origin = X-Forwarded-Host (Host 127.0.0.1:3100) passes", async () => {
     const res = await unsafe("POST", {
       host: "127.0.0.1:3100", "x-forwarded-host": "dev-agenthub.mfec.co.th",

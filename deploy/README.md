@@ -3,7 +3,7 @@
 Layout on the host: web app `bsm-midhub.service` (user `bsmmidhub`, 127.0.0.1:3100, basePath `/midhub`),
 root helper `bsm-midhub-helper.service` (socket `/run/midhub/helper.sock`, 0660 root:bsmmidhub).
 Two ways in: `https://10.4.150.142/midhub` through Caddy (section 4), and `https://dev-agenthub.mfec.co.th/midhub`
-through the corporate F5 and AgentHub's Next rewrite, which does NOT pass through Caddy (section 10). The installer renders unit templates with the real repo path (`APP_DIR`, default =
+through the corporate F5 and AgentHub's /midhub proxy route, which does NOT pass through Caddy (section 10). The installer renders unit templates with the real repo path (`APP_DIR`, default =
 the repo root containing `deploy/`; override: `sudo APP_DIR=/path deploy/install.sh` or pass as arg 1).
 `install.sh` never touches `bsm-agenthub` or Caddy.
 
@@ -38,9 +38,9 @@ writable, `fs.protected_hardlinks=1`, SQLite `journal_mode=wal`, `better-sqlite3
 site any more, see section 10), `/midhub/api/agent/mids` (also `%61gent`) = 404 via Caddy, loopback agent API
 without the secret refused, AgentHub `/` still 200/307, `MIDHUB_AGENT_SECRET` absent or >= 32 chars, `.env.local`
 mode 0600, AgentHub's listener owner, and (Gate 14) the domain path straight at AgentHub's :3000 with
-`Host: dev-agenthub.mfec.co.th`: `/midhub/login` = 200 and every agent-path variant of section 10 = 404 (MANUAL
-"AgentHub rewrite not deployed yet" while login and all variants are 404; FAIL if any variant is not 404, a redirect
-counting only if it ends in 404). MANUAL: an AgentHub admin can open /midhub on both entries and save something,
+`Host: dev-agenthub.mfec.co.th`: `/midhub/login` = 200 and every agent-path variant of section 10 refused (404, or 401/403 from MidHub; MANUAL
+"AgentHub proxy not deployed yet" while login and all variants are 404; FAIL on any 2xx, or on a redirect whose final
+status is 2xx). MANUAL: an AgentHub admin can open /midhub on both entries and save something,
 SSE streams through the domain, spike MID validated in the instance.
 
 ## 1. Build (as bsmmidhub, in APP_DIR)
@@ -307,10 +307,10 @@ can edit MID files from a session. API reference: `docs/agent-api.md`.
    `MIDHUB_URL=http://127.0.0.1:3100/midhub`, then restart AgentHub (done by its owner, not by this runbook).
 4. The 404 for `/midhub/api/agent` and `/midhub/api/agent/*` is MANDATORY on every way in: `@midhubAgent` +
    `respond @midhubAgent 404` from `deploy/Caddyfile.midhub` in every Caddy site that carries `handle @midhub`
-   (section 4), and AgentHub's own 404 in front of its `/midhub` rewrite (section 10). The secret + loopback checks in
+   (section 4), and AgentHub's own 404 in its `/midhub` proxy route (section 10). The secret + loopback checks in
    the app are defense in depth only.
 5. Host must not be rewritten to loopback: AgentHub calls `127.0.0.1:3100` directly so `Host` is genuinely loopback.
-   Do not route this call through Caddy or AgentHub's rewrite and do not add a `header_up Host 127.0.0.1` to make it
+   Do not route this call through Caddy or AgentHub's /midhub proxy and do not add a `header_up Host 127.0.0.1` to make it
    pass; MidHub answers 403 `agent_auth` to any request whose Host or X-Forwarded-For/X-Real-IP/Forwarded is not
    loopback, or whose `X-Forwarded-Host` differs from `Host` (AgentHub's patch route must not send that header).
 6. Per MID, a user switches "อนุญาตให้ AgentHub" on in the overview tab (default off).
@@ -327,45 +327,60 @@ second (same call plus a forwarding header), and 404 from the third:
       -H "X-MidHub-Session-Id: check-1" -H 'X-Forwarded-For: 1.2.3.4' http://127.0.0.1:3100/midhub/api/agent/mids
     curl -s -o /dev/null -w '%{http_code}\n' https://<host>/midhub/api/agent/mids      # must be 404 via Caddy
 
-## 10. Domain path via AgentHub rewrite
+## 10. Domain path via AgentHub's /midhub proxy
 
 `https://dev-agenthub.mfec.co.th/midhub` does not go through Caddy. Request flow:
 
-    browser --https--> corporate F5 (TLS ends here; sends X-Forwarded-For: <client>, no X-Forwarded-Proto)
-            --http--> AgentHub's Next server :3000
-            --rewrite /midhub/:path* -> http://127.0.0.1:3100/midhub/:path*--> MidHub (127.0.0.1:3100 only)
+    browser --https--> corporate F5 (TLS ends here; X-Forwarded-For, no X-Forwarded-Proto)
+            --http--> AgentHub's Next server :3000   (firewalled to the F5 and localhost)
+            --node:http--> MidHub 127.0.0.1:3100/midhub   (loopback only)
 
-Next's rewrite proxy (`next/dist/server/lib/router-utils/proxy-request.js`, httpxy with `changeOrigin: true`) sets
-`Host: 127.0.0.1:3100` and `X-Forwarded-Host: <browser's host>`, overwriting any client-sent value. What MidHub does
-with that shape:
+AgentHub serves `/midhub` with a hand-written route, not a `next.config` rewrite: `app/midhub/[[...path]]/route.ts` and
+`lib/midhub/ui-proxy.ts` in its repo (read-only reference for this runbook; its owner maintains it). What it does, and
+so what MidHub sees:
 
-- CSRF: unsafe API methods compare `Origin` with the first `X-Forwarded-Host` value (else `Host`), so
-  `Origin: https://dev-agenthub.mfec.co.th` passes and any other origin is refused (`proxy.ts`). Only local proxies can
-  set the header: MidHub listens on loopback only.
+- **Host is the browser's, unchanged** (`dev-agenthub.mfec.co.th`), not 127.0.0.1:3100.
+- Client headers pass through, including a client-sent `X-Forwarded-Host`, `X-Forwarded-For`, `X-Real-IP` and
+  `Forwarded`; only hop-by-hop headers and **every `x-midhub-*` header are stripped**. Next's server also fills in any of
+  `X-Forwarded-Host` (= Host), `X-Forwarded-For` (= the socket peer, i.e. the F5) and `X-Forwarded-Proto` that are missing.
+- **`/midhub/api/agent` and `/midhub/api/agent/*` get a 404 in AgentHub**, decided on the decoded path segments
+  (case-insensitive; empty and dot segments refused) and the upstream path is rebuilt from exactly those segments.
+  `/midhub/api/agent%2Fmids` is a different single segment, is forwarded, and MidHub does not route it to the agent API.
+- Bodies and SSE stream through; an absolute `Location` for the public host or the upstream is made relative.
+
+What MidHub does with that shape:
+
+- CSRF: unsafe API methods compare `Origin` with the first `X-Forwarded-Host` value, else `Host`. Here both are the
+  browser's host, so `Origin: https://dev-agenthub.mfec.co.th` passes and any other origin is refused (`proxy.ts`). A
+  browser cannot add `X-Forwarded-Host` to a cross-origin request without a CORS preflight, which MidHub never grants.
 - Redirects are relative (`/midhub/...`, no scheme or host), so the browser stays on `https://dev-agenthub.mfec.co.th`
-  although the F5 sends no `X-Forwarded-Proto` (`proxy.redirects.test.ts`).
+  although the F5 sends no `X-Forwarded-Proto` (`proxy.redirects.test.ts`). This relies on the unit's
+  `next start -H 127.0.0.1 -p 3100` (`deploy/bsm-midhub.service`), which makes Next's request URL absolute.
 - `midhub_session` is `Secure` in production from `NODE_ENV`, never from the request's scheme; `Path=/midhub`,
   host-only, so it is a separate cookie per entry (IP and domain).
-- `/midhub/api/agent/*` refuses any request whose `X-Forwarded-Host` differs from `Host` (403 `agent_auth`), which
-  every request through the rewrite does, besides needing the secret.
-- IP allowlist: MidHub checks the left-most `X-Forwarded-For` entry. On this path that is the value the F5 sends, so
-  **the allowlist trusts the F5's `X-Forwarded-For`**. This holds only while the F5 overwrites (not appends to) a
-  client-sent `X-Forwarded-For` and always sends one: if a client value reached MidHub it could pick its own IP, and
-  with no header at all MidHub sees AgentHub's loopback address, which the allowlist always admits.
+- IP allowlist: MidHub checks the left-most `X-Forwarded-For` entry, which here is whatever the F5 delivers.
+  **The allowlist therefore trusts the F5's `X-Forwarded-For`** and holds only if the F5 overwrites (not appends to) a
+  client-sent value. See the MANUAL check in the gates (below).
 
-What AgentHub must do (its repo, its owner; MidHub's deploy never touches it):
+**What protects the agent API on the domain path** (all four hold together; any one of the first, second and fourth
+already closes the browser route):
 
-1. A 404 for `/midhub/api/agent` and `/midhub/api/agent/*` BEFORE the rewrite, covering encoded, case and double-slash
-   variants (match on the decoded, case-folded path with repeated slashes collapsed, or simply 404 anything under
-   `/midhub/api/` whose decoded, lowercased path starts with `/midhub/api/agent`).
-2. Keep AgentHub's `proxy.ts` off `/midhub` (its matcher must exclude it): MidHub does its own auth, CSRF and IP checks,
-   and AgentHub's proxy would redirect MidHub pages to AgentHub's `/login` or buffer upload bodies.
-3. `proxyTimeout` >= 120 s for the rewrite (Next's default is 30 s). It is an idle timeout: MidHub's SSE streams (log
-   tail, job progress) send a `: ping` every 15 s, so they stay open; slow non-streaming calls need the longer value.
-   SSE responses carry `Cache-Control: no-transform`, so AgentHub's gzip leaves them unbuffered.
+1. AgentHub refuses `api/agent` (404, decoded segments).
+2. AgentHub strips `x-midhub-*`, so the agent secret cannot be passed through the domain; MidHub then answers 401.
+3. MidHub itself needs the secret AND an all-loopback `X-Forwarded-For` (plus loopback Host, `X-Real-IP`, `Forwarded`).
+4. Port 3000 is firewalled to the F5 and localhost, so nobody can skip the F5.
 
-Variants AgentHub should test (each must be 404 at AgentHub, or a Next 308 to a path that is 404; Gate 14 checks
-them with `curl --path-as-is -H 'Host: dev-agenthub.mfec.co.th' http://127.0.0.1:3000<path>`):
+MidHub's rule "refuse when `X-Forwarded-Host` differs from `Host`" (`lib/agent/auth.ts`) is defense in depth for a
+real Next `rewrites()` only, where Host would become 127.0.0.1:3100 and `X-Forwarded-Host` the browser's host. It adds
+nothing against the deployed proxy, which passes Host through (a client can send `Host: 127.0.0.1:3100` and get a
+matching copy). MidHub's CSRF and agent checks also hold if AgentHub ever switches to a real rewrite.
+
+AgentHub's side (its repo, its owner; MidHub's deploy never touches it): keep its `proxy.ts` matcher off `/midhub`
+(MidHub does its own auth, CSRF and IP checks; AgentHub's gate would redirect MidHub pages to `/login` or buffer
+uploads), and keep the `api/agent` refusal and the `x-midhub-*` stripping. The proxy sets no timeout, so SSE (log tail,
+job progress; `: ping` every 15 s, `Cache-Control: no-transform`) stays open.
+
+Variants Gate 14 probes (`curl --path-as-is -H 'Host: dev-agenthub.mfec.co.th' http://127.0.0.1:3000<path>`):
 
     /midhub/api/agent
     /midhub/api/agent/mids
@@ -375,13 +390,18 @@ them with `curl --path-as-is -H 'Host: dev-agenthub.mfec.co.th' http://127.0.0.1
     /midhub//api/agent/mids
     /midhub/api/agent%2Fmids
 
-Next answers the two doubled-slash spellings itself with a 308 to `/midhub/api/agent/mids` before any rewrite runs;
-that is fine as long as the clean path is 404. Check by hand:
+Each must be refused: 404 (AgentHub's refusal), or 401/403 (reached MidHub, which has no agent route at that path or no
+session), or a redirect (Next's 308 for a doubled slash) whose final status is one of those. Any 2xx fails. Check by hand:
 
     for p in /midhub/login /midhub/api/agent /midhub/api/agent/mids /midhub/api/%61gent/mids /midhub/api/Agent/mids \
              //midhub/api/agent/mids /midhub//api/agent/mids /midhub/api/agent%2Fmids; do
       printf '%-28s %s\n' "$p" "$(curl -s -o /dev/null --path-as-is -w '%{http_code}' -H 'Host: dev-agenthub.mfec.co.th' "http://127.0.0.1:3000$p")"
     done
 
-Expected: `/midhub/login` 200 (MidHub's access page), every agent spelling 404 (or 308 for the doubled slashes).
+Expected: `/midhub/login` 200 (MidHub's access page); the first six spellings 404 (308 for the doubled slashes);
+`agent%2Fmids` 404, 401 or 403.
+
+MANUAL (F5 `X-Forwarded-For`): from outside, send `X-Forwarded-For: 127.0.0.1` through the domain with a non-empty
+MidHub IP allowlist; it must be blocked. If it isn't, the F5 appends instead of replacing; ask network to make it
+overwrite.
 

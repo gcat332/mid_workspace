@@ -24,9 +24,11 @@ const { NextResponse } = await import("next/server")
 const { proxy } = await import("@/proxy")
 const { signToken } = await import("@/lib/auth/jwt")
 
-// Header shapes MidHub sees. Rewrite: AgentHub's Next proxy (httpxy, changeOrigin) sets Host to the target and
-// X-Forwarded-Host to the browser's host; the F5 adds the client in X-Forwarded-For and no X-Forwarded-Proto.
+// Header shapes MidHub sees. REWRITE models a hypothetical real Next rewrites() rule (Host = target, X-Forwarded-Host =
+// browser host). DEPLOYED is AgentHub's actual hand-written proxy: browser Host passed through, client IP in
+// X-Forwarded-For (from the F5), Next fills in X-Forwarded-Host = Host. Neither side sends X-Forwarded-Proto.
 const REWRITE = { host: "127.0.0.1:3100", "x-forwarded-host": "dev-agenthub.mfec.co.th", "x-forwarded-for": "10.20.30.40" }
+const DEPLOYED = { host: "dev-agenthub.mfec.co.th", "x-forwarded-host": "dev-agenthub.mfec.co.th", "x-forwarded-for": "10.20.30.40" }
 const CADDY = { host: "10.4.150.142", "x-forwarded-host": "10.4.150.142", "x-forwarded-proto": "https", "x-forwarded-for": "10.20.30.40" }
 
 // Production builds the proxy's request URL from the server's own address (next-server.js runEdgeFunction /
@@ -67,7 +69,7 @@ beforeEach(() => {
   warn = vi.spyOn(console, "warn").mockImplementation(() => {}) // the unreachable lookup's diagnostics
 })
 
-describe.each([["AgentHub rewrite", REWRITE], ["Caddy", CADDY]])("redirects are relative (%s)", (_n, shape) => {
+describe.each([["AgentHub deployed proxy", DEPLOYED], ["hypothetical rewrite", REWRITE], ["Caddy", CADDY]])("redirects are relative (%s)", (_n, shape) => {
   it("gate: a page without a session -> /midhub/api/auth/agenthub?next=...", async () => {
     const loc = expectRelative(await throughNext("/mids?x=1", shape))
     expect(loc).toBe("/midhub/api/auth/agenthub?next=%2Fmids%3Fx%3D1")
