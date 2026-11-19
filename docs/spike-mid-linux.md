@@ -97,7 +97,7 @@ or uploaded by AgentHub survive only until the next sync unless they are registe
 3. Fixed (`33971b9`/`08d3718`): chown/chmod failures were reported as `systemctl_failed` without detail.
 4. Fixed (`e2fc6d9`): the helper unit's `User=root` + `NoNewPrivileges` + `ProtectKernelModules` dropped CAP_SETUID on systemd 255, so
    `setpriv` in `fixOwnership` failed (also the cause of the spike1 import's fixOwnership failure).
-5. **Fix committed (36ec587 + reset-failed), host re-verification pending (unit `Restart=always`; see deploy/README.md):** a new MID stops itself after the instance's first property sync. About 30-40 s after the first connect the MID logs
+5. **Verified on host (2026-11-19, commit 24dae4e; unit `Restart=always`):** a fresh MID `p3check` was installed (job succeeded 08:14:57), the MID restarted itself at 08:15:28 (~40 s after first connect, ShutdownHandler in agent0.log.0), systemd brought the unit back to `active` by 08:15:42 (`NRestarts=1`) and the log shows "MID Server is connected to instance" again at 08:15:53. Uninstall afterwards was clean (unit gone, folder gone, archive `p3check-20261119-081737.tar.gz` 172,720 B). Check of I1 (`reset-failed` before start/restart): 6 back-to-back `POST /api/mids/p3check/actions {"action":"restart"}` all returned 200 (first 8.6 s, rest ~1 s), unit `active`, `Result=success`.
    `Changed properties saved to MID glide.properties file: [com.service_now.mid.logging.MIDLogFileHandler.count=10]` and
    `Restarting MID Server as MID glide.properties file has been updated with settings from the Instance`. The wrapper then gets
    TERM, exits 0, and systemd marks the unit inactive (`Restart=on-failure` does not fire). Seen on p2test, p2clone and p2resume
