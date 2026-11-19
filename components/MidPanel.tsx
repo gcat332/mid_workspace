@@ -9,6 +9,7 @@ import { LogTab } from "./LogTab"
 import { JobProgress } from "./JobProgress"
 import { OverviewTab } from "./OverviewTab"
 import { apiFetch } from "@/lib/ui/api"
+import { StatusPill } from "@/components/StatusPill"
 import { failedJobShown, jobIsActive, statusView, type HostView, type MidView } from "@/lib/ui/status-view"
 import { tabKeyTarget } from "@/lib/ui/tabs"
 import { quotaFullMessage } from "@/lib/mids/messages"
@@ -149,7 +150,7 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
     <section aria-label={`MID ${mid.name}`} className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="mr-2 min-w-0 break-all text-xl font-semibold text-gray-900">{mid.name}</h2>
-        <span className="text-sm text-gray-600">{sv.icon} {sv.label}</span>
+        <StatusPill view={sv} />
         <div className="flex flex-wrap gap-2 sm:ml-auto">
           <button type="button" onClick={() => request("restart")} disabled={busy || !!busyReason || !isUp}
             aria-describedby="mid-btn-reasons"

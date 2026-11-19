@@ -4,6 +4,7 @@ import { AgentAccessSwitch } from "./AgentAccessSwitch"
 import { safeHttpUrl } from "@/lib/ui/api"
 import { instanceRecordUrl } from "@/lib/ui/record-link"
 import { jobKindLabel, jobStatusLabel } from "@/lib/ui/stages"
+import { StatusPill } from "@/components/StatusPill"
 import { formatBytes, formatJobTime, formatUptime, statusView, type MidView } from "@/lib/ui/status-view"
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -37,7 +38,7 @@ export function OverviewTab({ mid, jobShown = false, busyReason = null, onChange
       </Row>
       <Row label="MID Server Name">{mid.midName ?? "-"}</Row>
       <Row label="Version">{mid.version || "Unknown"}</Row>
-      <Row label="Service Status">{sv.icon} {sv.label}</Row>
+      <Row label="Service Status"><StatusPill view={sv} /></Row>
       <Row label="Uptime">{running ? formatUptime(mid.status.since) : "-"}</Row>
       <Row label="Memory Usage">{formatBytes(mid.status.memoryBytes)}</Row>
       <Row label="Heap">{mid.heapMb} MB</Row>

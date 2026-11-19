@@ -30,7 +30,8 @@ export type HostView = {
   disk?: { freeBytes: number | null; totalBytes: number | null; usage: { mids: number; packages: number; archive: number } | null }
 }
 
-export type StatusView = { icon: "🟢" | "⚪" | "🟡" | "🔴"; label: string }
+export type StatusTone = "running" | "stopped" | "busy" | "failed" | "unknown"
+export type StatusView = { tone: StatusTone; label: string }
 
 /** Status wording. The UI is English; the AgentHub API (/api/agent/mids) keeps its Thai `status` strings. */
 const LABELS = {
@@ -57,17 +58,17 @@ export function resumableUninstall(m: Pick<MidView, "job" | "state">): boolean {
 
 export function statusView(m: JobPick, locale: "en" | "th" = "en"): StatusView {
   const L = LABELS[locale]
-  const busy: StatusView = { icon: "🟡", label: L.working }
-  if (m.job && jobIsActive(m)) return { icon: "🟡", label: runningJobLabel(m.job, locale) }
-  if (m.job && failedJobShown(m)) return { icon: "🔴", label: isRemovalKind(m.job.kind) ? L.uninstallFailed : L.installFailed }
+  const busy: StatusView = { tone: "busy", label: L.working }
+  if (m.job && jobIsActive(m)) return { tone: "busy", label: runningJobLabel(m.job, locale) }
+  if (m.job && failedJobShown(m)) return { tone: "failed", label: isRemovalKind(m.job.kind) ? L.uninstallFailed : L.installFailed }
   if (m.state === "installing" || m.state === "upgrading" || m.state === "uninstalling") return busy
-  if (m.state === "error") return { icon: "🔴", label: L.failed }
+  if (m.state === "error") return { tone: "failed", label: L.failed }
   switch (m.status.state) {
-    case "running": return { icon: "🟢", label: L.running }
-    case "stopped": return { icon: "⚪", label: L.stopped }
-    case "starting": return { icon: "🟡", label: locale === "th" ? L.working : L.starting }
-    case "failed": return { icon: "🔴", label: L.failed }
-    default: return { icon: "⚪", label: L.unknown }
+    case "running": return { tone: "running", label: L.running }
+    case "stopped": return { tone: "stopped", label: L.stopped }
+    case "starting": return { tone: "busy", label: locale === "th" ? L.working : L.starting }
+    case "failed": return { tone: "failed", label: L.failed }
+    default: return { tone: "unknown", label: L.unknown }
   }
 }
 

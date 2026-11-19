@@ -8,17 +8,17 @@ const mid = (state: string, st: MidView["status"]["state"]): MidView => ({
 
 describe("statusView", () => {
   it.each([
-    ["ready", "running", "🟢", "Running"],
-    ["ready", "stopped", "⚪", "Stopped"],
-    ["ready", "starting", "🟡", "Starting"],
-    ["ready", "failed", "🔴", "Failed"],
-    ["ready", "unknown", "⚪", "Unknown"],
-    ["installing", "stopped", "🟡", "Working"],
-    ["upgrading", "running", "🟡", "Working"],
-    ["uninstalling", "stopped", "🟡", "Working"],
-    ["error", "stopped", "🔴", "Failed"],
-  ])("state=%s status=%s", (state, st, icon, label) => {
-    expect(statusView(mid(state, st as MidView["status"]["state"]))).toEqual({ icon, label })
+    ["ready", "running", "running", "Running"],
+    ["ready", "stopped", "stopped", "Stopped"],
+    ["ready", "starting", "busy", "Starting"],
+    ["ready", "failed", "failed", "Failed"],
+    ["ready", "unknown", "unknown", "Unknown"],
+    ["installing", "stopped", "busy", "Working"],
+    ["upgrading", "running", "busy", "Working"],
+    ["uninstalling", "stopped", "busy", "Working"],
+    ["error", "stopped", "failed", "Failed"],
+  ])("state=%s status=%s", (state, st, tone, label) => {
+    expect(statusView(mid(state, st as MidView["status"]["state"]))).toEqual({ tone, label })
   })
 })
 
@@ -36,29 +36,29 @@ describe("statusView with a job", () => {
     ["uninstall", "archive", "Removing"],
     ["cancel_install", "deleteDir", "Removing"],
   ])("running %s/%s -> yellow %s", (kind, stage, label) => {
-    expect(statusView(withJob("installing", J(kind, stage, "running")))).toEqual({ icon: "🟡", label })
+    expect(statusView(withJob("installing", J(kind, stage, "running")))).toEqual({ tone: "busy", label })
   })
   it("queued counts as active; an active job beats a running service", () => {
-    expect(statusView(withJob("installed", J("install", "extract", "queued"), "running"))).toEqual({ icon: "🟡", label: "Extracting" })
+    expect(statusView(withJob("installed", J("install", "extract", "queued"), "running"))).toEqual({ tone: "busy", label: "Extracting" })
   })
   it("failed install -> red 'Install Failed' while the MID is not installed", () => {
-    expect(statusView(withJob("error", J("install", "extract", "failed")))).toEqual({ icon: "🔴", label: "Install Failed" })
-    expect(statusView(withJob("installing", J("clone", "extract", "failed")))).toEqual({ icon: "🔴", label: "Install Failed" })
+    expect(statusView(withJob("error", J("install", "extract", "failed")))).toEqual({ tone: "failed", label: "Install Failed" })
+    expect(statusView(withJob("installing", J("clone", "extract", "failed")))).toEqual({ tone: "failed", label: "Install Failed" })
   })
   it("cancel_install: running -> Removing, failed -> Uninstall Failed", () => {
-    expect(statusView(withJob("installing", J("cancel_install", "stop", "running")))).toEqual({ icon: "🟡", label: "Removing" })
-    expect(statusView(withJob("error", J("cancel_install", "stop", "failed")))).toEqual({ icon: "🔴", label: "Uninstall Failed" })
+    expect(statusView(withJob("installing", J("cancel_install", "stop", "running")))).toEqual({ tone: "busy", label: "Removing" })
+    expect(statusView(withJob("error", J("cancel_install", "stop", "failed")))).toEqual({ tone: "failed", label: "Uninstall Failed" })
   })
   it("failed removal -> red 'Uninstall Failed'", () => {
-    expect(statusView(withJob("error", J("uninstall", "archive", "failed")))).toEqual({ icon: "🔴", label: "Uninstall Failed" })
+    expect(statusView(withJob("error", J("uninstall", "archive", "failed")))).toEqual({ tone: "failed", label: "Uninstall Failed" })
   })
   it("an old failed job does not hide a healthy installed MID", () => {
-    expect(statusView(withJob("installed", J("install", "extract", "failed"), "running"))).toEqual({ icon: "🟢", label: "Running" })
+    expect(statusView(withJob("installed", J("install", "extract", "failed"), "running"))).toEqual({ tone: "running", label: "Running" })
   })
   it("succeeded/cancelled jobs and a null job fall back to the service state", () => {
-    expect(statusView(withJob("installed", J("install", "markRemoved", "succeeded"), "running"))).toEqual({ icon: "🟢", label: "Running" })
-    expect(statusView(withJob("installed", J("install", "extract", "cancelled"), "stopped"))).toEqual({ icon: "⚪", label: "Stopped" })
-    expect(statusView({ ...mid("installed", "stopped"), job: null })).toEqual({ icon: "⚪", label: "Stopped" })
+    expect(statusView(withJob("installed", J("install", "markRemoved", "succeeded"), "running"))).toEqual({ tone: "running", label: "Running" })
+    expect(statusView(withJob("installed", J("install", "extract", "cancelled"), "stopped"))).toEqual({ tone: "stopped", label: "Stopped" })
+    expect(statusView({ ...mid("installed", "stopped"), job: null })).toEqual({ tone: "stopped", label: "Stopped" })
   })
 })
 

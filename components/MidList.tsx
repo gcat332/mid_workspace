@@ -1,3 +1,4 @@
+import { StatusDot } from "@/components/StatusPill"
 import { failedJobShown, jobIsActive, statusView, type MidView } from "@/lib/ui/status-view"
 
 type Props = { mids: MidView[]; selected: string | null; onSelect: (name: string) => void }
@@ -14,7 +15,7 @@ export function MidList({ mids, selected, onSelect }: Props) {
             <button type="button" onClick={() => onSelect(m.name)} aria-current={active ? "true" : undefined}
               className={`w-full rounded-lg px-3 py-2 text-left ${active ? "bg-blue-50 ring-1 ring-blue-300" : "hover:bg-gray-50"}`}>
               <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
-                <span aria-hidden>{sv.icon}</span>
+                <StatusDot tone={sv.tone} />
                 <span className="truncate">{m.name}</span>
                 {m.agentAccess && (
                   <span className="shrink-0 rounded-full bg-brand-sky/10 px-1.5 py-0.5 text-[10px] font-semibold text-brand-navy ring-1 ring-brand-sky/40 dark:text-brand-sky-soft">AgentHub</span>
