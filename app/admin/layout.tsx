@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic"
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const user = await getSessionUser()
   const body = (
-    <main className="mx-auto max-w-6xl p-4 sm:p-6">
+    <main className="px-4 md:px-8 py-4">
       <AdminNav />
       {children}
     </main>

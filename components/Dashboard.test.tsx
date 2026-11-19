@@ -138,4 +138,13 @@ describe("Dashboard optimistic busy", () => {
     await poll()
     expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(false)
   })
+
+  it("uses the full page width (no max-w-6xl / mx-auto) with nav-aligned padding", async () => {
+    mids = [mk("installed", null)]
+    await load()
+    const main = document.querySelector("main")!
+    expect(main.className).not.toContain("max-w-6xl")
+    expect(main.className).not.toContain("mx-auto")
+    expect(main.className).toContain("md:px-8")
+  })
 })

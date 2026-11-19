@@ -146,7 +146,7 @@ export function Dashboard({ email, userId, isAdmin }: { email: string; userId: s
 
   return (
     <AppChrome user={{ email, role: isAdmin ? "admin" : "member" }}>
-      <main className="mx-auto max-w-6xl p-4">
+      <main className="px-4 md:px-8 py-4">
         <DashboardToolbar host={host} mids={mids ?? []} onImport={() => setImporting(true)} onCreate={openWizard} />
         {forbidden && (
           <div role="alert" className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -172,7 +172,7 @@ export function Dashboard({ email, userId, isAdmin }: { email: string; userId: s
             </button>
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-[18rem_minmax(0,1fr)]">
+          <div className="grid gap-4 md:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)]">
             <nav aria-label="MID" className="min-w-0 rounded-xl border border-gray-200 bg-white dark:bg-neutral-800 p-2">
               <MidList mids={mids} selected={selected} onSelect={pick} />
             </nav>
