@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/ui/api"
 import { ErrorNotice, readApiError, type ApiError } from "@/components/ErrorNotice"
 import { actionLabel, compactDetail, detailPairs } from "@/lib/ui/audit-format"
-import { inputCls } from "@/lib/ui/classes"
+import { inputCls, tableCardCls, theadCls, trHoverCls } from "@/lib/ui/classes"
 
 type Item = { id: string; at: string; email: string; action: string; midName: string | null; detail: string }
 
@@ -87,21 +87,21 @@ export function AuditLog() {
 
   return (
     <section>
-      <h1 className="mb-4 text-xl font-semibold text-gray-900">Audit Log</h1>
+      <h1 className="mb-4 text-lg font-semibold text-gray-900">Audit Log</h1>
       <div className="mb-4 flex flex-wrap gap-3">
         <label className="text-sm text-gray-700">
-          <span className="mb-1 block">MID</span>
+          <span className="mb-1 block text-xs font-medium text-gray-600">MID</span>
           <input className={input} value={mid} maxLength={100} onChange={(e) => setMid(e.target.value)} placeholder="Exact MID name" />
         </label>
         <label className="text-sm text-gray-700">
-          <span className="mb-1 block">User</span>
+          <span className="mb-1 block text-xs font-medium text-gray-600">User</span>
           <input className={input} value={user} maxLength={100} onChange={(e) => setUser(e.target.value)} placeholder="Part of Email" />
         </label>
       </div>
       {error && <div className="mb-3"><ErrorNotice error={error} /></div>}
-      <div className="overflow-x-auto rounded-lg border border-gray-200">
+      <div className={tableCardCls}>
         <table className="w-full text-left text-sm">
-          <thead className="bg-gray-50 text-xs text-gray-600">
+          <thead className={theadCls}>
             <tr>
               <th className="px-3 py-2 font-medium">Time</th>
               <th className="px-3 py-2 font-medium">User</th>
@@ -112,7 +112,7 @@ export function AuditLog() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {items.map((r) => (
-              <tr key={r.id} className="align-top">
+              <tr key={r.id} className={`align-top ${trHoverCls}`}>
                 <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-700">{formatBangkok(r.at)}</td>
                 <td className="px-3 py-2 whitespace-nowrap text-gray-900">{r.email}</td>
                 <td className="px-3 py-2 text-gray-900">

@@ -12,7 +12,13 @@ export const labelCls = "block text-xs font-medium text-gray-600 dark:text-neutr
 export const errorTextCls = "text-xs text-red-500 dark:text-red-400"
 
 // Panel/card surface (compose padding/divide-y/overflow at the call site).
-export const cardCls = "bg-white dark:bg-neutral-800 rounded-xl border border-gray-200 dark:border-neutral-700"
+export const cardCls = "bg-white dark:bg-neutral-800 rounded-xl border border-gray-200 dark:border-neutral-700 shadow-[0_1px_2px_rgba(23,35,50,0.06)]"
+
+// Admin data tables: a card that scrolls the table sideways on phones; tinted header row with 12px/500 muted th;
+// faint row hover. Machine values (times, IPs/CIDRs, URLs, IDs) add `font-mono` at the cell.
+export const tableCardCls = `${cardCls} relative overflow-x-auto`
+export const theadCls = "border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-600 dark:border-neutral-700 dark:text-neutral-300"
+export const trHoverCls = "hover:bg-gray-50"
 
 // Selected row in sidebars/lists.
 export const activeRowCls = "bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-medium"

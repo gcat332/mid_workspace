@@ -28,6 +28,7 @@ type BackupFull = Backup & { content: string }
 const LANG: Record<ConfigFile, string> = { "config.xml": "xml", "wrapper-override.conf": "ini" }
 const NETWORK: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" }
 const input = `mt-1 ${inputCls} disabled:bg-gray-50 dark:disabled:bg-neutral-800`
+const fieldCls = "text-xs font-medium text-gray-600 dark:text-neutral-300"
 const btn = "rounded-lg border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
 const fmt = (iso: string) => new Date(iso).toLocaleString("th-TH")
 const KEEP_PW = "•••••••• (ตั้งไว้แล้ว — เว้นว่าง = ไม่เปลี่ยน)"
@@ -140,47 +141,47 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
       )}
 
       {mode === "form" ? (
-        <form className="grid max-w-2xl gap-3" onSubmit={(e) => {
+        <form className="grid max-w-4xl gap-x-4 gap-y-3 lg:grid-cols-2" onSubmit={(e) => {
           e.preventDefault()
           void put({ baseHash: data.files["config.xml"].hash, wrapperBaseHash: data.files["wrapper-override.conf"].hash, form: { ...form, password: pw.password, proxyPassword: pw.proxyPassword } })
         }}>
-          <label className="text-sm text-gray-700">Instance URL
+          <label className={fieldCls}>Instance URL
             <input className={input} value={form.url} onChange={(e) => setF("url", e.target.value)} /></label>
-          <label className="text-sm text-gray-700">Username
+          <label className={fieldCls}>Username
             <input className={input} value={form.username} onChange={(e) => setF("username", e.target.value)} autoComplete="off" /></label>
-          <label className="text-sm text-gray-700">Password <span className="text-xs text-gray-500">(เว้นว่าง = ไม่เปลี่ยน)</span>
+          <label className={fieldCls}>Password <span className="font-normal text-gray-500">(เว้นว่าง = ไม่เปลี่ยน)</span>
             <input className={input} type="password" value={pw.password} onChange={(e) => { setSaved(false); setPw({ ...pw, password: e.target.value }) }} autoComplete="new-password"
               placeholder={form.hasPassword ? KEEP_PW : "Not Set"} /></label>
-          <label className="text-sm text-gray-700">MID Server Name
+          <label className={fieldCls}>MID Server Name
             <input className={input} value={form.midName} onChange={(e) => setF("midName", e.target.value)} /></label>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label className="flex items-center gap-2 text-sm text-gray-700 lg:col-span-2">
             <input type="checkbox" checked={form.useProxy} onChange={(e) => setF("useProxy", e.target.checked)} /> Use Proxy</label>
           {form.useProxy && (
-            <div className="grid gap-3 rounded-lg border border-gray-200 p-3">
-              <label className="text-sm text-gray-700">Proxy host
+            <div className="grid gap-x-4 gap-y-3 rounded-lg border border-gray-200 p-3 lg:col-span-2 lg:grid-cols-2">
+              <label className={fieldCls}>Proxy host
                 <input className={input} value={form.proxyHost} onChange={(e) => setF("proxyHost", e.target.value)} /></label>
-              <label className="text-sm text-gray-700">Proxy port
+              <label className={fieldCls}>Proxy port
                 <input className={input} inputMode="numeric" value={form.proxyPort} onChange={(e) => setF("proxyPort", e.target.value)} /></label>
-              <label className="text-sm text-gray-700">Proxy username
+              <label className={fieldCls}>Proxy username
                 <input className={input} value={form.proxyUser} onChange={(e) => setF("proxyUser", e.target.value)} autoComplete="off" /></label>
-              <label className="text-sm text-gray-700">Proxy Password <span className="text-xs text-gray-500">(เว้นว่าง = ไม่เปลี่ยน)</span>
+              <label className={fieldCls}>Proxy Password <span className="font-normal text-gray-500">(เว้นว่าง = ไม่เปลี่ยน)</span>
                 <input className={input} type="password" value={pw.proxyPassword} onChange={(e) => { setSaved(false); setPw({ ...pw, proxyPassword: e.target.value }) }} autoComplete="new-password"
                   placeholder={form.hasProxyPassword ? KEEP_PW : "Not Set"} /></label>
             </div>
           )}
-          <label className="text-sm text-gray-700">Heap (MB), {MIN_HEAP_MB}-{MAX_HEAP_MB}
+          <label className={fieldCls}>Heap (MB), {MIN_HEAP_MB}-{MAX_HEAP_MB}
             <input className={input} type="number" min={MIN_HEAP_MB} max={MAX_HEAP_MB} step={64} value={Number.isNaN(form.heapMb) ? "" : form.heapMb}
               onChange={(e) => setF("heapMb", e.target.valueAsNumber)} aria-invalid={!heapOk} aria-describedby="heap-note" /></label>
-          {!heapOk && <p className="text-xs text-red-700">RAM ต้องเป็นจำนวนเต็ม {MIN_HEAP_MB}-{MAX_HEAP_MB} MB</p>}
-          <p id="heap-note" className={`text-xs ${heapChanged ? "text-amber-700" : "text-gray-500"}`}>
+          {!heapOk && <p className="text-xs text-red-700 lg:col-span-2">RAM ต้องเป็นจำนวนเต็ม {MIN_HEAP_MB}-{MAX_HEAP_MB} MB</p>}
+          <p id="heap-note" className={`text-xs lg:col-span-2 ${heapChanged ? "text-amber-700" : "text-gray-500"}`}>
             เปลี่ยน RAM แล้ว ระบบจะเขียน systemd unit ของ MID นี้ใหม่จากแม่แบบของ MidHub (unit ที่แก้เองบนเครื่องจะถูกทับ)
           </p>
-          <div><button type="submit" disabled={busy || !heapOk || !!busyReason} className={`btn-primary px-4 py-2 text-sm`}>
+          <div className="flex justify-end gap-2 lg:col-span-2"><button type="submit" disabled={busy || !heapOk || !!busyReason} className={`btn-primary px-4 py-2 text-sm`}>
             {busy ? "Saving…" : "Save"}</button></div>
         </form>
       ) : (
         <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <select aria-label="File" value={rawFile} onChange={(e) => setRawFile(e.target.value as ConfigFile)}
               className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm">
               <option value="config.xml">config.xml</option>
@@ -200,13 +201,15 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
       )}
 
       <section aria-label="Backup History" className="border-t border-gray-200 pt-4">
-        <h3 className="text-sm font-semibold text-gray-900">Backup History</h3>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-gray-900">Backup History</h3>
+        </div>
         {backups.length === 0 ? <p className="mt-1 text-sm text-gray-500">No Backups</p> : (
           <ul className="mt-2 divide-y divide-gray-100 text-sm">
             {backups.map((b) => (
-              <li key={b.id} className="flex flex-wrap items-center gap-2 py-1.5">
+              <li key={b.id} className="flex flex-wrap items-center gap-2 rounded px-1 py-1.5 hover:bg-gray-50">
                 <span className="font-mono text-xs">{b.file}</span>
-                <span className="text-gray-600">{fmt(b.createdAt)} · {b.createdBy}{b.note ? ` · ${b.note}` : ""}</span>
+                <span className="text-xs text-gray-600"><span className="font-mono">{fmt(b.createdAt)}</span> · {b.createdBy}{b.note ? ` · ${b.note}` : ""}</span>
                 <button type="button" onClick={() => void pickBackup(b.id)} aria-pressed={selected?.id === b.id}
                   className="ml-auto text-blue-600 dark:text-blue-400 hover:underline">Compare</button>
               </li>

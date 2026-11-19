@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { apiFetch } from "@/lib/ui/api"
+import { tableCardCls, theadCls, trHoverCls } from "@/lib/ui/classes"
 import { isLocked } from "@/lib/auth/lockout"
 
 // Read-only list of who has signed in (AgentHub admins, created on first sign-in). The only action is lock/unlock:
@@ -47,18 +48,18 @@ export function UsersManager({ myId }: { myId: string }) {
 
   return (
     <section>
-      <h1 className="mb-2 text-xl font-semibold text-gray-900">Users</h1>
+      <h1 className="mb-2 text-lg font-semibold text-gray-900">Users</h1>
       <p className="mb-4 text-sm text-gray-600">
         MidHub ใช้ได้เฉพาะ admin ของ AgentHub โดยเข้าสู่ระบบผ่าน AgentHub รายชื่อนี้คือผู้ที่เคยเข้า MidHub แล้ว
         จัดการบัญชีและสิทธิ์ได้ที่ AgentHub ส่วนที่นี่ทำได้เพียงล็อกไม่ให้เข้า MidHub
       </p>
       {err && <div className="mb-2"><ErrorNotice error={err} /></div>}
-      <div className="relative overflow-x-auto rounded-xl border border-gray-200 bg-white dark:bg-neutral-800">
+      <div className={tableCardCls}>
         <table className="w-full text-sm">
-          <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600">
+          <thead className={theadCls}>
             <tr>
-              <th className="px-4 py-3">Email</th><th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Last Sign-in</th><th className="px-4 py-3"><span className="sr-only">Actions</span></th>
+              <th className="px-4 py-2 font-medium">Email</th><th className="px-4 py-2 font-medium">Status</th>
+              <th className="px-4 py-2 font-medium">Last Sign-in</th><th className="px-4 py-2 font-medium"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -66,13 +67,13 @@ export function UsersManager({ myId }: { myId: string }) {
               const locked = isLocked(u.lockedAt)
               const self = u.id === myId
               return (
-                <tr key={u.id}>
-                  <td className="whitespace-nowrap px-4 py-3 text-gray-900">{u.email}{self && <span className="text-gray-400"> (You)</span>}</td>
-                  <td className="whitespace-nowrap px-4 py-3">
+                <tr key={u.id} className={trHoverCls}>
+                  <td className="whitespace-nowrap px-4 py-2 text-gray-900">{u.email}{self && <span className="text-gray-400"> (You)</span>}</td>
+                  <td className="whitespace-nowrap px-4 py-2">
                     {locked ? <span className="text-red-600">Locked</span> : <span className="text-gray-500">Active</span>}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-gray-500">{fmt(u.lastLoginAt)}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right">
+                  <td className="whitespace-nowrap px-4 py-2 font-mono text-xs text-gray-500">{fmt(u.lastLoginAt)}</td>
+                  <td className="whitespace-nowrap px-4 py-2 text-right">
                     {locked ? (
                       <button type="button" disabled={busy} className="text-blue-600 dark:text-blue-400 hover:underline"
                         onClick={() => setPending({ user: u, lock: false })}>Unlock</button>

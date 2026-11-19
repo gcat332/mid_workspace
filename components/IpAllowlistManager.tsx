@@ -5,7 +5,7 @@ import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { apiFetch } from "@/lib/ui/api"
 import { wouldAllow, isLoopback } from "@/lib/net/cidr"
-import { inputCls } from "@/lib/ui/classes"
+import { inputCls, tableCardCls, theadCls, trHoverCls } from "@/lib/ui/classes"
 
 type Entry = { id: string; cidr: string; note: string; createdAt: string }
 type Pending = { title: string; body: string; confirmLabel: string; run: () => Promise<void> }
@@ -76,7 +76,7 @@ export function IpAllowlistManager() {
 
   return (
     <section>
-      <h1 className="mb-2 text-xl font-semibold text-gray-900">IP Allowlist</h1>
+      <h1 className="mb-2 text-lg font-semibold text-gray-900">IP Allowlist</h1>
       <p className="mb-4 text-sm text-gray-600">
         ถ้ารายการว่าง อนุญาตทุก IP; เมื่อมีรายการ เฉพาะ IP/CIDR ในรายการเท่านั้นที่เข้าใช้งานได้ (รองรับ IPv4 และ IPv6)
       </p>
@@ -95,17 +95,17 @@ export function IpAllowlistManager() {
         <button type="submit" disabled={busy} className="btn-primary px-4 py-2 text-sm font-medium">Add</button>
       </form>
       {err && <div className="mb-2"><ErrorNotice error={err} /></div>}
-      <div className="relative overflow-x-auto rounded-xl border border-gray-200 bg-white dark:bg-neutral-800">
+      <div className={tableCardCls}>
         <table className="w-full text-sm">
-          <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600">
-            <tr><th className="px-4 py-3">IP / CIDR</th><th className="px-4 py-3">Note</th><th className="px-4 py-3"><span className="sr-only">Actions</span></th></tr>
+          <thead className={theadCls}>
+            <tr><th className="px-4 py-2 font-medium">IP / CIDR</th><th className="px-4 py-2 font-medium">Note</th><th className="px-4 py-2 font-medium"><span className="sr-only">Actions</span></th></tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {entries.map((e) => (
-              <tr key={e.id}>
-                <td className="px-4 py-3 font-mono text-gray-900">{e.cidr}</td>
-                <td className="px-4 py-3 text-gray-500">{e.note || "—"}</td>
-                <td className="px-4 py-3 text-right">
+              <tr key={e.id} className={trHoverCls}>
+                <td className="px-4 py-2 font-mono text-gray-900">{e.cidr}</td>
+                <td className="px-4 py-2 text-gray-500">{e.note || "—"}</td>
+                <td className="px-4 py-2 text-right">
                   <button type="button" className="text-red-600 hover:underline" onClick={() => remove(e)}>Delete</button>
                 </td>
               </tr>

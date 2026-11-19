@@ -40,7 +40,7 @@ const styleFor = (t: string): Style => TAG_STYLE[t] ?? FALLBACK
 function VersionCard({ entry, latest }: { entry: Entry; latest?: boolean }) {
   const s = styleFor(entry.type)
   return (
-    <article className={`${cardCls} px-4 py-3 shadow-sm`}>
+    <article className={`${cardCls} px-4 py-3`}>
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="font-mono text-[15px] font-semibold text-gray-900 dark:text-neutral-100">{entry.version}</h3>
         <Badge tone={s.tone}>

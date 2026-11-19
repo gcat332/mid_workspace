@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { apiFetch } from "@/lib/ui/api"
-import { cardCls, ghostBtnCls, inputCls, labelCls } from "@/lib/ui/classes"
+import { cardCls, ghostBtnCls, inputCls, labelCls, tableCardCls, theadCls, trHoverCls } from "@/lib/ui/classes"
 
 type Instance = {
   id: string; label: string; url: string; midUser: string | null; hasPassword: boolean
@@ -97,7 +97,7 @@ export function InstancesManager() {
 
   return (
     <section>
-      <h1 className="mb-2 text-xl font-semibold text-gray-900">Instances</h1>
+      <h1 className="mb-2 text-lg font-semibold text-gray-900">Instances</h1>
       <p className="mb-4 text-sm text-gray-600">
         เก็บ URL ของ demo instance พร้อม MID user/password (เข้ารหัสไว้ ไม่แสดงกลับ) เพื่อใช้ตอนติดตั้ง MID ใหม่
         ทุกครั้งที่บันทึกจะทดสอบการเชื่อมต่อก่อน
@@ -119,7 +119,7 @@ export function InstancesManager() {
           <label className={labelCls} htmlFor="inst-pass">Password</label>
           <input id="inst-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" className={inputCls} />
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+        <div className="flex flex-wrap items-center justify-end gap-2 sm:col-span-2">
           <button type="button" disabled={busy || !formReady} onClick={() => void test()} className={ghostBtnCls}>Test Connection</button>
           <button type="submit" disabled={busy || !formReady} className="btn-primary px-4 py-2 text-sm font-medium">Save</button>
           {reason && <span className="text-xs text-gray-500">{reason}</span>}
@@ -129,7 +129,7 @@ export function InstancesManager() {
       {info && <p role="status" className="mb-2 text-sm text-green-700 dark:text-green-400">{info}</p>}
       {editing && (
         <form className={`${cardCls} mb-3 grid gap-3 p-4 sm:grid-cols-3`} onSubmit={(e) => { e.preventDefault(); void saveEdit() }}>
-          <p className="text-sm text-gray-700 sm:col-span-3">Edit {editing.url}</p>
+          <p className="text-sm text-gray-700 sm:col-span-3">Edit <span className="font-mono text-xs">{editing.url}</span></p>
           <div>
             <label className={labelCls} htmlFor="e-label">Display Name</label>
             <input id="e-label" value={eLabel} onChange={(e) => setELabel(e.target.value)} className={inputCls} />
@@ -143,31 +143,31 @@ export function InstancesManager() {
             <input id="e-pass" type="password" value={ePass} onChange={(e) => setEPass(e.target.value)} autoComplete="new-password"
               placeholder={editing.hasPassword ? "ตั้งไว้แล้ว (เว้นว่าง = ไม่เปลี่ยน)" : "Not Set"} className={inputCls} />
           </div>
-          <div className="flex gap-2 sm:col-span-3">
+          <div className="flex flex-wrap items-center justify-end gap-2 sm:col-span-3">
             <button type="submit" disabled={busy} className="btn-primary px-4 py-2 text-sm font-medium">Test and Save</button>
             {busy && <span className="self-center text-xs text-gray-500">กำลังทดสอบการเชื่อมต่อ อาจใช้เวลาถึง 15 วินาที กรุณารอ...</span>}
             <button type="button" onClick={() => setEditing(null)} className={ghostBtnCls}>Cancel</button>
           </div>
         </form>
       )}
-      <div className={`${cardCls} relative overflow-x-auto`}>
+      <div className={tableCardCls}>
         <table className="w-full text-sm">
-          <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600">
+          <thead className={theadCls}>
             <tr>
-              <th className="px-4 py-3">Name</th><th className="px-4 py-3">URL</th><th className="px-4 py-3">MID user</th>
-              <th className="px-4 py-3">Password</th><th className="px-4 py-3">Build</th>
-              <th className="px-4 py-3"><span className="sr-only">Actions</span></th>
+              <th className="px-4 py-2 font-medium">Name</th><th className="px-4 py-2 font-medium">URL</th><th className="px-4 py-2 font-medium">MID user</th>
+              <th className="px-4 py-2 font-medium">Password</th><th className="px-4 py-2 font-medium">Build</th>
+              <th className="px-4 py-2 font-medium"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {items.map((i) => (
-              <tr key={i.id}>
-                <td className="whitespace-nowrap px-4 py-3 text-gray-900">{i.label}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-gray-700">{i.url}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-gray-700">{i.midUser ?? "—"}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-gray-500">{i.hasPassword ? "Set" : "Not Set"}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-gray-500">{i.buildstamp ?? "—"}</td>
-                <td className="space-x-3 whitespace-nowrap px-4 py-3 text-right">
+              <tr key={i.id} className={trHoverCls}>
+                <td className="whitespace-nowrap px-4 py-2 text-gray-900">{i.label}</td>
+                <td className="whitespace-nowrap px-4 py-2 font-mono text-xs text-gray-700">{i.url}</td>
+                <td className="whitespace-nowrap px-4 py-2 text-gray-700">{i.midUser ?? "—"}</td>
+                <td className="whitespace-nowrap px-4 py-2 text-gray-500">{i.hasPassword ? "Set" : "Not Set"}</td>
+                <td className="whitespace-nowrap px-4 py-2 font-mono text-xs text-gray-500">{i.buildstamp ?? "—"}</td>
+                <td className="space-x-3 whitespace-nowrap px-4 py-2 text-right">
                   <button type="button" className="text-blue-600 hover:underline dark:text-blue-400" onClick={() => startEdit(i)}>Edit</button>
                   <button type="button" className="text-red-600 hover:underline" onClick={() => setDel(i)}>Delete</button>
                 </td>

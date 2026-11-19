@@ -44,7 +44,7 @@ export default async function LoginPage({ searchParams }: Props) {
 
   return (
     <div className="min-h-svh flex items-center justify-center bg-gray-50 dark:bg-neutral-900">
-      <div className="bg-white dark:bg-neutral-800 rounded-xl shadow-lg w-full max-w-md mx-4 p-8">
+      <div className="bg-white dark:bg-neutral-800 rounded-xl shadow-[0_1px_2px_rgba(23,35,50,0.06)] w-full max-w-md mx-4 p-8">
         <div className="mb-6 flex items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={`${BASE_PATH}/logo-mfec-black.png`} alt="MFEC" className="h-6 w-auto dark:hidden" />
