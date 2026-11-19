@@ -124,6 +124,12 @@ export async function proxy(req: NextRequest) {
 
   // 2) CSRF: unsafe API methods must come from this origin (public routes included).
   if (isApi && !SAFE_METHODS.has(req.method) && crossOrigin(req)) {
+    // Header values only (never cookies): enough to see which proxy hop changed Host / X-Forwarded-Host.
+    const h = (k: string) => req.headers.get(k) ?? "-"
+    console.warn(
+      `[csrf] refused ${req.method} ${pathname} origin=${h("origin")} host=${h("host")} xfh=${h("x-forwarded-host")} ` +
+      `sfs=${h("sec-fetch-site")} xff=${h("x-forwarded-for")}`,
+    )
     return NextResponse.json(
       { code: "csrf", message: "คำขอนี้ไม่ได้มาจากหน้า MidHub เอง จึงถูกปฏิเสธ กรุณาเปิด MidHub แล้วทำรายการใหม่" },
       { status: 403 },

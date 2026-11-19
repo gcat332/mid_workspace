@@ -374,6 +374,21 @@ describe("CSRF origin check on unsafe API methods (M1)", () => {
     expect(res.status).toBe(403)
     expect((await res.json()).code).toBe("csrf")
   })
+  it("a rejection logs what the browser and proxies sent (no cookies), so a real-browser 403 can be diagnosed", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await unsafe("PATCH", { origin: "https://evil.example", "x-forwarded-host": "fwd.example", "sec-fetch-site": "same-origin" }, "/api/mids/m1")
+      const line = warn.mock.calls.map((c) => c.join(" ")).find((l) => l.includes("[csrf]")) ?? ""
+      expect(line).toContain("PATCH /api/mids/m1")
+      expect(line).toContain("origin=https://evil.example")
+      expect(line).toContain("host=localhost:3100")
+      expect(line).toContain("xfh=fwd.example")
+      expect(line).toContain("sfs=same-origin")
+      expect(line).not.toContain("midhub_session")
+    } finally {
+      warn.mockRestore()
+    }
+  })
   it("Sec-Fetch-Site cross-site / same-site -> 403", async () => {
     expect((await unsafe("POST", { "sec-fetch-site": "cross-site" })).status).toBe(403)
     expect((await unsafe("POST", { "sec-fetch-site": "same-site" })).status).toBe(403)
