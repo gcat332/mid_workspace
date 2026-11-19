@@ -34,6 +34,34 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   return res
 }
 
+/**
+ * POST a FormData body to the app's API through XMLHttpRequest, so the caller can show upload progress (fetch has
+ * none). Resolves like apiFetch: an HTML reply becomes the same 502 `rejected_by_network` error and a 401 goes to
+ * the login page. Rejects on a network failure.
+ */
+export function apiUpload(path: string, body: FormData, onProgress: (percent: number) => void): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open("POST", `${API_BASE}${path}`)
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && e.total > 0) onProgress(Math.round((e.loaded / e.total) * 100)) }
+    xhr.onerror = xhr.onabort = xhr.ontimeout = () => reject(new TypeError("upload failed"))
+    xhr.onload = () => {
+      const type = xhr.getResponseHeader("content-type") ?? ""
+      const empty = [204, 205, 304].includes(xhr.status)
+      const raw = new Response(empty ? null : xhr.responseText, { status: xhr.status, headers: type ? { "content-type": type } : {} })
+      void networkRejection(raw).then((rejected) => {
+        const res = rejected ?? raw
+        if (res.status === 401) {
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+          window.location.assign(LOGIN_URL)
+        }
+        resolve(res)
+      }, reject)
+    }
+    xhr.send(body)
+  })
+}
+
 /** Only http(s) URLs may become links (blocks javascript: etc. from a tampered config.xml). */
 export function safeHttpUrl(u: string | null): string | null {
   return u && /^https?:\/\//i.test(u) ? u : null

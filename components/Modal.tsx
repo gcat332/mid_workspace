@@ -64,8 +64,9 @@ export function Modal({ labelledBy, onClose, busy, wide, children }: Props) {
     if (dlg && level >= Math.max(...open) && !dlg.contains(document.activeElement)) dlg.focus()
   }, [busy, level])
 
+  // z-[65]: above the full-screen file editor (z-[60]) so its unsaved-changes confirm shows on top (as AgentHub).
   return createPortal(
-    <div ref={overlayRef} data-modal-level={level} className={`fixed inset-0 z-50 flex items-center justify-center bg-black/40 ${wide ? "p-0 sm:p-4" : "p-4"}`}>
+    <div ref={overlayRef} data-modal-level={level} className={`fixed inset-0 z-[65] flex items-center justify-center bg-black/40 ${wide ? "p-0 sm:p-4" : "p-4"}`}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1}
         className={wide
           ? "flex h-full w-full flex-col bg-white dark:bg-neutral-800 shadow-xl focus:outline-none sm:h-[min(92vh,52rem)] sm:max-w-3xl sm:rounded-xl"
