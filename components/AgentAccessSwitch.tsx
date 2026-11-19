@@ -4,7 +4,7 @@ import { useId, useRef, useState } from "react"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { apiFetch } from "@/lib/ui/api"
 
-export const AGENT_ACCESS_LABEL = "อนุญาตให้ AgentHub (น้อง Java) แก้ไฟล์ MID นี้"
+export const AGENT_ACCESS_LABEL = "AgentHub Access"
 export const AGENT_ACCESS_NOTE = "น้อง Java ใน AgentHub จะแก้ไฟล์ของ MID นี้ได้ เมื่อ session ทำงานกับ instance เดียวกัน"
 
 type Props = {
@@ -58,7 +58,7 @@ export function AgentAccessSwitch({ midName, enabled, disabledReason = null, onC
         </button>
         <div className="min-w-0">
           <p className="text-sm font-medium text-gray-900">
-            <span id={labelId}>{AGENT_ACCESS_LABEL}</span> <span className={`ml-1 text-xs font-semibold ${on ? "text-brand-navy dark:text-brand-sky-soft" : "text-gray-500"}`}>{on ? "เปิด" : "ปิด"}</span>
+            <span id={labelId}>{AGENT_ACCESS_LABEL}</span> <span className={`ml-1 text-xs font-semibold ${on ? "text-brand-navy dark:text-brand-sky-soft" : "text-gray-500"}`}>{on ? "On" : "Off"}</span>
           </p>
           <p id={noteId} className="mt-0.5 text-xs text-gray-500">
             {on ? AGENT_ACCESS_NOTE : "ปิดอยู่: AgentHub จะแก้ไฟล์ของ MID นี้ไม่ได้"} · ต้องใช้ session ที่ SN_INSTANCE_URL ตรงกับ instance ของ MID

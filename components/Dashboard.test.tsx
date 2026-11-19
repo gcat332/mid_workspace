@@ -51,7 +51,7 @@ describe("Dashboard uninstall ownership", () => {
   it("an in-flight uninstall on load opens the dialog in resume mode with a single progress view", async () => {
     mids = [mk("uninstalling", J("uninstall", "running"))]
     await load()
-    expect(screen.getByRole("dialog", { name: "ลบ demo-x" })).toBeTruthy()
+    expect(screen.getByRole("dialog", { name: "Uninstall demo-x" })).toBeTruthy()
     expect(screen.queryByLabelText(/พิมพ์ชื่อ MID/)).toBeNull()
     expect(screen.getAllByTestId("job-progress")).toHaveLength(1) // the dialog's; the panel hides its own
   })

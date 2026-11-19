@@ -4,10 +4,10 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 
 const links = [
-  { href: "/admin/users", label: "ผู้ใช้" },
+  { href: "/admin/users", label: "Users" },
   { href: "/admin/instances", label: "Instances" },
   { href: "/admin/ip-allowlist", label: "IP Allowlist" },
-  { href: "/admin/audit", label: "Audit" },
+  { href: "/admin/audit", label: "Audit Log" },
 ]
 
 // Admin sub-tabs under the app chrome (the "Admin" tab there leads here). Same underline language as the chrome nav.

@@ -32,7 +32,11 @@ export type HostView = {
 
 export type StatusView = { icon: "🟢" | "⚪" | "🟡" | "🔴"; label: string }
 
-const BUSY: StatusView = { icon: "🟡", label: "กำลังทำงาน" }
+/** Status wording. The UI is English; the AgentHub API (/api/agent/mids) keeps its Thai `status` strings. */
+const LABELS = {
+  en: { working: "Working", installFailed: "Install Failed", uninstallFailed: "Uninstall Failed", failed: "Failed", running: "Running", stopped: "Stopped", starting: "Starting", unknown: "Unknown" },
+  th: { working: "กำลังทำงาน", installFailed: "ติดตั้งไม่สำเร็จ", uninstallFailed: "ลบไม่สำเร็จ", failed: "ล่ม", running: "กำลังรัน", stopped: "หยุด", starting: "กำลังทำงาน", unknown: "ไม่ทราบสถานะ" },
+} as const
 
 type JobPick = Pick<MidView, "state" | "status" | "job">
 
@@ -51,23 +55,25 @@ export function resumableUninstall(m: Pick<MidView, "job" | "state">): boolean {
   return m.job?.kind === "uninstall" && (isActiveJobStatus(m.job.status) || (m.job.status === "failed" && m.state === "uninstalling"))
 }
 
-export function statusView(m: JobPick): StatusView {
-  if (m.job && jobIsActive(m)) return { icon: "🟡", label: runningJobLabel(m.job) }
-  if (m.job && failedJobShown(m)) return { icon: "🔴", label: isRemovalKind(m.job.kind) ? "ลบไม่สำเร็จ" : "ติดตั้งไม่สำเร็จ" }
-  if (m.state === "installing" || m.state === "upgrading" || m.state === "uninstalling") return BUSY
-  if (m.state === "error") return { icon: "🔴", label: "ล่ม" }
+export function statusView(m: JobPick, locale: "en" | "th" = "en"): StatusView {
+  const L = LABELS[locale]
+  const busy: StatusView = { icon: "🟡", label: L.working }
+  if (m.job && jobIsActive(m)) return { icon: "🟡", label: runningJobLabel(m.job, locale) }
+  if (m.job && failedJobShown(m)) return { icon: "🔴", label: isRemovalKind(m.job.kind) ? L.uninstallFailed : L.installFailed }
+  if (m.state === "installing" || m.state === "upgrading" || m.state === "uninstalling") return busy
+  if (m.state === "error") return { icon: "🔴", label: L.failed }
   switch (m.status.state) {
-    case "running": return { icon: "🟢", label: "กำลังรัน" }
-    case "stopped": return { icon: "⚪", label: "หยุด" }
-    case "starting": return BUSY
-    case "failed": return { icon: "🔴", label: "ล่ม" }
-    default: return { icon: "⚪", label: "ไม่ทราบสถานะ" }
+    case "running": return { icon: "🟢", label: L.running }
+    case "stopped": return { icon: "⚪", label: L.stopped }
+    case "starting": return { icon: "🟡", label: locale === "th" ? L.working : L.starting }
+    case "failed": return { icon: "🔴", label: L.failed }
+    default: return { icon: "⚪", label: L.unknown }
   }
 }
 
 /** `used` is the helper's quotaUsed (slots held), not just processes that are currently running. */
 export function quotaView(used: number, max: number): { text: string; full: boolean } {
-  return { text: `กำลังรัน ${used}/${max}`, full: used >= max }
+  return { text: `Running ${used}/${max}`, full: used >= max }
 }
 
 export function formatBytes(b: number | null): string {

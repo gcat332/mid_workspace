@@ -62,7 +62,7 @@ export function UninstallDialog({ mid, jobId: initialJobId = null, onClose: clos
   return (
     <Modal labelledBy="uninstall-title" onClose={onClose} busy={busy}>
       <h2 id="uninstall-title" className="text-lg font-semibold text-gray-900 dark:text-neutral-100">
-        {jobId ? `ลบ ${mid.name}` : `ลบ MID ${mid.name}?`}
+        {jobId ? `Uninstall ${mid.name}` : `Uninstall MID ${mid.name}?`}
       </h2>
       {jobId === null ? (
         <form className="mt-2 space-y-3 text-sm text-gray-700" onSubmit={(e) => { e.preventDefault(); void submit() }}>
@@ -77,10 +77,10 @@ export function UninstallDialog({ mid, jobId: initialJobId = null, onClose: clos
           </label>
           {err && <ErrorNotice error={err} />}
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} disabled={busy} className={ghostBtnCls}>ยกเลิก</button>
+            <button type="button" onClick={onClose} disabled={busy} className={ghostBtnCls}>Cancel</button>
             <button type="submit" disabled={!matches || busy}
               className="rounded-[10px] bg-danger px-4 py-2 text-sm font-semibold text-white hover:bg-danger-press disabled:opacity-50">
-              {busy ? "กำลังดำเนินการ..." : "ลบ MID นี้"}
+              {busy ? "Working…" : "Uninstall"}
             </button>
           </div>
           {!matches && <p className="text-xs text-gray-500">ปุ่มลบจะใช้ได้เมื่อพิมพ์ชื่อตรงทุกตัวอักษร (ตัวพิมพ์เล็ก/ใหญ่ต้องตรง)</p>}
@@ -97,7 +97,7 @@ export function UninstallDialog({ mid, jobId: initialJobId = null, onClose: clos
                 : <p className="text-xs">หา record ใน ServiceNow ได้ที่ MID Server ชื่อ “{mid.midName ?? mid.name}”</p>}
             </div>
           )}
-          {!done && <div className="flex justify-end"><button type="button" onClick={onClose} className={ghostBtnCls}>ปิด</button></div>}
+          {!done && <div className="flex justify-end"><button type="button" onClick={onClose} className={ghostBtnCls}>Close</button></div>}
         </div>
       )}
     </Modal>

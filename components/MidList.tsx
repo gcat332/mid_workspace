@@ -4,7 +4,7 @@ type Props = { mids: MidView[]; selected: string | null; onSelect: (name: string
 
 export function MidList({ mids, selected, onSelect }: Props) {
   return (
-    <ul aria-label="รายการ MID" className="space-y-1">
+    <ul aria-label="MID List" className="space-y-1">
       {mids.map((m) => {
         const sv = statusView(m)
         const active = m.name === selected
@@ -21,7 +21,7 @@ export function MidList({ mids, selected, onSelect }: Props) {
                 )}
                 <span className={jobNote ? "shrink-0 text-xs font-normal text-gray-600" : "sr-only"}>{sv.label}</span>
               </span>
-              <span className="mt-0.5 block truncate pl-6 text-xs text-gray-500">{m.instanceUrl ?? "ไม่ระบุ instance"}</span>
+              <span className="mt-0.5 block truncate pl-6 text-xs text-gray-500">{m.instanceUrl ?? "No Instance"}</span>
             </button>
           </li>
         )

@@ -27,7 +27,7 @@ type Props = {
   userId: string
 }
 
-const STEPS = ["Instance", "ตั้งค่า", "ตรวจสอบ", "ติดตั้ง"] as const
+const STEPS = ["Instance", "Settings", "Review", "Install"] as const
 const INITIAL: WizardState = {
   instance: null, pendingNew: false, buildstamp: "", name: "", nameCheck: "idle", snName: "",
   heapMb: String(DEFAULT_HEAP_MB), logFiles: String(DEFAULT_LOG_FILES), proxyOn: false, proxyHost: "", proxyPort: "",
@@ -96,16 +96,16 @@ export function CreateMidWizard({ isAdmin, host, mids, jobId, onJobChange, onOpe
   const requestClose = () => { if (!running && dirty) setConfirmClose(true); else onClose() }
 
   const active = running ? 4 : step
-  const nextLabel = step === 3 ? "ติดตั้ง" : "ถัดไป"
+  const nextLabel = step === 3 ? "Install" : "Next"
 
   return (
     <Modal labelledBy="wizard-title" onClose={requestClose} busy={busy} wide>
       <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 sm:px-5 dark:border-neutral-700">
-        <h2 id="wizard-title" className="text-lg font-semibold text-gray-900 dark:text-neutral-100">{running ? (jobKind === "clone" ? "Clone MID" : "ติดตั้ง MID") : "สร้าง MID ใหม่"}</h2>
-        <button type="button" onClick={requestClose} disabled={busy} aria-label="ปิด" className="rounded-lg px-2 py-1 text-xl leading-none text-gray-600 hover:bg-gray-100 disabled:opacity-50">×</button>
+        <h2 id="wizard-title" className="text-lg font-semibold text-gray-900 dark:text-neutral-100">{running ? (jobKind === "clone" ? "Clone MID" : "Install MID") : "New MID Server"}</h2>
+        <button type="button" onClick={requestClose} disabled={busy} aria-label="Close" className="rounded-lg px-2 py-1 text-xl leading-none text-gray-600 hover:bg-gray-100 disabled:opacity-50">×</button>
       </div>
 
-      <ol aria-label="ขั้นตอน" className="flex items-center gap-1 border-b border-gray-200 px-4 py-3 sm:gap-2 sm:px-5 dark:border-neutral-700">
+      <ol aria-label="Steps" className="flex items-center gap-1 border-b border-gray-200 px-4 py-3 sm:gap-2 sm:px-5 dark:border-neutral-700">
         {STEPS.map((label, i) => {
           const n = i + 1
           const cur = n === active
@@ -117,7 +117,7 @@ export function CreateMidWizard({ isAdmin, host, mids, jobId, onJobChange, onOpe
               </span>
               <span className={`${cur ? "" : "max-sm:sr-only"} truncate text-sm ${cur ? "font-semibold text-gray-900 dark:text-neutral-100" : "text-gray-600"}`}>
                 <span className="sr-only">{`${n}. `}</span>{label}
-                <span className="sr-only">{` (${cur ? "ขั้นปัจจุบัน" : done ? "เสร็จแล้ว" : "ยังไม่ถึง"})`}</span>
+                <span className="sr-only">{` (${cur ? "current" : done ? "done" : "pending"})`}</span>
               </span>
               {n < STEPS.length && <span aria-hidden className="mx-0.5 h-px w-3 bg-gray-300 sm:w-6" />}
             </li>
@@ -148,18 +148,18 @@ export function CreateMidWizard({ isAdmin, host, mids, jobId, onJobChange, onOpe
       {!running && (
         <div className="border-t border-gray-200 px-4 py-3 sm:px-5 dark:border-neutral-700">
           <div className="flex items-center justify-between gap-2">
-            <button type="button" onClick={() => go((step - 1) as 1 | 2)} disabled={step === 1 || busy} className={ghostBtnCls}>ย้อนกลับ</button>
+            <button type="button" onClick={() => go((step - 1) as 1 | 2)} disabled={step === 1 || busy} className={ghostBtnCls}>Back</button>
             <button type="button" disabled={!verdict.ok || busy} aria-describedby={!verdict.ok && verdict.reason ? "wizard-reason" : undefined}
               onClick={() => (step === 3 ? void install() : go((step + 1) as 2 | 3))}
               className="btn-primary px-5 py-2 text-sm font-medium">
-              {busy ? "กำลังเริ่มติดตั้ง..." : nextLabel}
+              {busy ? "Starting…" : nextLabel}
             </button>
           </div>
           {!verdict.ok && verdict.reason && <p id="wizard-reason" className="mt-2 text-right text-xs text-gray-600">{verdict.reason}</p>}
         </div>
       )}
       {confirmClose && (
-        <ConfirmDialog title="ปิดและทิ้งข้อมูลที่กรอก?" confirmLabel="ปิดและทิ้งข้อมูล" danger onConfirm={onClose} onCancel={() => setConfirmClose(false)}>
+        <ConfirmDialog title="Discard Changes?" confirmLabel="Discard" danger onConfirm={onClose} onCancel={() => setConfirmClose(false)}>
           ข้อมูลที่กรอกหรือเลือกไว้ในหน้านี้จะหายไป
         </ConfirmDialog>
       )}

@@ -92,7 +92,7 @@ export function ProfileMenu({ email, role }: { email: string; role: string }) {
 
   return (
     <div ref={ref} className="relative">
-      <button ref={triggerRef} type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} aria-label="เมนูผู้ใช้"
+      <button ref={triggerRef} type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} aria-label="User Menu"
         className={`flex items-center gap-2.5 rounded-full py-1 pl-1 pr-3 transition-colors ${open ? "bg-gray-100 dark:bg-neutral-700" : "hover:bg-gray-100 dark:hover:bg-neutral-700"}`}>
         <span className={avatar} aria-hidden>{initials(email)}</span>
         <span className="hidden sm:flex flex-col items-start leading-tight">
@@ -127,7 +127,7 @@ export function ProfileMenu({ email, role }: { email: string; role: string }) {
           <button type="button" role="menuitem" onClick={logout}
             className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-logout-red hover:bg-logout-red-soft dark:hover:bg-red-950/30 transition-colors">
             <svg className={ico} aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" /></svg>
-            ออกจากระบบ
+            Sign Out
           </button>
           {logoutErr && <p role="alert" className="px-3 pt-1 pb-1 text-xs text-red-600">ออกจากระบบไม่สำเร็จ ลองกดอีกครั้ง</p>}
         </div>

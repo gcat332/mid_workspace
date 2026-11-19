@@ -29,26 +29,26 @@ export function DashboardToolbar({ host, mids, onImport, onCreate }: Props) {
           <span className="min-w-0 text-sm text-gray-700">RAM: MID ใช้ {formatBytes(midRam)} / ทั้งเครื่อง {formatBytes(host.totalBytes)} (ว่าง {formatBytes(host.availableBytes)})</span>
           {host.disk && host.disk.freeBytes !== null && (
             <span
-              title={host.disk.usage ? `MID ${formatBytes(host.disk.usage.mids)} · แพ็กเกจ ${formatBytes(host.disk.usage.packages)} · archive ${formatBytes(host.disk.usage.archive)}` : "ไม่สามารถอ่านการใช้พื้นที่แยกตามโฟลเดอร์ได้"}
+              title={host.disk.usage ? `MID ${formatBytes(host.disk.usage.mids)} · Packages ${formatBytes(host.disk.usage.packages)} · archive ${formatBytes(host.disk.usage.archive)}` : "ไม่สามารถอ่านการใช้พื้นที่แยกตามโฟลเดอร์ได้"}
               className={`rounded-full px-3 py-1 text-sm font-medium ${host.disk.freeBytes < MIN_FREE_BYTES ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}`}
             >
-              ดิสก์ว่าง {(host.disk.freeBytes / GIB).toFixed(1)} GB
+              Disk Free {(host.disk.freeBytes / GIB).toFixed(1)} GB
             </span>
           )}
           {host.disk?.usage && (
             <span className="min-w-0 text-xs text-gray-600">
-              MID {formatBytes(host.disk.usage.mids)} · แพ็กเกจ {formatBytes(host.disk.usage.packages)} · archive {formatBytes(host.disk.usage.archive)}
+              MID {formatBytes(host.disk.usage.mids)} · Packages {formatBytes(host.disk.usage.packages)} · archive {formatBytes(host.disk.usage.archive)}
             </span>
           )}
-          {lowRam && <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700">RAM ว่างเหลือน้อย</span>}
+          {lowRam && <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700">Low RAM</span>}
         </>
       )}
       <div className="ml-auto flex flex-wrap items-center gap-2">
         <button type="button" onClick={onImport} className={ghostBtnCls}>
-          Import MID ที่มีอยู่
+          Import MID Server
         </button>
         <button type="button" onClick={onCreate} className="btn-primary px-4 py-2 text-sm font-medium">
-          + สร้าง MID ใหม่
+          + New MID Server
         </button>
       </div>
     </div>

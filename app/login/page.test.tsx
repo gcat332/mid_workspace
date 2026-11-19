@@ -29,10 +29,10 @@ it("a live session is sent on to the app", async () => {
   await expect(render()).rejects.toMatchObject({ to: "/" })
 })
 
-it("links to AgentHub's own /login (absolute path, no /midhub) with the Thai button and note", async () => {
+it("links to AgentHub's own /login (absolute path, no /midhub) with the English button and Thai note", async () => {
   const html = await render("signed_out")
   expect(html).toContain('href="/login"')
-  expect(html).toContain("ไปเข้าสู่ระบบที่ AgentHub")
+  expect(html).toContain("Sign In with AgentHub")
   expect(html).toContain("เข้าสู่ระบบ AgentHub ด้วยบัญชี admin แล้วกลับมาที่ /midhub")
   expect(html).not.toContain('href="/midhub/login"')
   // no local login of any kind
@@ -40,7 +40,7 @@ it("links to AgentHub's own /login (absolute path, no /midhub) with the Thai but
   expect(html).not.toContain('type="password"')
 })
 
-it("reason-specific Thai text; unknown reasons fall back to the generic text", async () => {
+it("reason-specific text; unknown reasons fall back to the generic text", async () => {
   const texts = {
     signed_out: await render("signed_out"),
     not_admin: await render("not_admin"),
@@ -48,15 +48,15 @@ it("reason-specific Thai text; unknown reasons fall back to the generic text", a
     locked: await render("locked"),
     logged_out: await render("logged_out"),
   }
-  expect(texts.signed_out).toContain("ยังไม่ได้เข้าสู่ระบบ AgentHub")
+  expect(texts.signed_out).toContain("Signed Out of AgentHub")
   expect(texts.not_admin).toContain("ไม่ใช่ admin")
-  expect(texts.unreachable).toContain("ติดต่อ AgentHub ไม่ได้")
+  expect(texts.unreachable).toContain("AgentHub Unreachable")
   expect(texts.locked).toContain("ถูกล็อก")
-  expect(texts.logged_out).toContain("ออกจากระบบ MidHub แล้ว")
+  expect(texts.logged_out).toContain("Signed Out of MidHub")
   expect(new Set(Object.values(texts)).size).toBe(5)
   const unknown = await render("<script>alert(1)</script>")
   expect(unknown).not.toContain("<script>alert(1)")
-  expect(unknown).toContain("เข้าสู่ระบบ AgentHub")
+  expect(unknown).toContain("Sign In with AgentHub")
   expect(await render(["not_admin", "x"])).toContain("ไม่ใช่ admin")
 })
 

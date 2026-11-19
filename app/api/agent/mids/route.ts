@@ -11,7 +11,7 @@ export const GET = agentRoute(async (_req, caller) => {
       state: m.state,
       status: { ...m.status, since: m.status.since ? m.status.since.toISOString() : null },
       job: m.job ? { ...m.job, createdAt: m.job.createdAt.toISOString() } : null,
-    })
+    }, "th")
     return {
       name: m.name,
       snName: m.midName,

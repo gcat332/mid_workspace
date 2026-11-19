@@ -38,7 +38,7 @@ function Detail({ detail }: { detail: string }) {
         <>
           <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
             className="mt-0.5 text-blue-600 dark:text-blue-400 hover:underline">
-            {open ? "ซ่อน JSON" : "ดู JSON เต็ม"}
+            {open ? "Hide JSON" : "Show JSON"}
           </button>
           {open && <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-gray-50 p-1.5 font-mono text-gray-700">{compactDetail(detail)}</pre>}
         </>
@@ -87,15 +87,15 @@ export function AuditLog() {
 
   return (
     <section>
-      <h1 className="mb-4 text-xl font-semibold text-gray-900">Audit log</h1>
+      <h1 className="mb-4 text-xl font-semibold text-gray-900">Audit Log</h1>
       <div className="mb-4 flex flex-wrap gap-3">
         <label className="text-sm text-gray-700">
           <span className="mb-1 block">MID</span>
-          <input className={input} value={mid} maxLength={100} onChange={(e) => setMid(e.target.value)} placeholder="ชื่อ MID ตรงตัว" />
+          <input className={input} value={mid} maxLength={100} onChange={(e) => setMid(e.target.value)} placeholder="Exact MID name" />
         </label>
         <label className="text-sm text-gray-700">
-          <span className="mb-1 block">ผู้ใช้</span>
-          <input className={input} value={user} maxLength={100} onChange={(e) => setUser(e.target.value)} placeholder="ส่วนหนึ่งของอีเมล" />
+          <span className="mb-1 block">User</span>
+          <input className={input} value={user} maxLength={100} onChange={(e) => setUser(e.target.value)} placeholder="Part of email" />
         </label>
       </div>
       {error && <div className="mb-3"><ErrorNotice error={error} /></div>}
@@ -103,11 +103,11 @@ export function AuditLog() {
         <table className="w-full text-left text-sm">
           <thead className="bg-gray-50 text-xs text-gray-600">
             <tr>
-              <th className="px-3 py-2 font-medium">เวลา</th>
-              <th className="px-3 py-2 font-medium">ผู้ใช้</th>
-              <th className="px-3 py-2 font-medium">การกระทำ</th>
+              <th className="px-3 py-2 font-medium">Time</th>
+              <th className="px-3 py-2 font-medium">User</th>
+              <th className="px-3 py-2 font-medium">Action</th>
               <th className="px-3 py-2 font-medium">MID</th>
-              <th className="px-3 py-2 font-medium">รายละเอียด</th>
+              <th className="px-3 py-2 font-medium">Details</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -123,17 +123,17 @@ export function AuditLog() {
               </tr>
             ))}
             {!loading && !error && items.length === 0 && !next && (
-              <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">ไม่พบรายการ</td></tr>
+              <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">No Entries</td></tr>
             )}
           </tbody>
         </table>
       </div>
       <div className="mt-4">
-        {loading && <p className="text-sm text-gray-500" role="status">กำลังโหลด…</p>}
+        {loading && <p className="text-sm text-gray-500" role="status">Loading…</p>}
         {!loading && next && (
           <button type="button" onClick={() => void load(next.mid, next.user, next.cursor)}
             className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-800 hover:bg-gray-50">
-            โหลดเพิ่ม
+            Load More
           </button>
         )}
       </div>

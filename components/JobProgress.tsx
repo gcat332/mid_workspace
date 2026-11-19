@@ -33,10 +33,10 @@ function lineText(e: JournalEntry): string | null {
   switch (e.type) {
     case "log": return e.msg ?? null
     case "stage": return e.stage ? `▶ ${jobStageLabel(e.stage)}` : null
-    case "retry": return "ลองใหม่อีกครั้ง"
-    case "cancelled": return "ยกเลิกงานแล้ว"
-    case "done": return "เสร็จสิ้น"
-    case "error": return `ผิดพลาด: ${e.message ?? ""}${e.detail ? `\n${e.detail}` : ""}`
+    case "retry": return "Retrying"
+    case "cancelled": return "Cancelled"
+    case "done": return "Done"
+    case "error": return `Error: ${e.message ?? ""}${e.detail ? `\n${e.detail}` : ""}`
     default: return null
   }
 }
@@ -200,12 +200,12 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose, onStatus, 
     if (i === idx) return failed || job.status === "cancelled" ? "fail" : "run"
     return "wait"
   }
-  const heading = !job ? "กำลังโหลด..."
-    : succeeded ? (isInstall ? "ติดตั้งเสร็จแล้ว" : "เสร็จเรียบร้อย")
-    : failed ? (removal ? "ลบไม่สำเร็จ" : "ติดตั้งไม่สำเร็จ")
-    : job.status === "cancelled" ? "ยกเลิกแล้ว"
-    : removal ? "กำลังลบ..."
-    : "กำลังติดตั้ง..."
+  const heading = !job ? "Loading…"
+    : succeeded ? (isInstall ? "Installed" : "Completed")
+    : failed ? (removal ? "Uninstall Failed" : "Install Failed")
+    : job.status === "cancelled" ? "Cancelled"
+    : removal ? "Removing…"
+    : "Installing…"
 
   return (
     <div className="space-y-4">
@@ -221,7 +221,7 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose, onStatus, 
       {loadErr && <ErrorNotice error={loadErr} />}
 
       {job && (
-        <ol aria-label="ขั้นตอน" className="space-y-1.5">
+        <ol aria-label="Steps" className="space-y-1.5">
           {job.stages.map((s, i) => {
             const st = stageState(i)
             return (
@@ -232,11 +232,11 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose, onStatus, 
                   {st === "run" && <span className="h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />}
                   {st === "wait" && <span className="h-2 w-2 rounded-full bg-gray-300" />}
                 </span>
-                <span className="sr-only">{st === "done" ? "เสร็จ" : st === "fail" ? "ล้มเหลว" : st === "run" ? "กำลังทำ" : "รอ"}:</span>
+                <span className="sr-only">{st === "done" ? "Done" : st === "fail" ? "Failed" : st === "run" ? "Running" : "Waiting"}:</span>
                 <span className={st === "wait" ? "text-gray-500" : st === "fail" ? "font-medium text-red-700" : "text-gray-900 dark:text-neutral-100"}>{jobStageLabel(s)}</span>
                 {s === "fetchPackage" && st === "run" && progress !== null && (
                   <span className="flex min-w-0 flex-1 items-center gap-2">
-                    <span role="progressbar" aria-label="ดาวน์โหลด" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} className="h-2 min-w-0 max-w-48 flex-1 overflow-hidden rounded-full bg-gray-200">
+                    <span role="progressbar" aria-label="Download" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} className="h-2 min-w-0 max-w-48 flex-1 overflow-hidden rounded-full bg-gray-200">
                       <span className="block h-full bg-blue-600" style={{ width: `${progress}%` }} />
                     </span>
                     <span className="text-xs tabular-nums text-gray-600">{progress}%</span>
@@ -251,7 +251,7 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose, onStatus, 
       {streamErr && (
         <div className="space-y-2">
           <ErrorNotice error={streamErr} />
-          <button type="button" onClick={() => reconnect()} className={ghostBtnCls}>เชื่อมต่อใหม่</button>
+          <button type="button" onClick={() => reconnect()} className={ghostBtnCls}>Reconnect</button>
         </div>
       )}
 
@@ -263,10 +263,10 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose, onStatus, 
           }} />
           {!mayAct && <p role="status" className="text-sm text-amber-700">ลองใหม่หรือยกเลิกไม่ได้: {noActReason}</p>}
           {mayAct && <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={busy} onClick={() => void retry()} className="btn-primary px-4 py-2 text-sm font-medium">ลองใหม่</button>
-            {!removal && <button type="button" disabled={busy} onClick={() => setConfirmCancel(true)} className={ghostBtnCls}>ยกเลิกและลบ</button>}
+            <button type="button" disabled={busy} onClick={() => void retry()} className="btn-primary px-4 py-2 text-sm font-medium">Retry</button>
+            {!removal && <button type="button" disabled={busy} onClick={() => setConfirmCancel(true)} className={ghostBtnCls}>Cancel and Delete</button>}
           </div>}
-          {mayAct && <p className="text-xs text-gray-500">“ลองใหม่” ทำต่อจากขั้นที่ล้มเหลว{!removal && " · “ยกเลิกและลบ” ลบ MID ที่ติดตั้งค้างไว้ทั้งหมด"}</p>}
+          {mayAct && <p className="text-xs text-gray-500">“Retry” ทำต่อจากขั้นที่ล้มเหลว{!removal && " · “Cancel and Delete” ลบ MID ที่ติดตั้งค้างไว้ทั้งหมด"}</p>}
         </div>
       )}
       {actionErr && <ErrorNotice error={actionErr} />}
@@ -279,21 +279,21 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose, onStatus, 
             {target?.url && (
               <a href={`${target.url}ecc_agent_list.do?sysparm_query=name=${encodeURIComponent(target.sn)}`} target="_blank" rel="noopener noreferrer"
                 className="btn-primary inline-block px-4 py-2 text-sm font-medium">
-                ไป Validate MID ใน instance
+                Validate in ServiceNow
               </a>
             )}
-            <button type="button" onClick={() => onOpenMid(job!.midName)} className={ghostBtnCls}>ไปที่ MID นี้</button>
+            <button type="button" onClick={() => onOpenMid(job!.midName)} className={ghostBtnCls}>Open MID</button>
           </div>
         </div>
       )}
       {succeeded && !isInstall && (
-        <button type="button" onClick={onClose} className="btn-primary px-4 py-2 text-sm font-medium">ปิด</button>
+        <button type="button" onClick={onClose} className="btn-primary px-4 py-2 text-sm font-medium">Close</button>
       )}
 
       <div>
-        <p className="mb-1 text-xs font-medium text-gray-600">บันทึกการทำงาน</p>
-        <ul ref={logRef} tabIndex={0} aria-label="บันทึกการทำงาน" className="max-h-48 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 font-mono text-xs">
-          {lines.length === 0 && <li className="text-gray-500">รอข้อมูล...</li>}
+        <p className="mb-1 text-xs font-medium text-gray-600">Activity Log</p>
+        <ul ref={logRef} tabIndex={0} aria-label="Activity Log" className="max-h-48 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 font-mono text-xs">
+          {lines.length === 0 && <li className="text-gray-500">Waiting…</li>}
           {lines.map((l, i) => {
             const t = lineText(l)
             if (t === null) return null
@@ -304,7 +304,7 @@ export function JobProgress({ jobId, onJobChange, onOpenMid, onClose, onStatus, 
       </div>
 
       {confirmCancel && (
-        <ConfirmDialog title="ยกเลิกและลบ MID นี้?" confirmLabel="ยกเลิกและลบ" danger busy={busy} onConfirm={() => void cancel()} onCancel={() => setConfirmCancel(false)}>
+        <ConfirmDialog title="Cancel and Delete MID?" confirmLabel="Cancel and Delete" danger busy={busy} onConfirm={() => void cancel()} onCancel={() => setConfirmCancel(false)}>
           ระบบจะหยุดและลบ MID <span className="font-mono">{job?.midName}</span> ที่ติดตั้งค้างไว้ รวมถึงไฟล์ทั้งหมดของมัน
         </ConfirmDialog>
       )}

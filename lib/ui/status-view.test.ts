@@ -8,15 +8,15 @@ const mid = (state: string, st: MidView["status"]["state"]): MidView => ({
 
 describe("statusView", () => {
   it.each([
-    ["ready", "running", "🟢", "กำลังรัน"],
-    ["ready", "stopped", "⚪", "หยุด"],
-    ["ready", "starting", "🟡", "กำลังทำงาน"],
-    ["ready", "failed", "🔴", "ล่ม"],
-    ["ready", "unknown", "⚪", "ไม่ทราบสถานะ"],
-    ["installing", "stopped", "🟡", "กำลังทำงาน"],
-    ["upgrading", "running", "🟡", "กำลังทำงาน"],
-    ["uninstalling", "stopped", "🟡", "กำลังทำงาน"],
-    ["error", "stopped", "🔴", "ล่ม"],
+    ["ready", "running", "🟢", "Running"],
+    ["ready", "stopped", "⚪", "Stopped"],
+    ["ready", "starting", "🟡", "Starting"],
+    ["ready", "failed", "🔴", "Failed"],
+    ["ready", "unknown", "⚪", "Unknown"],
+    ["installing", "stopped", "🟡", "Working"],
+    ["upgrading", "running", "🟡", "Working"],
+    ["uninstalling", "stopped", "🟡", "Working"],
+    ["error", "stopped", "🔴", "Failed"],
   ])("state=%s status=%s", (state, st, icon, label) => {
     expect(statusView(mid(state, st as MidView["status"]["state"]))).toEqual({ icon, label })
   })
@@ -27,38 +27,38 @@ const J = (kind: string, stage: string, status: string) => ({ id: "j1", kind, st
 
 describe("statusView with a job", () => {
   it.each([
-    ["install", "fetchPackage", "กำลังดาวน์โหลด"],
-    ["install", "extract", "กำลังแตกไฟล์"],
-    ["clone", "configure", "กำลังตั้งค่า"],
-    ["install", "waitConnected", "รอเชื่อมต่อ instance"],
-    ["install", "precheck", "กำลังติดตั้ง"],
-    ["uninstall", "stop", "กำลังลบ"],
-    ["uninstall", "archive", "กำลังลบ"],
-    ["cancel_install", "deleteDir", "กำลังลบ"],
+    ["install", "fetchPackage", "Downloading"],
+    ["install", "extract", "Extracting"],
+    ["clone", "configure", "Configuring"],
+    ["install", "waitConnected", "Waiting for Instance"],
+    ["install", "precheck", "Installing"],
+    ["uninstall", "stop", "Removing"],
+    ["uninstall", "archive", "Removing"],
+    ["cancel_install", "deleteDir", "Removing"],
   ])("running %s/%s -> yellow %s", (kind, stage, label) => {
     expect(statusView(withJob("installing", J(kind, stage, "running")))).toEqual({ icon: "🟡", label })
   })
   it("queued counts as active; an active job beats a running service", () => {
-    expect(statusView(withJob("installed", J("install", "extract", "queued"), "running"))).toEqual({ icon: "🟡", label: "กำลังแตกไฟล์" })
+    expect(statusView(withJob("installed", J("install", "extract", "queued"), "running"))).toEqual({ icon: "🟡", label: "Extracting" })
   })
-  it("failed install -> red 'ติดตั้งไม่สำเร็จ' while the MID is not installed", () => {
-    expect(statusView(withJob("error", J("install", "extract", "failed")))).toEqual({ icon: "🔴", label: "ติดตั้งไม่สำเร็จ" })
-    expect(statusView(withJob("installing", J("clone", "extract", "failed")))).toEqual({ icon: "🔴", label: "ติดตั้งไม่สำเร็จ" })
+  it("failed install -> red 'Install Failed' while the MID is not installed", () => {
+    expect(statusView(withJob("error", J("install", "extract", "failed")))).toEqual({ icon: "🔴", label: "Install Failed" })
+    expect(statusView(withJob("installing", J("clone", "extract", "failed")))).toEqual({ icon: "🔴", label: "Install Failed" })
   })
-  it("cancel_install: running -> กำลังลบ, failed -> ลบไม่สำเร็จ", () => {
-    expect(statusView(withJob("installing", J("cancel_install", "stop", "running")))).toEqual({ icon: "🟡", label: "กำลังลบ" })
-    expect(statusView(withJob("error", J("cancel_install", "stop", "failed")))).toEqual({ icon: "🔴", label: "ลบไม่สำเร็จ" })
+  it("cancel_install: running -> Removing, failed -> Uninstall Failed", () => {
+    expect(statusView(withJob("installing", J("cancel_install", "stop", "running")))).toEqual({ icon: "🟡", label: "Removing" })
+    expect(statusView(withJob("error", J("cancel_install", "stop", "failed")))).toEqual({ icon: "🔴", label: "Uninstall Failed" })
   })
-  it("failed removal -> red 'ลบไม่สำเร็จ'", () => {
-    expect(statusView(withJob("error", J("uninstall", "archive", "failed")))).toEqual({ icon: "🔴", label: "ลบไม่สำเร็จ" })
+  it("failed removal -> red 'Uninstall Failed'", () => {
+    expect(statusView(withJob("error", J("uninstall", "archive", "failed")))).toEqual({ icon: "🔴", label: "Uninstall Failed" })
   })
   it("an old failed job does not hide a healthy installed MID", () => {
-    expect(statusView(withJob("installed", J("install", "extract", "failed"), "running"))).toEqual({ icon: "🟢", label: "กำลังรัน" })
+    expect(statusView(withJob("installed", J("install", "extract", "failed"), "running"))).toEqual({ icon: "🟢", label: "Running" })
   })
   it("succeeded/cancelled jobs and a null job fall back to the service state", () => {
-    expect(statusView(withJob("installed", J("install", "markRemoved", "succeeded"), "running"))).toEqual({ icon: "🟢", label: "กำลังรัน" })
-    expect(statusView(withJob("installed", J("install", "extract", "cancelled"), "stopped"))).toEqual({ icon: "⚪", label: "หยุด" })
-    expect(statusView({ ...mid("installed", "stopped"), job: null })).toEqual({ icon: "⚪", label: "หยุด" })
+    expect(statusView(withJob("installed", J("install", "markRemoved", "succeeded"), "running"))).toEqual({ icon: "🟢", label: "Running" })
+    expect(statusView(withJob("installed", J("install", "extract", "cancelled"), "stopped"))).toEqual({ icon: "⚪", label: "Stopped" })
+    expect(statusView({ ...mid("installed", "stopped"), job: null })).toEqual({ icon: "⚪", label: "Stopped" })
   })
 })
 
@@ -88,8 +88,8 @@ describe("resumableUninstall", () => {
 })
 
 describe("quotaView", () => {
-  it("full at 4/4", () => expect(quotaView(4, 4)).toEqual({ text: "กำลังรัน 4/4", full: true }))
-  it("not full at 2/4", () => expect(quotaView(2, 4)).toEqual({ text: "กำลังรัน 2/4", full: false }))
+  it("full at 4/4", () => expect(quotaView(4, 4)).toEqual({ text: "Running 4/4", full: true }))
+  it("not full at 2/4", () => expect(quotaView(2, 4)).toEqual({ text: "Running 2/4", full: false }))
 })
 
 describe("formatJobTime", () => {

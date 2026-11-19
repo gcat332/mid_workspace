@@ -9,7 +9,7 @@ import { MAX_HEAP_MB, MIN_HEAP_MB } from "@/lib/helper/protocol"
 import { inputCls } from "@/lib/ui/classes"
 import { useIsDark } from "@/lib/ui/use-is-dark"
 
-const EDITOR_LOADING = <p className="p-3 text-sm text-gray-500">กำลังโหลด editor…</p>
+const EDITOR_LOADING = <p className="p-3 text-sm text-gray-500">Loading…</p>
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false, loading: () => EDITOR_LOADING })
 const DiffEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.DiffEditor), { ssr: false, loading: () => EDITOR_LOADING })
 
@@ -102,7 +102,7 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
   }
   const put = (body: object) => send(base, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, () => canRestart && setAskRestart(true))
 
-  if (!data || !form) return err ? <ErrorNotice error={err} /> : <p className="text-sm text-gray-500">กำลังโหลดการตั้งค่า...</p>
+  if (!data || !form) return err ? <ErrorNotice error={err} /> : <p className="text-sm text-gray-500">Loading…</p>
 
   const setF = <K extends keyof Form>(k: K, v: Form[K]) => { setSaved(false); setForm({ ...form, [k]: v }) }
   const heapOk = Number.isInteger(form.heapMb) && form.heapMb >= MIN_HEAP_MB && form.heapMb <= MAX_HEAP_MB
@@ -120,22 +120,22 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
 
   return (
     <div className="space-y-4">
-      <div role="group" aria-label="โหมดแก้ไข" className="inline-flex overflow-hidden rounded-lg border border-gray-300 text-sm">
+      <div role="group" aria-label="Edit Mode" className="inline-flex overflow-hidden rounded-lg border border-gray-300 text-sm">
         {(["form", "raw"] as const).map((m) => (
           <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}
             className={`px-4 py-1.5 ${mode === m ? "bg-blue-600 text-white" : "bg-white dark:bg-neutral-800 text-gray-700 hover:bg-gray-50"}`}>
-            {m === "form" ? "ฟอร์ม" : "Raw"}
+            {m === "form" ? "Form" : "Raw"}
           </button>
         ))}
       </div>
 
       {busyReason && <p role="status" className="text-sm text-amber-700">{busyReason} — แก้ไขและบันทึกไม่ได้จนกว่างานจะเสร็จ</p>}
-      {saved && !err && <p role="status" className="text-sm text-emerald-700">บันทึกแล้ว</p>}
+      {saved && !err && <p role="status" className="text-sm text-emerald-700">Saved</p>}
       {data.warning && <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{data.warning}</p>}
       {err && (
         <div className="space-y-2">
           <ErrorNotice error={err} />
-          {stale && <button type="button" onClick={() => void load()} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`}>โหลดใหม่ (การแก้ไขที่ยังไม่บันทึกจะหาย)</button>}
+          {stale && <button type="button" onClick={() => void load()} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`} title="การแก้ไขที่ยังไม่บันทึกจะหาย">Reload</button>}
         </div>
       )}
 
@@ -148,13 +148,13 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
             <input className={input} value={form.url} onChange={(e) => setF("url", e.target.value)} /></label>
           <label className="text-sm text-gray-700">Username
             <input className={input} value={form.username} onChange={(e) => setF("username", e.target.value)} autoComplete="off" /></label>
-          <label className="text-sm text-gray-700">Password (เว้นว่าง = ไม่เปลี่ยน)
+          <label className="text-sm text-gray-700">Password
             <input className={input} type="password" value={pw.password} onChange={(e) => { setSaved(false); setPw({ ...pw, password: e.target.value }) }} autoComplete="new-password"
-              placeholder={form.hasPassword ? KEEP_PW : "ยังไม่ได้ตั้ง"} /></label>
-          <label className="text-sm text-gray-700">ชื่อ MID ใน ServiceNow
+              placeholder={form.hasPassword ? KEEP_PW : "Not Set"} /></label>
+          <label className="text-sm text-gray-700">MID Server Name
             <input className={input} value={form.midName} onChange={(e) => setF("midName", e.target.value)} /></label>
           <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input type="checkbox" checked={form.useProxy} onChange={(e) => setF("useProxy", e.target.checked)} /> ใช้ Proxy</label>
+            <input type="checkbox" checked={form.useProxy} onChange={(e) => setF("useProxy", e.target.checked)} /> Use Proxy</label>
           {form.useProxy && (
             <div className="grid gap-3 rounded-lg border border-gray-200 p-3">
               <label className="text-sm text-gray-700">Proxy host
@@ -163,12 +163,12 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
                 <input className={input} inputMode="numeric" value={form.proxyPort} onChange={(e) => setF("proxyPort", e.target.value)} /></label>
               <label className="text-sm text-gray-700">Proxy username
                 <input className={input} value={form.proxyUser} onChange={(e) => setF("proxyUser", e.target.value)} autoComplete="off" /></label>
-              <label className="text-sm text-gray-700">Proxy password (เว้นว่าง = ไม่เปลี่ยน)
+              <label className="text-sm text-gray-700">Proxy Password
                 <input className={input} type="password" value={pw.proxyPassword} onChange={(e) => { setSaved(false); setPw({ ...pw, proxyPassword: e.target.value }) }} autoComplete="new-password"
-                  placeholder={form.hasProxyPassword ? KEEP_PW : "ยังไม่ได้ตั้ง"} /></label>
+                  placeholder={form.hasProxyPassword ? KEEP_PW : "Not Set"} /></label>
             </div>
           )}
-          <label className="text-sm text-gray-700">RAM (heap) MB — {MIN_HEAP_MB} ถึง {MAX_HEAP_MB}
+          <label className="text-sm text-gray-700">Heap (MB), {MIN_HEAP_MB}-{MAX_HEAP_MB}
             <input className={input} type="number" min={MIN_HEAP_MB} max={MAX_HEAP_MB} step={64} value={Number.isNaN(form.heapMb) ? "" : form.heapMb}
               onChange={(e) => setF("heapMb", e.target.valueAsNumber)} aria-invalid={!heapOk} aria-describedby="heap-note" /></label>
           {!heapOk && <p className="text-xs text-red-700">RAM ต้องเป็นจำนวนเต็ม {MIN_HEAP_MB}-{MAX_HEAP_MB} MB</p>}
@@ -176,19 +176,19 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
             เปลี่ยน RAM แล้ว ระบบจะเขียน systemd unit ของ MID นี้ใหม่จากแม่แบบของ MidHub (unit ที่แก้เองบนเครื่องจะถูกทับ)
           </p>
           <div><button type="submit" disabled={busy || !heapOk || !!busyReason} className={`btn-primary px-4 py-2 text-sm`}>
-            {busy ? "กำลังบันทึก..." : "บันทึก"}</button></div>
+            {busy ? "Saving…" : "Save"}</button></div>
         </form>
       ) : (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <select aria-label="ไฟล์" value={rawFile} onChange={(e) => setRawFile(e.target.value as ConfigFile)}
+            <select aria-label="File" value={rawFile} onChange={(e) => setRawFile(e.target.value as ConfigFile)}
               className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm">
               <option value="config.xml">config.xml</option>
               <option value="wrapper-override.conf">wrapper-override.conf</option>
             </select>
             <button type="button" disabled={busy || !!busyReason}
               onClick={() => void put({ file: rawFile, content: drafts[rawFile], baseHash: data.files[rawFile].hash })}
-              className={`btn-primary px-4 py-2 text-sm`}>{busy ? "กำลังบันทึก..." : "บันทึก"}</button>
+              className={`btn-primary px-4 py-2 text-sm`}>{busy ? "Saving…" : "Save"}</button>
           </div>
           {rawFile === "config.xml" && <p className="text-xs text-gray-500">ค่า password แสดงเป็น ******** — ถ้าไม่แก้ ระบบจะคงค่าเดิมในไฟล์ไว้</p>}
           <div className="h-96 overflow-hidden rounded-lg border border-gray-300">
@@ -199,16 +199,16 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
         </div>
       )}
 
-      <section aria-label="ประวัติการแก้ไข" className="border-t border-gray-200 pt-4">
-        <h3 className="text-sm font-semibold text-gray-900">ประวัติการแก้ไข (backup)</h3>
-        {backups.length === 0 ? <p className="mt-1 text-sm text-gray-500">ยังไม่มี backup</p> : (
+      <section aria-label="Backup History" className="border-t border-gray-200 pt-4">
+        <h3 className="text-sm font-semibold text-gray-900">Backup History</h3>
+        {backups.length === 0 ? <p className="mt-1 text-sm text-gray-500">No Backups</p> : (
           <ul className="mt-2 divide-y divide-gray-100 text-sm">
             {backups.map((b) => (
               <li key={b.id} className="flex flex-wrap items-center gap-2 py-1.5">
                 <span className="font-mono text-xs">{b.file}</span>
                 <span className="text-gray-600">{fmt(b.createdAt)} · {b.createdBy}{b.note ? ` · ${b.note}` : ""}</span>
                 <button type="button" onClick={() => void pickBackup(b.id)} aria-pressed={selected?.id === b.id}
-                  className="ml-auto text-blue-600 dark:text-blue-400 hover:underline">เทียบกับปัจจุบัน</button>
+                  className="ml-auto text-blue-600 dark:text-blue-400 hover:underline">Compare</button>
               </li>
             ))}
           </ul>
@@ -228,20 +228,20 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
                 options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false } }} />
             </div>
             <button type="button" disabled={busy || !!busyReason} onClick={() => setConfirmRollback(true)}
-              className={`${btn} border-red-300 text-red-700 hover:bg-red-50`}>Rollback เป็นเวอร์ชันนี้</button>
+              className={`${btn} border-red-300 text-red-700 hover:bg-red-50`}>Roll Back</button>
           </div>
         )}
       </section>
 
       {confirmRollback && selected && (
-        <ConfirmDialog title="Rollback ไฟล์นี้?" danger busy={busy} confirmLabel="Rollback เลย"
+        <ConfirmDialog title="Roll Back File?" danger busy={busy} confirmLabel="Roll Back"
           onCancel={() => setConfirmRollback(false)}
           onConfirm={() => void send(`${base}/backups/${encodeURIComponent(selected.id)}`, { method: "POST" }, () => canRestart && setAskRestart(true)).then(() => setConfirmRollback(false))}>
           ไฟล์ {selected.file} จะถูกแทนที่ด้วยเวอร์ชัน backup นี้ (เวอร์ชันปัจจุบันจะถูกเก็บเป็น backup ก่อน)
         </ConfirmDialog>
       )}
       {askRestart && (
-        <ConfirmDialog title="Restart เลยไหม?" confirmLabel="Restart เลย" onCancel={() => setAskRestart(false)}
+        <ConfirmDialog title="Restart Now?" confirmLabel="Restart" onCancel={() => setAskRestart(false)}
           onConfirm={() => { setAskRestart(false); onRestart() }}>
           บันทึกแล้ว การตั้งค่าใหม่จะมีผลหลัง restart MID (งานที่กำลังทำอยู่จะถูกขัดจังหวะ)
         </ConfirmDialog>

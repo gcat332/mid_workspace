@@ -14,10 +14,10 @@ import { tabKeyTarget } from "@/lib/ui/tabs"
 import { quotaFullMessage } from "@/lib/mids/messages"
 
 const TABS = [
-  { id: "overview", label: "ภาพรวม" },
-  { id: "config", label: "ตั้งค่า" },
-  { id: "files", label: "ไฟล์" },
-  { id: "logs", label: "Log" },
+  { id: "overview", label: "Overview" },
+  { id: "config", label: "Configuration" },
+  { id: "files", label: "Files" },
+  { id: "logs", label: "Logs" },
 ] as const
 type TabId = (typeof TABS)[number]["id"]
 
@@ -103,7 +103,7 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
     }
   }
 
-  /** "ซ่อมสิทธิ์ไฟล์": the root helper makes the whole MID tree midsvc:midhub and group-writable (audited). */
+  /** "Repair Permissions": the root helper makes the whole MID tree midsvc:midhub and group-writable (audited). */
   async function fixOwnership() {
     setErr(null); setFixed(false); setFixing(true)
     try {
@@ -142,7 +142,7 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
     busyReason,
     !busyReason && !isUp ? RESTART_WHEN_UP : null,
     NOT_YET,
-    uninstallReason && uninstallReason !== busyReason ? `ลบ: ${uninstallReason}` : null,
+    uninstallReason && uninstallReason !== busyReason ? `Uninstall: ${uninstallReason}` : null,
   ].filter(Boolean) as string[]
 
   return (
@@ -164,10 +164,10 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
           )}
           <button type="button" onClick={() => void fixOwnership()} disabled={fixing || !!busyReason}
             title="ให้ไฟล์ทั้งหมดของ MID เป็นของ midsvc:midhub และกลุ่มแก้ไขได้ (ใช้เมื่อแก้ไฟล์ไม่ได้เพราะสิทธิ์)"
-            className={`${hdrBtn} border-gray-300 text-gray-800 hover:bg-gray-50`}>{fixing ? "กำลังซ่อม..." : "ซ่อมสิทธิ์ไฟล์"}</button>
+            className={`${hdrBtn} border-gray-300 text-gray-800 hover:bg-gray-50`}>{fixing ? "Repairing…" : "Repair Permissions"}</button>
           <button type="button" disabled aria-describedby="mid-btn-reasons" className={`${hdrBtn} border-gray-300 text-gray-800`}>Upgrade</button>
           <button type="button" onClick={() => onUninstall(mid)} disabled={uninstallReason !== null} aria-describedby="mid-btn-reasons"
-            className={`${hdrBtn} border-red-300 text-red-700 hover:bg-red-50`}>ลบ</button>
+            className={`${hdrBtn} border-red-300 text-red-700 hover:bg-red-50`}>Uninstall</button>
         </div>
       </div>
       <p id="mid-btn-reasons" className="mt-1 text-xs text-gray-500">{reasons.join(" · ")}</p>
@@ -186,7 +186,7 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
         </div>
       )}
 
-      <div role="tablist" aria-label="รายละเอียด MID" onKeyDown={onTabKey} className="mt-4 flex gap-1 overflow-x-auto border-b border-gray-200">
+      <div role="tablist" aria-label="MID Details" onKeyDown={onTabKey} className="mt-4 flex gap-1 overflow-x-auto border-b border-gray-200">
         {TABS.map((t) => (
           <button key={t.id} type="button" role="tab" id={`tab-${t.id}`} aria-selected={tab === t.id} aria-controls="tabpanel"
             tabIndex={tab === t.id ? 0 : -1} onClick={() => selectTab(t.id)}
@@ -205,9 +205,9 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
       {pending && (
         // One dialog instance for both steps so the opener (and focus restore) survives the low-memory handoff.
         <ConfirmDialog
-          title={pending.lowMemory ? "RAM เหลือน้อย ทำต่อหรือไม่?" : `${ACTION_TH[pending.action]} ${mid.name}?`}
+          title={pending.lowMemory ? "Low RAM. Continue?" : `${ACTION_TH[pending.action]} ${mid.name}?`}
           danger busy={busy}
-          confirmLabel={pending.lowMemory ? "ยืนยัน ทำต่อ" : `${ACTION_TH[pending.action]} เลย`}
+          confirmLabel={pending.lowMemory ? "Confirm" : `${ACTION_TH[pending.action]}`}
           onCancel={() => setPending(null)} onConfirm={() => void send(pending.action, !!pending.lowMemory)}>
           {pending.lowMemory ??
             (pending.action === "stop"

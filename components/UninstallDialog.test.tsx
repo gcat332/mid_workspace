@@ -32,7 +32,7 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-const confirmBtn = () => screen.getByRole("button", { name: "ลบ MID นี้" }) as HTMLButtonElement
+const confirmBtn = () => screen.getByRole("button", { name: "Uninstall" }) as HTMLButtonElement
 const type = (v: string) => fireEvent.change(screen.getByLabelText(/พิมพ์ชื่อ MID/), { target: { value: v } })
 
 describe("UninstallDialog", () => {
@@ -70,7 +70,7 @@ describe("UninstallDialog", () => {
     render(<UninstallDialog viewer={ADMIN} mid={mid} onClose={() => {}} />)
     type("mid-a")
     fireEvent.click(confirmBtn())
-    await screen.findByRole("list", { name: "ขั้นตอน" })
+    await screen.findByRole("list", { name: "Steps" })
     const del = calls.find((c) => c.method === "DELETE")!
     expect(del.url).toBe("/midhub/api/mids/mid-a")
     expect(JSON.parse(del.body!)).toEqual({ confirmName: "mid-a" })
@@ -94,7 +94,7 @@ describe("UninstallDialog", () => {
     fireEvent.click(confirmBtn())
     expect(await screen.findByText(/มีงานอื่นกำลังทำอยู่/)).toBeTruthy()
     await waitFor(() => expect(confirmBtn().disabled).toBe(false))
-    expect(screen.queryByRole("list", { name: "ขั้นตอน" })).toBeNull()
+    expect(screen.queryByRole("list", { name: "Steps" })).toBeNull()
   })
 
   it("rejects a 202 without a job id", async () => {
@@ -103,7 +103,7 @@ describe("UninstallDialog", () => {
     type("mid-a")
     fireEvent.click(confirmBtn())
     expect(await screen.findByRole("alert")).toBeTruthy()
-    expect(screen.queryByRole("list", { name: "ขั้นตอน" })).toBeNull()
+    expect(screen.queryByRole("list", { name: "Steps" })).toBeNull()
   })
 
   it("resume mode skips typing, shows the job, and the record link after success", async () => {
@@ -117,7 +117,7 @@ describe("UninstallDialog", () => {
   it("reports the shown job id when closed (so the host can remember the dismissal)", async () => {
     const onClose = vi.fn()
     render(<UninstallDialog viewer={ADMIN} mid={mid} jobId="u1" onClose={onClose} />)
-    await screen.findByRole("list", { name: "ขั้นตอน" })
+    await screen.findByRole("list", { name: "Steps" })
     fireEvent.keyDown(document, { key: "Escape" })
     expect(onClose).toHaveBeenCalledWith("u1")
   })
@@ -126,12 +126,12 @@ describe("UninstallDialog", () => {
     jobStatus = "failed"
     render(<UninstallDialog viewer={{ isAdmin: false, userId: "m1" }} mid={mid} jobId="u1" onClose={() => {}} />)
     expect(await screen.findByText(/ต้องเป็น Admin/)).toBeTruthy()
-    expect(screen.queryByText("ลองใหม่")).toBeNull()
+    expect(screen.queryByText("Retry")).toBeNull()
   })
 
   it("resume mode as an admin: failed uninstall offers retry", async () => {
     jobStatus = "failed"
     render(<UninstallDialog viewer={ADMIN} mid={mid} jobId="u1" onClose={() => {}} />)
-    expect(await screen.findByText("ลองใหม่")).toBeTruthy()
+    expect(await screen.findByText("Retry")).toBeTruthy()
   })
 })

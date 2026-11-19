@@ -61,15 +61,15 @@ export function IpAllowlistManager() {
   function add() {
     setErr(null)
     if (!locksMeOut([...entries.map((e) => e.cidr), cidr.trim()])) { void doAdd(); return }
-    setPending({ title: "IP ของคุณจะถูกบล็อก", body: `${lockoutText} ต้องการเพิ่ม ${cidr.trim()} ต่อหรือไม่?`, confirmLabel: "เพิ่มต่อ", run: doAdd })
+    setPending({ title: "Your IP Will Be Blocked", body: `${lockoutText} ต้องการเพิ่ม ${cidr.trim()} ต่อหรือไม่?`, confirmLabel: "Add Anyway", run: doAdd })
   }
   function remove(e: Entry) {
     setErr(null)
     const lockout = locksMeOut(entries.filter((x) => x.id !== e.id).map((x) => x.cidr))
     setPending({
-      title: `ลบ ${e.cidr} ออกจากรายการ?`,
+      title: `Remove ${e.cidr}?`,
       body: lockout ? lockoutText : "IP ในช่วงนี้จะเข้าใช้งานไม่ได้อีก (ถ้ายังมีรายการอื่นเหลืออยู่)",
-      confirmLabel: "ลบ",
+      confirmLabel: "Remove",
       run: async () => { await call(`/admin/ip-allowlist?id=${encodeURIComponent(e.id)}`, { method: "DELETE" }) },
     })
   }
@@ -84,21 +84,21 @@ export function IpAllowlistManager() {
         <p className="mb-3 text-xs text-gray-600">
           IP ของคุณที่เซิร์ฟเวอร์เห็น: <span className="font-mono text-gray-900">{myIp}</span>{" "}
           ({wouldAllow(myIp, entries.map((e) => e.cidr)) ? "อนุญาต" : "ไม่อยู่ในรายการ"}){" "}
-          <button type="button" className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setCidr(myIp)}>ใช้ IP นี้</button>
+          <button type="button" className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setCidr(myIp)}>Use This IP</button>
         </p>
       )}
       <form className="mb-3 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); add() }}>
-        <input value={cidr} onChange={(e) => setCidr(e.target.value)} placeholder="1.2.3.4 หรือ 10.0.0.0/24 หรือ 2001:db8::/32"
-          aria-label="IP หรือ CIDR" className={`${input} min-w-[200px] flex-1`} />
-        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="หมายเหตุ (ไม่บังคับ)"
-          aria-label="หมายเหตุ" className={`${input} min-w-[140px] flex-1`} />
-        <button type="submit" disabled={busy} className="btn-primary px-4 py-2 text-sm font-medium">เพิ่ม</button>
+        <input value={cidr} onChange={(e) => setCidr(e.target.value)} placeholder="1.2.3.4, 10.0.0.0/24 or 2001:db8::/32"
+          aria-label="IP or CIDR" className={`${input} min-w-[200px] flex-1`} />
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (Optional)"
+          aria-label="Note" className={`${input} min-w-[140px] flex-1`} />
+        <button type="submit" disabled={busy} className="btn-primary px-4 py-2 text-sm font-medium">Add</button>
       </form>
       {err && <div className="mb-2"><ErrorNotice error={err} /></div>}
       <div className="relative overflow-x-auto rounded-xl border border-gray-200 bg-white dark:bg-neutral-800">
         <table className="w-full text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600">
-            <tr><th className="px-4 py-3">IP / CIDR</th><th className="px-4 py-3">หมายเหตุ</th><th className="px-4 py-3"><span className="sr-only">จัดการ</span></th></tr>
+            <tr><th className="px-4 py-3">IP / CIDR</th><th className="px-4 py-3">Note</th><th className="px-4 py-3"><span className="sr-only">Actions</span></th></tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {entries.map((e) => (
@@ -106,7 +106,7 @@ export function IpAllowlistManager() {
                 <td className="px-4 py-3 font-mono text-gray-900">{e.cidr}</td>
                 <td className="px-4 py-3 text-gray-500">{e.note || "—"}</td>
                 <td className="px-4 py-3 text-right">
-                  <button type="button" className="text-red-600 hover:underline" onClick={() => remove(e)}>ลบ</button>
+                  <button type="button" className="text-red-600 hover:underline" onClick={() => remove(e)}>Remove</button>
                 </td>
               </tr>
             ))}

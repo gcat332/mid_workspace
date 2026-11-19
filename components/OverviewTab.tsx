@@ -35,26 +35,26 @@ export function OverviewTab({ mid, jobShown = false, busyReason = null, onChange
       <Row label="Instance">
         {url ? <a href={url} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">{url}</a> : (mid.instanceUrl ?? "-")}
       </Row>
-      <Row label="ชื่อ MID ใน ServiceNow">{mid.midName ?? "-"}</Row>
-      <Row label="เวอร์ชัน">{mid.version || "ไม่ทราบ"}</Row>
-      <Row label="สถานะ service">{sv.icon} {sv.label}</Row>
+      <Row label="MID Server Name">{mid.midName ?? "-"}</Row>
+      <Row label="Version">{mid.version || "Unknown"}</Row>
+      <Row label="Service Status">{sv.icon} {sv.label}</Row>
       <Row label="Uptime">{running ? formatUptime(mid.status.since) : "-"}</Row>
-      <Row label="RAM ที่ใช้">{formatBytes(mid.status.memoryBytes)}</Row>
+      <Row label="Memory Usage">{formatBytes(mid.status.memoryBytes)}</Row>
       <Row label="Heap">{mid.heapMb} MB</Row>
       <Row label="AgentHub">
         <AgentAccessSwitch midName={mid.name} enabled={mid.agentAccess ?? false} disabledReason={busyReason} onChanged={onChanged} />
       </Row>
-      <Row label="Record ใน instance">
+      <Row label="Instance Record">
         {recordUrl
-          ? <a href={recordUrl} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">เปิดดู MID Server ใน ServiceNow</a>
+          ? <a href={recordUrl} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">Open in ServiceNow</a>
           : "-"}
       </Row>
       {mid.job && (
-        <Row label="job ล่าสุด">
+        <Row label="Last Job">
           {jobKindLabel(mid.job.kind)} · {jobStatusLabel(mid.job.status)} · {formatJobTime(mid.job.createdAt)}{" "}
           {(mid.job.kind === "install" || mid.job.kind === "clone") && !jobShown && (
           <Link replace scroll={false} href={`${pathname}?mid=${encodeURIComponent(mid.name)}&job=${encodeURIComponent(mid.job.id)}`}
-            className="whitespace-nowrap text-blue-600 hover:underline dark:text-blue-400">ดูความคืบหน้า</Link>)}
+            className="whitespace-nowrap text-blue-600 hover:underline dark:text-blue-400">View Progress</Link>)}
         </Row>
       )}
     </dl>

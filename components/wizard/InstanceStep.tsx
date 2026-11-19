@@ -83,7 +83,7 @@ export function InstanceStep({ isAdmin, state, onChange, onLabel }: Props) {
     const res = await call("/instances/test", jsonInit("POST", { url, midUser, password }))
     if (!res) return
     const j = (await res.json()) as { buildstamp: string | null }
-    setInfo(`เชื่อมต่อสำเร็จ${j.buildstamp ? ` (build: ${j.buildstamp})` : ""} กด “ทดสอบและบันทึก” เพื่อใช้ instance นี้`)
+    setInfo(`เชื่อมต่อสำเร็จ${j.buildstamp ? ` (build: ${j.buildstamp})` : ""} กด “Test and Save” เพื่อใช้ instance นี้`)
   }
   async function saveNew() {
     let lbl = label.trim()
@@ -112,15 +112,15 @@ export function InstanceStep({ isAdmin, state, onChange, onLabel }: Props) {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-base font-semibold text-gray-900 dark:text-neutral-100">เลือก ServiceNow instance ที่ MID จะเชื่อมต่อ</h3>
+        <h3 className="text-base font-semibold text-gray-900 dark:text-neutral-100">Select Instance</h3>
         <p className="mt-0.5 text-sm text-gray-600">เลือกจากที่บันทึกไว้ หรือเพิ่ม instance ใหม่</p>
       </div>
       {loadErr && <ErrorNotice error={loadErr} />}
-      {items === null && !loadErr && <p className="text-sm text-gray-500">กำลังโหลด...</p>}
-      {items && items.length === 0 && !adding && <p className="text-sm text-gray-600">ยังไม่มี instance ที่บันทึกไว้ กด “เพิ่ม instance ใหม่”</p>}
+      {items === null && !loadErr && <p className="text-sm text-gray-500">Loading…</p>}
+      {items && items.length === 0 && !adding && <p className="text-sm text-gray-600">ยังไม่มี instance ที่บันทึกไว้ กด “Add Instance”</p>}
 
       {items && items.length > 0 && (
-        <ul role="radiogroup" aria-label="instance ที่บันทึกไว้" className="space-y-2">
+        <ul role="radiogroup" aria-label="Saved Instances" className="space-y-2">
           {items.map((i) => {
             const on = state.instance?.id === i.id
             return (
@@ -133,7 +133,7 @@ export function InstanceStep({ isAdmin, state, onChange, onLabel }: Props) {
                     </span>
                     <span className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-neutral-100">{i.label}</span>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${i.hasPassword ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>
-                      {i.hasPassword ? "มีรหัสแล้ว" : "ยังไม่มีรหัส"}
+                      {i.hasPassword ? "Has Password" : "No Password"}
                     </span>
                   </span>
                   <span className="mt-0.5 block break-all pl-6 text-xs text-gray-600">{host(i.url)}</span>
@@ -154,10 +154,10 @@ export function InstanceStep({ isAdmin, state, onChange, onLabel }: Props) {
               <p className="text-sm text-gray-800 dark:text-neutral-100">instance นี้ยังไม่มีรหัส ใส่ MID user และรหัสผ่านเพื่อใช้งาน</p>
               <label className="block"><span className={labelCls}>MID user</span>
                 <input className={inputCls} value={fixUser} onChange={(e) => setFixUser(e.target.value)} autoComplete="off" /></label>
-              <label className="block"><span className={labelCls}>รหัสผ่าน</span>
+              <label className="block"><span className={labelCls}>Password</span>
                 <input className={inputCls} type="password" value={fixPass} onChange={(e) => setFixPass(e.target.value)} autoComplete="new-password" /></label>
               <button type="button" disabled={busy || !fixUser.trim() || !fixPass} onClick={() => void saveCreds(sel)} className="btn-primary px-4 py-2 text-sm font-medium">
-                {busy ? "กำลังบันทึก..." : "บันทึกรหัส"}
+                {busy ? "Saving…" : "Save Password"}
               </button>
               {(!fixUser.trim() || !fixPass) && !busy && <p className="text-xs text-gray-500">กรอก MID user และรหัสผ่านให้ครบก่อน</p>}
             </div>
@@ -171,37 +171,37 @@ export function InstanceStep({ isAdmin, state, onChange, onLabel }: Props) {
         <div className={`${cardCls} space-y-2 p-3`}>
           <p className="text-sm text-gray-800 dark:text-neutral-100">instance นี้ยังไม่ทราบ build ของ ServiceNow เลือกแพ็กเกจที่โหลดไว้แล้ว หรือพิมพ์ buildstamp</p>
           {packages.length > 0 && (
-            <label className="block"><span className={labelCls}>แพ็กเกจที่มีในเครื่อง</span>
+            <label className="block"><span className={labelCls}>Local Packages</span>
               <select className={inputCls} value={packages.some((p) => p.buildstamp === bs) ? bs : ""} onChange={(e) => onChange({ buildstamp: e.target.value })}>
-                <option value="">— เลือก —</option>
+                <option value="">— Select —</option>
                 {packages.map((p) => <option key={p.buildstamp} value={p.buildstamp}>{p.buildstamp}</option>)}
               </select></label>
           )}
-          <label className="block"><span className={labelCls}>หรือพิมพ์ buildstamp</span>
+          <label className="block"><span className={labelCls}>Or Enter Buildstamp</span>
             <input className={`${inputCls} font-mono`} value={state.buildstamp} onChange={(e) => onChange({ buildstamp: e.target.value })} spellCheck={false}
-              placeholder="เช่น washingtondc-12-08-2023__patch5-02-14-2024_02-23-2024_1115" /></label>
+              placeholder="e.g. washingtondc-12-08-2023__patch5-02-14-2024_02-23-2024_1115" /></label>
           {bs && !BUILDSTAMP_RE.test(bs) && <p className="text-xs text-red-600">รูปแบบ buildstamp ไม่ถูกต้อง</p>}
         </div>
       )}
       {sel && sel.hasPassword && sel.buildstamp && <p className="text-xs text-gray-600">จะติดตั้ง MID build: <span className="font-mono break-all">{sel.buildstamp}</span></p>}
 
       {!adding ? (
-        <button type="button" onClick={startAdd} className={ghostBtnCls}>+ เพิ่ม instance ใหม่</button>
+        <button type="button" onClick={startAdd} className={ghostBtnCls}>+ Add Instance</button>
       ) : (
         <form className={`${cardCls} space-y-2 p-3`} onSubmit={(e) => { e.preventDefault(); if (addReady && !busy) void saveNew() }}>
-          <p className="text-sm font-medium text-gray-900 dark:text-neutral-100">เพิ่ม instance ใหม่</p>
-          <label className="block"><span className={labelCls}>URL ของ instance</span>
+          <p className="text-sm font-medium text-gray-900 dark:text-neutral-100">Add Instance</p>
+          <label className="block"><span className={labelCls}>Instance URL</span>
             <input className={inputCls} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://xxx.service-now.com" autoComplete="off" /></label>
-          <label className="block"><span className={labelCls}>ชื่อเรียก (ไม่บังคับ)</span>
-            <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="เช่น DEV" /></label>
+          <label className="block"><span className={labelCls}>Display Name (Optional)</span>
+            <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. DEV" /></label>
           <label className="block"><span className={labelCls}>MID user</span>
             <input className={inputCls} value={midUser} onChange={(e) => setMidUser(e.target.value)} autoComplete="off" /></label>
-          <label className="block"><span className={labelCls}>รหัสผ่าน</span>
+          <label className="block"><span className={labelCls}>Password</span>
             <input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" /></label>
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={!addReady || busy} onClick={() => void testOnly()} className={ghostBtnCls}>ทดสอบการเชื่อมต่อ</button>
-            <button type="submit" disabled={!addReady || busy} className="btn-primary px-4 py-2 text-sm font-medium">{busy ? "กำลังทดสอบ..." : "ทดสอบและบันทึก"}</button>
-            <button type="button" disabled={busy} onClick={cancelAdd} className={ghostBtnCls}>ยกเลิก</button>
+            <button type="button" disabled={!addReady || busy} onClick={() => void testOnly()} className={ghostBtnCls}>Test Connection</button>
+            <button type="submit" disabled={!addReady || busy} className="btn-primary px-4 py-2 text-sm font-medium">{busy ? "Testing…" : "Test and Save"}</button>
+            <button type="button" disabled={busy} onClick={cancelAdd} className={ghostBtnCls}>Cancel</button>
           </div>
           {addReason && <p className="text-xs text-gray-500">{addReason}</p>}
         </form>

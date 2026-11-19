@@ -43,7 +43,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 const props = { jobId: "j1", onJobChange: vi.fn(), onOpenMid: vi.fn(), onClose: vi.fn(), viewer: { isAdmin: true, userId: "u1" } }
 const mount = async () => {
   render(<JobProgress {...props} />)
-  await screen.findByText("ดาวน์โหลดแพ็กเกจ MID")
+  await screen.findByText("Download Package")
   return FakeES.all[0]
 }
 
@@ -54,8 +54,8 @@ describe("JobProgress", () => {
     act(() => { es.emit({ type: "stage", stage: "fetchPackage" }); es.emit({ type: "log", level: "info", msg: "ดาวน์โหลด package 42%" }) })
     expect(await screen.findByText("42%")).toBeTruthy()
     expect(screen.getAllByText("ดาวน์โหลด package 42%").length).toBeGreaterThan(0)
-    expect(screen.queryByText("ลองใหม่")).toBeNull()
-    expect(screen.queryByText("ยกเลิกและลบ")).toBeNull()
+    expect(screen.queryByText("Retry")).toBeNull()
+    expect(screen.queryByText("Cancel and Delete")).toBeNull()
   })
 
   it("renders journal text as text, never HTML", async () => {
@@ -70,8 +70,8 @@ describe("JobProgress", () => {
     const es = await mount()
     job = { ...job, stage: "extract", status: "failed", error: "แตกไฟล์ไม่สำเร็จ" }
     act(() => { es.emit({ type: "error", code: "x", message: "แตกไฟล์ไม่สำเร็จ", detail: "unzip: bad" }); es.fire("done", { status: "failed" }) })
-    expect(await screen.findByText("ลองใหม่")).toBeTruthy()
-    expect(screen.getByText("ยกเลิกและลบ")).toBeTruthy()
+    expect(await screen.findByText("Retry")).toBeTruthy()
+    expect(screen.getByText("Cancel and Delete")).toBeTruthy()
     expect(screen.getAllByText(/แตกไฟล์ไม่สำเร็จ/).length).toBeGreaterThan(0)
   })
 
@@ -79,7 +79,7 @@ describe("JobProgress", () => {
     const es = await mount()
     job = { ...job, stage: "extract", status: "failed", error: "boom" }
     act(() => es.fire("done", { status: "failed" }))
-    fireEvent.click(await screen.findByText("ลองใหม่"))
+    fireEvent.click(await screen.findByText("Retry"))
     await waitFor(() => expect(calls.some((c) => c.url.endsWith("/jobs/j1/retry") && c.method === "POST")).toBe(true))
     await waitFor(() => expect(FakeES.all.length).toBe(2))
   })
@@ -88,10 +88,10 @@ describe("JobProgress", () => {
     const es = await mount()
     job = { ...job, stage: "extract", status: "failed", error: "boom" }
     act(() => es.fire("done", { status: "failed" }))
-    fireEvent.click(await screen.findByText("ยกเลิกและลบ"))
+    fireEvent.click(await screen.findByText("Cancel and Delete"))
     expect(calls.some((c) => c.url.endsWith("/cancel"))).toBe(false)
     const dlg = screen.getByRole("dialog")
-    fireEvent.click(Array.from(dlg.querySelectorAll("button")).find((b) => b.textContent === "ยกเลิกและลบ")!)
+    fireEvent.click(Array.from(dlg.querySelectorAll("button")).find((b) => b.textContent === "Cancel and Delete")!)
     await waitFor(() => expect(props.onJobChange).toHaveBeenCalledWith("c9"))
   })
 
@@ -102,9 +102,9 @@ describe("JobProgress", () => {
     const a = await screen.findByRole("link", { name: /Validate/ })
     expect(a.getAttribute("href")).toBe("https://dev1.service-now.com/ecc_agent_list.do?sysparm_query=name=" + encodeURIComponent("midhub-mid-a & x"))
     expect(a.getAttribute("rel")).toContain("noopener")
-    fireEvent.click(screen.getByText("ไปที่ MID นี้"))
+    fireEvent.click(screen.getByText("Open MID"))
     expect(props.onOpenMid).toHaveBeenCalledWith("mid-a")
-    expect(screen.queryByText("ลองใหม่")).toBeNull()
+    expect(screen.queryByText("Retry")).toBeNull()
   })
 
   it("an SSE error event shows a notice and a reconnect button", async () => {
@@ -112,13 +112,13 @@ describe("JobProgress", () => {
     act(() => es.fire("error", { status: "error", message: "อ่านความคืบหน้าของงานไม่สำเร็จ" }))
     expect(await screen.findByText("อ่านความคืบหน้าของงานไม่สำเร็จ")).toBeTruthy()
     expect(es.closed).toBe(true)
-    fireEvent.click(screen.getByText("เชื่อมต่อใหม่"))
+    fireEvent.click(screen.getByText("Reconnect"))
     await waitFor(() => expect(FakeES.all.length).toBe(2))
   })
 
   it("closes the EventSource on unmount and when the job id changes", async () => {
     const { rerender, unmount } = render(<JobProgress {...props} />)
-    await screen.findByText("ดาวน์โหลดแพ็กเกจ MID")
+    await screen.findByText("Download Package")
     const first = FakeES.all[0]
     rerender(<JobProgress {...props} key="j2" jobId="j2" />)
     expect(first.closed).toBe(true)
@@ -141,13 +141,13 @@ describe("JobProgress", () => {
     await act(async () => { waiting[0](new Response(JSON.stringify({ ...job, stage: "extract", status: "running" }), { headers: { "content-type": "application/json" } })) })
     await waitFor(() => expect(waiting.length).toBe(2)) // exactly one trailing request, not three
     await act(async () => { waiting[1](new Response(JSON.stringify({ ...job, stage: "extract", status: "failed", error: "boom" }), { headers: { "content-type": "application/json" } })) })
-    expect(await screen.findByText("ลองใหม่")).toBeTruthy()
+    expect(await screen.findByText("Retry")).toBeTruthy()
     // a late stage event triggers another load that still says running: terminal state must stay
     ;(fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: string) =>
       url.endsWith("/jobs/j1") ? json({ ...job, stage: "extract", status: "running" }) : json([]))
     act(() => es.emit({ type: "stage", stage: "extract" }))
     await new Promise((r) => setTimeout(r, 50))
-    expect(screen.getByText("ลองใหม่")).toBeTruthy()
+    expect(screen.getByText("Retry")).toBeTruthy()
   })
 
   it.each(["retry", "cancel"])("a %s reply without a jobId does not navigate to job=undefined", async (which) => {
@@ -160,11 +160,11 @@ describe("JobProgress", () => {
       return json(job)
     })
     props.onJobChange.mockClear()
-    if (which === "retry") fireEvent.click(await screen.findByText("ลองใหม่"))
+    if (which === "retry") fireEvent.click(await screen.findByText("Retry"))
     else {
-      fireEvent.click(await screen.findByText("ยกเลิกและลบ"))
+      fireEvent.click(await screen.findByText("Cancel and Delete"))
       const dlg = screen.getByRole("dialog")
-      fireEvent.click(Array.from(dlg.querySelectorAll("button")).find((b) => b.textContent === "ยกเลิกและลบ")!)
+      fireEvent.click(Array.from(dlg.querySelectorAll("button")).find((b) => b.textContent === "Cancel and Delete")!)
     }
     expect(await screen.findByText(/เซิร์ฟเวอร์ตอบกลับไม่ถูกต้อง/)).toBeTruthy()
     expect(props.onJobChange).not.toHaveBeenCalled()
@@ -188,7 +188,7 @@ describe("JobProgress", () => {
   it("announces stage changes in a polite live region", async () => {
     await mount()
     const live = document.querySelector('[aria-live="polite"]')!
-    expect(live.textContent).toContain("ดาวน์โหลดแพ็กเกจ MID")
+    expect(live.textContent).toContain("Download Package")
   })
 })
 
@@ -203,33 +203,33 @@ describe("JobProgress retry/cancel permissions (engine rules)", () => {
   it("removal kinds: a member sees no retry and sees 'ต้องเป็น Admin'; an admin sees retry", async () => {
     failed("uninstall", "someone")
     await show(member("m1"))
-    expect(screen.queryByText("ลองใหม่")).toBeNull()
+    expect(screen.queryByText("Retry")).toBeNull()
     expect(screen.getByText(/ต้องเป็น Admin/)).toBeTruthy()
     cleanup()
     failed("uninstall", "someone")
     await show({ isAdmin: true, userId: "a1" })
-    expect(screen.getByText("ลองใหม่")).toBeTruthy()
+    expect(screen.getByText("Retry")).toBeTruthy()
   })
 
   it("removal kinds: even the creator (member) cannot retry cancel_install", async () => {
     failed("cancel_install", "m1")
     await show(member("m1"))
-    expect(screen.queryByText("ลองใหม่")).toBeNull()
+    expect(screen.queryByText("Retry")).toBeNull()
     expect(screen.getByText(/ต้องเป็น Admin/)).toBeTruthy()
   })
 
   it("install: the creator member sees retry and cancel", async () => {
     failed("install", "m1")
     await show(member("m1"))
-    expect(screen.getByText("ลองใหม่")).toBeTruthy()
-    expect(screen.getByText("ยกเลิกและลบ")).toBeTruthy()
+    expect(screen.getByText("Retry")).toBeTruthy()
+    expect(screen.getByText("Cancel and Delete")).toBeTruthy()
   })
 
   it("install: another member sees neither and the reason 'เฉพาะผู้สร้างงานหรือ Admin'", async () => {
     failed("clone", "m1")
     await show(member("m2"))
-    expect(screen.queryByText("ลองใหม่")).toBeNull()
-    expect(screen.queryByText("ยกเลิกและลบ")).toBeNull()
+    expect(screen.queryByText("Retry")).toBeNull()
+    expect(screen.queryByText("Cancel and Delete")).toBeNull()
     expect(screen.getByText(/เฉพาะผู้สร้างงานหรือ Admin/)).toBeTruthy()
   })
 })

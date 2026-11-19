@@ -9,28 +9,28 @@ export const dynamic = "force-dynamic"
 // still accepts is sent on to the app.
 const REASONS: Record<string, { title: string; body: string }> = {
   signed_out: {
-    title: "ยังไม่ได้เข้าสู่ระบบ AgentHub",
+    title: "Signed Out of AgentHub",
     body: "MidHub ใช้บัญชีเดียวกับ AgentHub คุณยังไม่ได้เข้าสู่ระบบ AgentHub หรือเซสชันของ AgentHub หมดอายุแล้ว",
   },
   not_admin: {
-    title: "บัญชีนี้ไม่ใช่ admin ของ AgentHub",
+    title: "Not an AgentHub Admin",
     body: "MidHub เปิดให้ใช้เฉพาะ admin ของ AgentHub บัญชี AgentHub ที่เข้าสู่ระบบอยู่ไม่ใช่ admin หากต้องใช้ MidHub ให้ติดต่อ admin ของ AgentHub",
   },
   unreachable: {
-    title: "ติดต่อ AgentHub ไม่ได้",
+    title: "AgentHub Unreachable",
     body: "MidHub ยืนยันตัวตนผ่าน AgentHub แต่ตอนนี้ติดต่อ AgentHub ไม่ได้ จึงเข้า MidHub ไม่ได้ชั่วคราว ลองใหม่อีกสักครู่ หากยังไม่ได้ให้แจ้งผู้ดูแลเซิร์ฟเวอร์",
   },
   locked: {
-    title: "บัญชีถูกล็อกใน MidHub",
+    title: "Account Locked",
     body: "บัญชีของคุณถูกล็อกไม่ให้เข้า MidHub (แม้ยังเป็น admin ของ AgentHub) กรุณาติดต่อ admin ของ MidHub ให้ปลดล็อก",
   },
   logged_out: {
-    title: "ออกจากระบบ MidHub แล้ว",
+    title: "Signed Out of MidHub",
     body: "ออกจากระบบ MidHub แล้ว (ไม่ได้ออกจากระบบ AgentHub) เมื่อต้องการใช้งานอีกครั้ง กดเข้า MidHub อีกครั้งด้านล่าง",
   },
 }
 const GENERIC = {
-  title: "เข้าสู่ระบบ AgentHub เพื่อใช้ MidHub",
+  title: "Sign In with AgentHub",
   body: "MidHub ใช้ได้เฉพาะ admin ของ AgentHub และเข้าสู่ระบบผ่าน AgentHub เท่านั้น",
 }
 
@@ -60,7 +60,7 @@ export default async function LoginPage({ searchParams }: Props) {
 
         {/* AgentHub's own login page on this same site: an absolute path, deliberately outside basePath. */}
         <a href="/login" className="w-full py-2 px-4 text-sm font-medium btn-primary flex items-center justify-center">
-          ไปเข้าสู่ระบบที่ AgentHub
+          Sign In with AgentHub
         </a>
         <p className="mt-3 text-xs text-gray-500 dark:text-neutral-400">
           เข้าสู่ระบบ AgentHub ด้วยบัญชี admin แล้วกลับมาที่ /midhub

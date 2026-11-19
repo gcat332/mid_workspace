@@ -105,10 +105,10 @@ export function InstancesManager() {
       <form className={`${cardCls} mb-3 grid gap-3 p-4 sm:grid-cols-2`} onSubmit={(e) => { e.preventDefault(); if (formReady) void add() }}>
         <div className="sm:col-span-2">
           <label className={labelCls} htmlFor="inst-url">Instance URL</label>
-          <input id="inst-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://<ชื่อ>.service-now.com" className={inputCls} />
+          <input id="inst-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://<name>.service-now.com" className={inputCls} />
         </div>
         <div>
-          <label className={labelCls} htmlFor="inst-label">ชื่อเรียก (ไม่บังคับ)</label>
+          <label className={labelCls} htmlFor="inst-label">Display Name (Optional)</label>
           <input id="inst-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="ใช้ชื่อโฮสต์ถ้าเว้นว่าง" className={inputCls} />
         </div>
         <div>
@@ -120,8 +120,8 @@ export function InstancesManager() {
           <input id="inst-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" className={inputCls} />
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
-          <button type="button" disabled={busy || !formReady} onClick={() => void test()} className={ghostBtnCls}>ทดสอบการเชื่อมต่อ</button>
-          <button type="submit" disabled={busy || !formReady} className="btn-primary px-4 py-2 text-sm font-medium">บันทึก</button>
+          <button type="button" disabled={busy || !formReady} onClick={() => void test()} className={ghostBtnCls}>Test Connection</button>
+          <button type="submit" disabled={busy || !formReady} className="btn-primary px-4 py-2 text-sm font-medium">Save</button>
           {reason && <span className="text-xs text-gray-500">{reason}</span>}
         </div>
       </form>
@@ -129,9 +129,9 @@ export function InstancesManager() {
       {info && <p role="status" className="mb-2 text-sm text-green-700 dark:text-green-400">{info}</p>}
       {editing && (
         <form className={`${cardCls} mb-3 grid gap-3 p-4 sm:grid-cols-3`} onSubmit={(e) => { e.preventDefault(); void saveEdit() }}>
-          <p className="text-sm text-gray-700 sm:col-span-3">แก้ไข {editing.url}</p>
+          <p className="text-sm text-gray-700 sm:col-span-3">Edit {editing.url}</p>
           <div>
-            <label className={labelCls} htmlFor="e-label">ชื่อเรียก</label>
+            <label className={labelCls} htmlFor="e-label">Display Name</label>
             <input id="e-label" value={eLabel} onChange={(e) => setELabel(e.target.value)} className={inputCls} />
           </div>
           <div>
@@ -141,12 +141,12 @@ export function InstancesManager() {
           <div>
             <label className={labelCls} htmlFor="e-pass">Password</label>
             <input id="e-pass" type="password" value={ePass} onChange={(e) => setEPass(e.target.value)} autoComplete="new-password"
-              placeholder={editing.hasPassword ? "ตั้งไว้แล้ว (เว้นว่าง = ไม่เปลี่ยน)" : "ยังไม่ได้ตั้ง"} className={inputCls} />
+              placeholder={editing.hasPassword ? "Set (blank = keep)" : "Not Set"} className={inputCls} />
           </div>
           <div className="flex gap-2 sm:col-span-3">
-            <button type="submit" disabled={busy} className="btn-primary px-4 py-2 text-sm font-medium">บันทึก (ทดสอบก่อนบันทึก)</button>
+            <button type="submit" disabled={busy} className="btn-primary px-4 py-2 text-sm font-medium">Test and Save</button>
             {busy && <span className="self-center text-xs text-gray-500">กำลังทดสอบการเชื่อมต่อ อาจใช้เวลาถึง 15 วินาที กรุณารอ...</span>}
-            <button type="button" onClick={() => setEditing(null)} className={ghostBtnCls}>ยกเลิก</button>
+            <button type="button" onClick={() => setEditing(null)} className={ghostBtnCls}>Cancel</button>
           </div>
         </form>
       )}
@@ -154,9 +154,9 @@ export function InstancesManager() {
         <table className="w-full text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600">
             <tr>
-              <th className="px-4 py-3">ชื่อ</th><th className="px-4 py-3">URL</th><th className="px-4 py-3">MID user</th>
+              <th className="px-4 py-3">Name</th><th className="px-4 py-3">URL</th><th className="px-4 py-3">MID user</th>
               <th className="px-4 py-3">Password</th><th className="px-4 py-3">Build</th>
-              <th className="px-4 py-3"><span className="sr-only">จัดการ</span></th>
+              <th className="px-4 py-3"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -165,20 +165,20 @@ export function InstancesManager() {
                 <td className="whitespace-nowrap px-4 py-3 text-gray-900">{i.label}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-gray-700">{i.url}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-gray-700">{i.midUser ?? "—"}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-gray-500">{i.hasPassword ? "ตั้งไว้แล้ว" : "ยังไม่ได้ตั้ง"}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-gray-500">{i.hasPassword ? "Set" : "Not Set"}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-gray-500">{i.buildstamp ?? "—"}</td>
                 <td className="space-x-3 whitespace-nowrap px-4 py-3 text-right">
-                  <button type="button" className="text-blue-600 hover:underline dark:text-blue-400" onClick={() => startEdit(i)}>แก้ไข</button>
-                  <button type="button" className="text-red-600 hover:underline" onClick={() => setDel(i)}>ลบ</button>
+                  <button type="button" className="text-blue-600 hover:underline dark:text-blue-400" onClick={() => startEdit(i)}>Edit</button>
+                  <button type="button" className="text-red-600 hover:underline" onClick={() => setDel(i)}>Delete</button>
                 </td>
               </tr>
             ))}
-            {items.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-400">ยังไม่มี instance</td></tr>}
+            {items.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-400">No Instances</td></tr>}
           </tbody>
         </table>
       </div>
       {del && (
-        <ConfirmDialog title={`ลบ instance ${del.label}?`} confirmLabel="ลบ instance" danger busy={busy}
+        <ConfirmDialog title={`Delete Instance ${del.label}?`} confirmLabel="Delete" danger busy={busy}
           onCancel={() => setDel(null)} onConfirm={() => void confirmDelete()}>
           credentials ที่เก็บไว้จะถูกลบ การลบไม่สามารถย้อนกลับได้ (ลบไม่ได้ถ้ายังมี MID ใช้ instance นี้อยู่)
         </ConfirmDialog>

@@ -12,7 +12,7 @@ describe("ConfirmDialog", () => {
     render(dlg(false))
     const d = screen.getByRole("dialog", { name: "Stop m1?" })
     expect(d.getAttribute("aria-modal")).toBe("true")
-    expect(document.activeElement).toBe(screen.getByText("ยกเลิก"))
+    expect(document.activeElement).toBe(screen.getByText("Cancel"))
   })
 
   it("keeps focus inside the dialog when buttons become disabled (busy), and Tab does not escape", () => {

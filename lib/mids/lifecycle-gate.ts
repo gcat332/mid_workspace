@@ -2,7 +2,7 @@
 // (actions, config, files) both use lifecycleBusy, with different allowed states: the agent check stays strict
 // (`installed` only, spec 5.2); the browser also allows `error` so a failed install stays stoppable and fixable.
 import { prisma } from "@/lib/db/client"
-import { ACTIVE_JOB_STATUSES, jobStageLabel } from "@/lib/ui/stages"
+import { ACTIVE_JOB_STATUSES, jobStageLabelTh } from "@/lib/ui/stages"
 import { MidError, validateMidName } from "./names"
 
 export type LifecycleFacts = {
@@ -25,7 +25,7 @@ export const BROWSER_WRITABLE_STATES: readonly string[] = ["installed", "error"]
 
 /** Pure: null when the MID's state is in `allowed` and it has no active job, else the Thai reason. */
 export function lifecycleBusy(m: LifecycleFacts, allowed: readonly string[] = AGENT_READY_STATES): string | null {
-  if (m.activeJob) return `MID นี้กำลังมีงานอยู่ (${jobStageLabel(m.activeJob)}) รอให้เสร็จก่อน`
+  if (m.activeJob) return `MID นี้กำลังมีงานอยู่ (${jobStageLabelTh(m.activeJob)}) รอให้เสร็จก่อน`
   if (m.state === "removed") return "MID นี้ถูกลบออกจาก MidHub แล้ว เลือก MID อื่น"
   if (!allowed.includes(m.state)) return `MID นี้ยังไม่พร้อมใช้งาน (${STATE_LABELS[m.state] ?? m.state}) รอให้เสร็จหรือให้ Admin ตรวจสอบก่อน`
   return null

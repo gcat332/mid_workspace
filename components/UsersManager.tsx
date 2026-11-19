@@ -47,7 +47,7 @@ export function UsersManager({ myId }: { myId: string }) {
 
   return (
     <section>
-      <h1 className="mb-2 text-xl font-semibold text-gray-900">ผู้ใช้</h1>
+      <h1 className="mb-2 text-xl font-semibold text-gray-900">Users</h1>
       <p className="mb-4 text-sm text-gray-600">
         MidHub ใช้ได้เฉพาะ admin ของ AgentHub โดยเข้าสู่ระบบผ่าน AgentHub รายชื่อนี้คือผู้ที่เคยเข้า MidHub แล้ว
         จัดการบัญชีและสิทธิ์ได้ที่ AgentHub ส่วนที่นี่ทำได้เพียงล็อกไม่ให้เข้า MidHub
@@ -57,8 +57,8 @@ export function UsersManager({ myId }: { myId: string }) {
         <table className="w-full text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600">
             <tr>
-              <th className="px-4 py-3">อีเมล</th><th className="px-4 py-3">สถานะ</th>
-              <th className="px-4 py-3">เข้าสู่ระบบล่าสุด</th><th className="px-4 py-3"><span className="sr-only">จัดการ</span></th>
+              <th className="px-4 py-3">Email</th><th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Last Sign-in</th><th className="px-4 py-3"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -67,20 +67,20 @@ export function UsersManager({ myId }: { myId: string }) {
               const self = u.id === myId
               return (
                 <tr key={u.id}>
-                  <td className="whitespace-nowrap px-4 py-3 text-gray-900">{u.email}{self && <span className="text-gray-400"> (คุณ)</span>}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-gray-900">{u.email}{self && <span className="text-gray-400"> (You)</span>}</td>
                   <td className="whitespace-nowrap px-4 py-3">
-                    {locked ? <span className="text-red-600">ถูกล็อก</span> : <span className="text-gray-500">ปกติ</span>}
+                    {locked ? <span className="text-red-600">Locked</span> : <span className="text-gray-500">Active</span>}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-gray-500">{fmt(u.lastLoginAt)}</td>
                   <td className="whitespace-nowrap px-4 py-3 text-right">
                     {locked ? (
                       <button type="button" disabled={busy} className="text-blue-600 dark:text-blue-400 hover:underline"
-                        onClick={() => setPending({ user: u, lock: false })}>ปลดล็อก</button>
+                        onClick={() => setPending({ user: u, lock: false })}>Unlock</button>
                     ) : self ? (
                       <span className="text-xs text-gray-400">ล็อกบัญชีตัวเองไม่ได้</span>
                     ) : (
                       <button type="button" disabled={busy} className="text-red-600 hover:underline"
-                        onClick={() => setPending({ user: u, lock: true })}>ล็อก</button>
+                        onClick={() => setPending({ user: u, lock: true })}>Lock</button>
                     )}
                   </td>
                 </tr>
@@ -94,8 +94,8 @@ export function UsersManager({ myId }: { myId: string }) {
       </div>
       {pending && (
         <ConfirmDialog
-          title={pending.lock ? `ล็อก ${pending.user.email}?` : `ปลดล็อก ${pending.user.email}?`}
-          confirmLabel={pending.lock ? "ล็อก" : "ปลดล็อก"}
+          title={pending.lock ? `Lock ${pending.user.email}?` : `Unlock ${pending.user.email}?`}
+          confirmLabel={pending.lock ? "Lock" : "Unlock"}
           danger={pending.lock} busy={busy}
           onCancel={() => setPending(null)}
           onConfirm={() => void apply(pending)}>

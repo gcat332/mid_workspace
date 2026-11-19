@@ -20,36 +20,36 @@ const mount = (onClose = vi.fn()) => {
 describe("CreateMidWizard", () => {
   it("opens on step 1 with Next disabled and a visible reason, then enables after picking an instance", async () => {
     mount()
-    expect(screen.getByRole("dialog", { name: "สร้าง MID ใหม่" })).toBeTruthy()
-    const next = screen.getByRole("button", { name: "ถัดไป" }) as HTMLButtonElement
+    expect(screen.getByRole("dialog", { name: "New MID Server" })).toBeTruthy()
+    const next = screen.getByRole("button", { name: "Next" }) as HTMLButtonElement
     expect(next.disabled).toBe(true)
     expect(next.getAttribute("aria-describedby")).toBe("wizard-reason")
     expect(document.getElementById("wizard-reason")?.textContent).toMatch(/เลือก instance/)
     fireEvent.click(await screen.findByRole("radio", { name: /DEV/ }))
-    expect((screen.getByRole("button", { name: "ถัดไป" }) as HTMLButtonElement).disabled).toBe(false)
-    fireEvent.click(screen.getByRole("button", { name: "ถัดไป" }))
-    expect(screen.getByLabelText(/ชื่อ MID \(/)).toBeTruthy()
-    expect((screen.getByRole("button", { name: "ถัดไป" }) as HTMLButtonElement).disabled).toBe(true) // no name yet
+    expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByRole("button", { name: "Next" }))
+    expect(screen.getByLabelText(/MID Name \(/)).toBeTruthy()
+    expect((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true) // no name yet
     expect(document.getElementById("wizard-reason")?.textContent).toMatch(/ตั้งชื่อ/)
   })
 
   it("closes straight away when nothing was entered", () => {
     const onClose = mount()
-    fireEvent.click(screen.getByRole("button", { name: "ปิด" }))
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it("asks before discarding entered data; Esc closes only the confirmation", async () => {
     const onClose = mount()
     fireEvent.click(await screen.findByRole("radio", { name: /DEV/ }))
-    fireEvent.click(screen.getByRole("button", { name: "ปิด" }))
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
     expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByRole("dialog", { name: "ปิดและทิ้งข้อมูลที่กรอก?" })).toBeTruthy()
+    expect(screen.getByRole("dialog", { name: "Discard Changes?" })).toBeTruthy()
     fireEvent.keyDown(document, { key: "Escape" })
-    expect(screen.queryByRole("dialog", { name: "ปิดและทิ้งข้อมูลที่กรอก?" })).toBeNull()
+    expect(screen.queryByRole("dialog", { name: "Discard Changes?" })).toBeNull()
     expect(onClose).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: "ปิด" }))
-    fireEvent.click(screen.getByRole("button", { name: "ปิดและทิ้งข้อมูล" }))
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
@@ -71,7 +71,7 @@ describe("CreateMidWizard with ?job=", () => {
   it("titles the progress modal from the job kind", async () => {
     withJob("install")
     show()
-    expect(await screen.findByRole("dialog", { name: "ติดตั้ง MID" })).toBeTruthy()
+    expect(await screen.findByRole("dialog", { name: "Install MID" })).toBeTruthy()
     cleanup()
     withJob("clone")
     show()

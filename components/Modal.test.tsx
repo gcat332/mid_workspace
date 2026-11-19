@@ -11,7 +11,7 @@ function Nested({ outerClose, innerClose }: { outerClose: () => void; innerClose
     <Modal labelledBy="o" onClose={outerClose} wide>
       <h2 id="o">outer</h2>
       <button>outer-a</button>
-      <ConfirmDialog title="inner?" confirmLabel="ยืนยัน" onConfirm={() => {}} onCancel={innerClose}>x</ConfirmDialog>
+      <ConfirmDialog title="inner?" confirmLabel="Confirm" onConfirm={() => {}} onCancel={innerClose}>x</ConfirmDialog>
     </Modal>
   )
 }
@@ -38,8 +38,8 @@ describe("nested modals", () => {
         const els = Array.from(inner.querySelectorAll<HTMLElement>("button")); const k = els.indexOf(document.activeElement as HTMLElement); els[k + 1]?.focus()
       }
     }
-    expect(seen.has("ยกเลิก")).toBe(true)
-    expect(seen.has("ยืนยัน")).toBe(true)
+    expect(seen.has("Cancel")).toBe(true)
+    expect(seen.has("Confirm")).toBe(true)
   })
 
   it("after the inner closes, the outer handles Esc again", () => {

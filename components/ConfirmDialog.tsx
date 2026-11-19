@@ -22,11 +22,11 @@ export function ConfirmDialog({ title, children, confirmLabel, danger, busy, onC
       <div className="mt-5 flex justify-end gap-2">
         <button data-autofocus type="button" onClick={onCancel} disabled={busy}
           className={ghostBtnCls}>
-          ยกเลิก
+          Cancel
         </button>
         <button type="button" onClick={onConfirm} disabled={busy}
           className={danger ? "rounded-[10px] bg-danger px-4 py-2 text-sm font-semibold text-white hover:bg-danger-press disabled:opacity-50" : "btn-primary px-4 py-2 text-sm font-medium"}>
-          {busy ? "กำลังดำเนินการ..." : confirmLabel}
+          {busy ? "Working…" : confirmLabel}
         </button>
       </div>
     </Modal>

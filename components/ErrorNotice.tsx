@@ -23,7 +23,7 @@ export function ErrorNotice({ error }: { error: ApiError }) {
         <>
           <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
             className="mt-1 text-xs text-red-700 underline">
-            {open ? "ซ่อนรายละเอียด" : "ดูรายละเอียด"}
+            {open ? "Hide Details" : "Show Details"}
           </button>
           {open && (
             <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-white/70 dark:bg-black/30 p-2 font-mono text-xs text-red-900">

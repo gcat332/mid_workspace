@@ -54,7 +54,7 @@ const no = (reason: string): Verdict => ({ ok: false, reason })
 
 export function canProceed(step: 1 | 2 | 3, s: WizardState, checks: Check[] = []): Verdict {
   if (step === 1) {
-    if (s.pendingNew) return no("กด “ทดสอบและบันทึก” ให้ผ่านก่อน จึงจะไปต่อได้")
+    if (s.pendingNew) return no("กด “Test and Save” ให้ผ่านก่อน จึงจะไปต่อได้")
     if (!s.instance) return no("เลือก instance หรือเพิ่ม instance ใหม่ก่อน")
     if (!s.instance.hasPassword) return no("instance นี้ยังไม่มีรหัส MID user ให้ Admin ใส่รหัสก่อน")
     const b = effectiveBuildstamp(s)
@@ -66,7 +66,7 @@ export function canProceed(step: 1 | 2 | 3, s: WizardState, checks: Check[] = []
     if (!s.name) return no("ตั้งชื่อ MID ก่อน")
     if (!MID_NAME_RE.test(s.name)) return no("ชื่อ MID ใช้ได้เฉพาะ a-z, 0-9 และ - (2-40 ตัวอักษร ขึ้นต้นด้วยตัวอักษรหรือตัวเลข)")
     if (s.nameCheck === "checking" || s.nameCheck === "idle") return no("กำลังตรวจสอบว่าชื่อว่างหรือไม่...")
-    if (s.nameCheck === "error") return no("ตรวจชื่อไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้) กด “ตรวจอีกครั้ง” ข้างช่องชื่อ")
+    if (s.nameCheck === "error") return no("ตรวจชื่อไม่สำเร็จ (เชื่อมต่อเซิร์ฟเวอร์ไม่ได้) กด “Check Again” ข้างช่องชื่อ")
     if (s.nameCheck !== "available") return no("ชื่อนี้ใช้ไม่ได้ ใช้ชื่ออื่น")
     if (!SN_NAME_RE.test(s.snName)) return no("ชื่อ MID ใน ServiceNow ใช้ได้เฉพาะ A-Z a-z 0-9 . _ - (1-80 ตัวอักษร)")
     if (!intIn(s.heapMb, MIN_HEAP_MB, MAX_HEAP_MB)) return no(`heap ต้องเป็นจำนวนเต็ม ${MIN_HEAP_MB}-${MAX_HEAP_MB} MB`)

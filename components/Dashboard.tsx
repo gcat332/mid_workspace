@@ -152,23 +152,23 @@ export function Dashboard({ email, userId, isAdmin }: { email: string; userId: s
           <div role="alert" className="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             <p>หน้านั้นสำหรับ Admin เท่านั้น (ต้องเป็น Admin) หากต้องการสิทธิ์ ให้ติดต่อ Admin ของ MidHub</p>
             <button type="button" onClick={() => router.replace(selected ? `${pathname}?mid=${encodeURIComponent(selected)}` : pathname)}
-              className="ml-auto shrink-0 text-amber-800 underline">ปิด</button>
+              className="ml-auto shrink-0 text-amber-800 underline">Close</button>
           </div>
         )}
         {midsErr && <div className="mb-4"><ErrorNotice error={midsErr} /></div>}
         {hostErr && <div className="mb-4"><ErrorNotice error={hostErr} /></div>}
         {mids === null ? (
-          <p className="text-sm text-gray-500">กำลังโหลด...</p>
+          <p className="text-sm text-gray-500">Loading…</p>
         ) : mids.length === 0 ? (
           <div className="mx-auto mt-16 max-w-md rounded-xl border border-gray-200 bg-white dark:bg-neutral-800 p-8 text-center">
-            <p className="text-lg font-medium text-gray-900">ยังไม่มี MID Server</p>
+            <p className="text-lg font-medium text-gray-900">No MID Servers</p>
             <p className="mt-2 text-sm text-gray-600">ถ้ามี MID ที่ติดตั้งไว้บนเครื่องนี้แล้ว กดปุ่มด้านล่างเพื่อนำเข้ามาจัดการได้เลย</p>
             <button type="button" onClick={() => setImporting(true)}
               className="mt-4 btn-primary px-4 py-2 text-sm font-medium">
-              Import MID ที่มีอยู่
+              Import MID Server
             </button>
             <button type="button" onClick={openWizard} className="mt-3 block w-full text-sm font-medium text-blue-700 underline">
-              หรือ สร้าง MID ใหม่
+              New MID Server
             </button>
           </div>
         ) : (

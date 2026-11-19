@@ -31,7 +31,7 @@ describe("canProceed", () => {
   it("step 1 blocks an unsaved/untested new instance", () => {
     const r = canProceed(1, s({ instance: null, pendingNew: true }))
     expect(r.ok).toBe(false)
-    expect(r.reason).toMatch(/ทดสอบ/)
+    expect(r.reason).toMatch(/Test and Save/)
   })
   it("step 1 blocks an instance without credentials", () => {
     const r = canProceed(1, s({ instance: { id: "i1", hasPassword: false, buildstamp: GOOD } }))
@@ -113,7 +113,7 @@ describe("misc helpers", () => {
     expect(parseProgress(["x"])).toBeNull()
   })
   it("jobStageLabel maps known stages and falls back to the raw name", () => {
-    expect(jobStageLabel("fetchPackage")).toMatch(/ดาวน์โหลด/)
+    expect(jobStageLabel("fetchPackage")).toBe("Download Package")
     expect(jobStageLabel("weird")).toBe("weird")
   })
 })
