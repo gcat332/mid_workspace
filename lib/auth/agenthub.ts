@@ -4,6 +4,7 @@
 import { prisma } from "@/lib/db/client"
 import { env } from "@/lib/env"
 import { isLocked } from "@/lib/auth/lockout"
+import { listenerOwnerProblem } from "@/lib/auth/listener-owner"
 import { MidError } from "@/lib/mids/names"
 import type { SessionPayload } from "@/lib/auth/jwt"
 
@@ -29,12 +30,23 @@ const deny = (reason: AgentHubDenial): AgentHubLookup => ({ ok: false, reason })
  * Asks AgentHub (GET <AGENTHUB_URL>/api/auth/me, only `Cookie: session=<value>`, redirects not followed, 5 s
  * timeout) whether the cookie belongs to an AgentHub admin. 200 admin with an email -> ok; 200 other role ->
  * not_admin; 401/403 or no cookie -> signed_out; anything else (5xx, redirect, bad body, network, timeout) -> unreachable.
+ * First, unless AGENTHUB_SERVICE_USER=none, the TCP listener on AgentHub's port must belong to that account
+ * (lib/auth/listener-owner.ts); otherwise -> unreachable and the cookie is not sent anywhere.
  */
 export async function lookupAgentHubAdmin(sessionCookie: string | undefined): Promise<AgentHubLookup> {
   if (!sessionCookie || !COOKIE_VALUE_RE.test(sessionCookie)) return deny("signed_out")
   // Outside the try: a configuration error (bad AGENTHUB_URL) must surface as a 500 with its own message, not be
   // reported to the user as "AgentHub unreachable".
   const url = `${env.agenthubUrl}/api/auth/me`
+  const serviceUser = env.agenthubServiceUser
+  if (serviceUser !== null) {
+    // Throws only for a configuration error (unknown user): a 500 with its message, like a bad AGENTHUB_URL.
+    const problem = await listenerOwnerProblem(env.agenthubUrl, serviceUser)
+    if (problem) {
+      console.warn(`[agenthub] not asking AgentHub (treated as unreachable): ${problem}`)
+      return deny("unreachable")
+    }
+  }
   let res: Response
   try {
     res = await fetch(url, {

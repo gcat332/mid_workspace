@@ -22,7 +22,8 @@ const fakeAgentHub = http.createServer((q, r) => {
   r.end(ah.body)
 })
 let ahBase = "http://127.0.0.1:1"
-vi.mock("@/lib/env", () => ({ env: { get agenthubUrl() { return ahBase } } }))
+// Listener-owner check off (AGENTHUB_SERVICE_USER=none): it is covered in lib/auth/agenthub.test.ts.
+vi.mock("@/lib/env", () => ({ env: { get agenthubUrl() { return ahBase }, agenthubServiceUser: null } }))
 beforeAll(async () => {
   await new Promise<void>((r) => fakeAgentHub.listen(0, "127.0.0.1", r))
   ahBase = `http://127.0.0.1:${(fakeAgentHub.address() as AddressInfo).port}`

@@ -13,6 +13,8 @@ export interface Env {
   agentSecret: string | null
   /** BSM AgentHub base URL (loopback only) asked for the signed-in user: GET <agenthubUrl>/api/auth/me. */
   agenthubUrl: string
+  /** Account that must own AgentHub's TCP listener (lib/auth/listener-owner.ts); null = check disabled ("none"). */
+  agenthubServiceUser: string | null
 }
 
 // ADMIN_EMAIL/ADMIN_PASSWORD are gone (sign-in is through AgentHub); old values left in .env.local are ignored.
@@ -30,6 +32,19 @@ function agenthubUrlFrom(v: string | undefined): string {
     throw new Error("AGENTHUB_URL must be http://127.0.0.1:<port>, http://localhost:<port> or http://[::1]:<port> (AgentHub on this host)")
   }
   return raw.replace(/\/$/, "")
+}
+
+// Before every lookup, AGENTHUB_URL's TCP listener must belong to this account (anti port squatting). Only the
+// literal "none" turns the check off (dev and tests); unset or empty means the production default.
+const SERVICE_USER_RE = /^[a-z_][a-z0-9_-]{0,31}$/
+
+function agenthubServiceUserFrom(v: string | undefined): string | null {
+  const raw = v || "bsmagenthub"
+  if (raw === "none") return null
+  if (!SERVICE_USER_RE.test(raw)) {
+    throw new Error('AGENTHUB_SERVICE_USER must be a Linux user name (the account AgentHub runs as) or "none"')
+  }
+  return raw
 }
 
 export function loadEnv(src: Record<string, string | undefined>): Env {
@@ -60,6 +75,7 @@ export function loadEnv(src: Record<string, string | undefined>): Env {
     helperSocket: src.MIDHUB_HELPER_SOCKET || "/run/midhub/helper.sock",
     agentSecret,
     agenthubUrl: agenthubUrlFrom(src.AGENTHUB_URL),
+    agenthubServiceUser: agenthubServiceUserFrom(src.AGENTHUB_SERVICE_USER),
   }
 }
 

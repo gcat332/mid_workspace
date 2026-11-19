@@ -21,6 +21,8 @@ const ACTION_LABELS: Record<string, string> = {
   "file.mkdir": "สร้างโฟลเดอร์",
   "auth.login": "เข้าสู่ระบบ (ผ่าน AgentHub)",
   "auth.denied": "ถูกปฏิเสธการเข้าใช้ MidHub",
+  // Written by the Agent API when its actor (an AgentHub admin) had no MidHub row yet (lib/agent/auth.ts).
+  "user.created": "สร้างผู้ใช้ (admin จาก AgentHub)",
   // user.create / user.delete / idp.update: no longer written (local login removed); kept for old rows.
   "user.create": "เพิ่มผู้ใช้",
   "user.update": "แก้ไขผู้ใช้",
@@ -57,6 +59,7 @@ const KEY_LABELS: Record<string, string> = {
   backupId: "backup",
   note: "หมายเหตุ",
   targetEmail: "ผู้ใช้",
+  email: "อีเมล",
   role: "สิทธิ์",
   ssoOnly: "SSO เท่านั้น",
   unlock: "ปลดล็อก",

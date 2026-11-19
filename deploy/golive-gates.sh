@@ -217,6 +217,25 @@ else
   no "$ENV_FILE missing"
 fi
 
+# ── Gate 13: AgentHub's listener is owned by AGENTHUB_SERVICE_USER ──────────────
+# MidHub refuses to send the AgentHub cookie unless every listener on AgentHub's port belongs to this account
+# (lib/auth/listener-owner.ts). Same data the app reads: LISTEN (0A) rows of /proc/net/tcp{,6} on the port.
+AH_PORT="${AH_PORT:-3000}"
+ah_user=$(envval AGENTHUB_SERVICE_USER); ah_user="${ah_user:-bsmagenthub}"
+hdr "Gate 13 — :$AH_PORT listener uid = $ah_user (AGENTHUB_SERVICE_USER)"
+if [ "$ah_user" = "none" ]; then
+  no "AGENTHUB_SERVICE_USER=none disables the listener-owner check (dev only). Fix: remove it or set the AgentHub account (bsmagenthub)"
+elif ! ah_uid=$(id -u "$ah_user" 2>/dev/null); then
+  no "user '$ah_user' does not exist (every sign-in would fail with a 500). Fix: AGENTHUB_SERVICE_USER in $ENV_FILE"
+else
+  ah_hex=$(printf '%04X' "$AH_PORT")
+  uids=$(awk -v p=":$ah_hex" '$4 == "0A" && toupper(substr($2, length($2) - 4)) == p { print $8 }' /proc/net/tcp /proc/net/tcp6 2>/dev/null | sort -u | tr '\n' ' ')
+  if [ -z "$uids" ]; then no "nothing listens on :$AH_PORT (AgentHub down?) — MidHub sign-in answers 'AgentHub unreachable'"
+  elif [ "$uids" = "$ah_uid " ]; then ok "every :$AH_PORT listener is uid $ah_uid ($ah_user)"
+  else no "listeners on :$AH_PORT have uid(s) $uids— expected only $ah_uid ($ah_user). Someone else holds AgentHub's port: check ss -ltnpe 'sport = :$AH_PORT'"
+  fi
+fi
+
 # ── Manual gates ──────────────────────────────────────────────────────────────
 hdr "Manual gates"
 man "an AgentHub admin can open /midhub: sign in to AgentHub (/login) as an admin, open /midhub on both sites (no second login); a non-admin AgentHub account gets 'ไม่ใช่ admin ของ AgentHub'"

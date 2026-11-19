@@ -15,6 +15,18 @@ exactly AgentHub's **admins**. MidHub keeps no passwords, no SSO config and no u
   secret. It asks AgentHub over loopback: `GET http://127.0.0.1:3000/api/auth/me` with only
   `Cookie: session=<value>` → `200 { email, role }` or `401`. Base URL from `AGENTHUB_URL`
   (default `http://127.0.0.1:3000`); must be a loopback http URL.
+- **Listener owner check (anti port squatting; final review Important 1).** Port 3000 is unprivileged: while
+  AgentHub is down any local account could listen on it, answer "admin" for any email and collect the
+  forwarded `session` cookies. Before every lookup MidHub reads `/proc/net/tcp` and `/proc/net/tcp6`
+  (world-readable) and finds the LISTEN sockets on the URL's port whose local address is the URL's loopback
+  address or a wildcard (`0.0.0.0`, `::`, v4-mapped forms included; `localhost` = both families). There must be
+  at least one, and every one must be owned by `AGENTHUB_SERVICE_USER` (default `bsmagenthub`; uid from
+  `/etc/passwd`, cached per process). Otherwise the lookup is `unreachable` (warn log "listener on :<port> not
+  owned by <user>", no cookie) and nothing is sent. A user missing from `/etc/passwd` is a configuration error
+  (500 + log, also logged at boot), not "unreachable". Only `AGENTHUB_SERVICE_USER=none` disables the check
+  (dev/tests). Residual: a race in the milliseconds between the check and the connect if AgentHub dies exactly
+  then; closing it fully needs a unix socket or peer credentials, out of scope. The reverse direction
+  (AgentHub → MidHub :3100 with `MIDHUB_AGENT_SECRET`) has the same pre-existing exposure; not addressed here.
 - **Admins only.** `role === "admin"` → MidHub upserts `User{ email (lowercased), role: "admin" }` and issues
   its own `midhub_session` (existing JWT/cookie, path `/midhub`). Any other role or 401 → the access page.
 - **Re-verification.** The MidHub session carries `ahAt` (time AgentHub last confirmed). Requests with a session

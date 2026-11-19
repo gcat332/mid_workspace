@@ -63,6 +63,7 @@ if you want to run `prisma migrate deploy` before install.sh, create it yourself
     MIDHUB_ROOT=/opt/midhub
     MIDHUB_MAX_RUNNING=4
     AGENTHUB_URL=http://127.0.0.1:3000
+    AGENTHUB_SERVICE_USER=bsmagenthub
     ENV
     chmod 600 .env.local
 
@@ -71,6 +72,16 @@ be >= 32 chars; `MIDHUB_VAULT_KEY` is base64 of exactly 32 bytes (losing it make
 passwords unrecoverable - back it up). `AGENTHUB_URL` (default `http://127.0.0.1:3000`) is where MidHub asks
 AgentHub who is signed in; it must be a loopback `http://` URL with a port. Anything else is logged at start
 (`[boot] env failed: ...` in `journalctl -u bsm-midhub`) and every sign-in then fails with a 500 carrying that message.
+`AGENTHUB_SERVICE_USER` (default `bsmagenthub`) is the account AgentHub runs as. Port 3000 is unprivileged, so
+while AgentHub is down any local account could listen there, answer "admin" and collect the forwarded AgentHub
+cookies. Before every lookup MidHub therefore reads `/proc/net/tcp` and `/proc/net/tcp6` and requires that every
+TCP listener on AgentHub's port (on the URL's loopback address or a wildcard such as `*:3000`) is owned by this
+account, and that there is at least one. Otherwise it does not send the cookie, logs
+`[agenthub] not asking AgentHub (treated as unreachable): listener on :3000 not owned by bsmagenthub (...)` and shows
+"AgentHub unreachable". A name that is not in `/etc/passwd` is a configuration error (logged at start as
+`[boot] AGENTHUB_SERVICE_USER failed: ...`; sign-ins then fail with a 500). `AGENTHUB_SERVICE_USER=none` turns the
+check off: for development only, never in production. Check by hand: `ss -ltnpe 'sport = :3000'` (the `uid:` field)
+or golive gate 13.
 `ADMIN_EMAIL`, `ADMIN_PASSWORD` and `PUBLIC_URL` are no longer used; if an older `.env.local` still has them they
 are ignored (remove them when convenient).
 
@@ -203,8 +214,9 @@ themselves. Break-glass if every admin is locked, as `bsmmidhub` in APP_DIR:
 
 Nothing to configure beyond `AGENTHUB_URL`. The upgrade from the old local login (migration
 `agenthub_sso_clear_password_locks`) clears old password locks once; existing MidHub sessions become invalid and
-users simply open `/midhub` again while signed in to AgentHub. The old SSO settings (IdP) and stored passwords are
-no longer used.
+users simply open `/midhub` again while signed in to AgentHub. Stored passwords are no longer used. The old SSO
+settings (IdP), including the client secret the old page stored in plaintext, are deleted by migration
+`agenthub_sso_delete_idp_config`; if an IdP client was ever configured for MidHub, also delete or rotate it in the IdP.
 
 ## 7. Updating
 
@@ -293,8 +305,14 @@ can edit MID files from a session. API reference: `docs/agent-api.md`.
    403 `agent_auth` to any request whose Host or X-Forwarded-For/X-Real-IP/Forwarded is not loopback.
 6. Per MID, a user switches "อนุญาตให้ AgentHub" on in the overview tab (default off).
 
-Check from the host (replace the email with a MidHub user; expect 200 JSON, and 403 with the extra header):
+Check from the host. Replace the email with **your own AgentHub admin email**: this call creates that email as a
+MidHub admin if it is new (audit `user.created`) or keeps it one, and MidHub users cannot be deleted afterwards (only
+locked), so never use a placeholder or someone else's address. Expect 200 JSON from the first command, 403 from the
+second (same call plus a forwarding header), and 404 from the third:
 
-    curl -s -H "X-MidHub-Agent-Secret: $MIDHUB_AGENT_SECRET" -H "X-MidHub-Actor-Email: you@example.com" \
-      -H "X-MidHub-Session-Id: check-1" http://127.0.0.1:3100/midhub/api/agent/mids
+    curl -s -H "X-MidHub-Agent-Secret: $MIDHUB_AGENT_SECRET" -H "X-MidHub-Actor-Email: <your-agenthub-admin-email>" \
+      -H 'X-MidHub-Actor-Role: admin' -H "X-MidHub-Session-Id: check-1" http://127.0.0.1:3100/midhub/api/agent/mids
+    curl -s -o /dev/null -w '%{http_code}\n' -H "X-MidHub-Agent-Secret: $MIDHUB_AGENT_SECRET" \
+      -H "X-MidHub-Actor-Email: <your-agenthub-admin-email>" -H 'X-MidHub-Actor-Role: admin' \
+      -H "X-MidHub-Session-Id: check-1" -H 'X-Forwarded-For: 1.2.3.4' http://127.0.0.1:3100/midhub/api/agent/mids
     curl -s -o /dev/null -w '%{http_code}\n' https://<host>/midhub/api/agent/mids      # must be 404 via Caddy

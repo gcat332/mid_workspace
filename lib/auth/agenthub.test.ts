@@ -20,14 +20,32 @@ const server = http.createServer((req, res) => {
 })
 let base = "http://127.0.0.1:1"
 let envError: Error | null = null
-vi.mock("@/lib/env", () => ({ env: { get agenthubUrl() { if (envError) throw envError; return base } } }))
+// The listener-owner check runs for real against this host's /proc/net/tcp{,6}: the fake AgentHub's socket is owned
+// by the uid running the tests, so the injected /etc/passwd maps the service user to that uid ("intruder-ah" to
+// another uid). null = AGENTHUB_SERVICE_USER=none.
+const SVC = "midhub-test-ah"
+let serviceUser: string | null = SVC
+vi.mock("@/lib/env", () => ({
+  env: {
+    get agenthubUrl() { if (envError) throw envError; return base },
+    get agenthubServiceUser() { return serviceUser },
+  },
+}))
 
 const findUnique = vi.hoisted(() => vi.fn(async (): Promise<unknown> => null))
 const upsert = vi.hoisted(() => vi.fn(async (a: { create: { email: string } }) => ({ id: "u9", email: a.create.email, role: "admin" })))
 const update = vi.hoisted(() => vi.fn(async (a: { where: { email: string } }) => ({ id: "u-race", email: a.where.email })))
 vi.mock("@/lib/db/client", () => ({ prisma: { user: { findUnique, upsert, update } } }))
 
-import { lookupAgentHubAdmin, signInFromAgentHub } from "./agenthub"
+import { isValidEmail, lookupAgentHubAdmin, signInFromAgentHub } from "./agenthub"
+import { deps as ownerDeps } from "./listener-owner"
+
+const realRead = ownerDeps.readFile
+const myUid = process.getuid!()
+ownerDeps.readFile = async (p: string) =>
+  p === "/etc/passwd"
+    ? `root:x:0:0:root:/root:/bin/bash\n${SVC}:x:${myUid}:${myUid}::/h:/bin/sh\nintruder-ah:x:${myUid + 1}:1::/h:/bin/sh\n`
+    : realRead(p)
 
 // A loopback port with nothing listening (connection refused). Port 1 would not do: fetch refuses it as a "bad port".
 async function closedPort(): Promise<string> {
@@ -48,6 +66,7 @@ beforeEach(() => {
   findUnique.mockReset(); findUnique.mockResolvedValue(null)
   upsert.mockClear(); update.mockClear()
   envError = null
+  serviceUser = SVC
 })
 
 describe("lookupAgentHubAdmin", () => {
@@ -126,7 +145,7 @@ describe("lookupAgentHubAdmin", () => {
       expect(lines[1]).toMatch(/status 302/)
       expect(lines[2]).toMatch(/not JSON/)
       expect(lines[3]).toMatch(/no valid email/)
-      expect(lines[4]).toMatch(/ECONNREFUSED/)
+      expect(lines[4]).toMatch(/listener on :\d+ not owned by midhub-test-ah \(nothing listening\)/)
       const all = JSON.stringify(warn.mock.calls) + JSON.stringify(others.map((o) => o.mock.calls))
       expect(all).not.toContain(COOKIE)
       expect(all.toLowerCase()).not.toContain("cookie")
@@ -151,9 +170,62 @@ describe("lookupAgentHubAdmin", () => {
     warn.mockRestore()
   }, 10_000)
 
+  it("listener check off (AGENTHUB_SERVICE_USER=none): a refused connection is logged with its code", async () => {
+    serviceUser = null
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const saved = base
+    base = await closedPort()
+    try {
+      expect(await lookupAgentHubAdmin(COOKIE)).toEqual({ ok: false, reason: "unreachable" })
+      expect(warn.mock.calls.map((c) => c.join(" ")).join("\n")).toMatch(/ECONNREFUSED/)
+    } finally {
+      base = saved; warn.mockRestore()
+    }
+  })
+
+  it("listener check off: the lookup works against any listener", async () => {
+    serviceUser = null
+    reply = { status: 200, body: '{"email":"a@x.com","role":"admin"}' }
+    expect(await lookupAgentHubAdmin(COOKIE)).toEqual({ ok: true, email: "a@x.com" })
+    expect(seen).toHaveLength(1)
+  })
+
+  it("port squatting: the listener belongs to another account -> unreachable, the cookie is never sent", async () => {
+    serviceUser = "intruder-ah"
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      reply = { status: 200, body: '{"email":"evil@x.com","role":"admin"}' }
+      expect(await lookupAgentHubAdmin(COOKIE)).toEqual({ ok: false, reason: "unreachable" })
+      expect(seen).toHaveLength(0)
+      const port = new URL(base).port
+      const lines = warn.mock.calls.map((c) => c.map(String).join(" "))
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatch(new RegExp(`listener on :${port} not owned by intruder-ah`))
+      expect(lines[0]).not.toContain(COOKIE)
+      expect(lines[0].toLowerCase()).not.toContain("cookie")
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it("an unknown AGENTHUB_SERVICE_USER is a configuration error (throws), not unreachable; nothing is sent", async () => {
+    serviceUser = "no-such-account"
+    await expect(lookupAgentHubAdmin(COOKIE)).rejects.toThrow(/AGENTHUB_SERVICE_USER.*no-such-account/)
+    expect(seen).toHaveLength(0)
+  })
+
   it("a configuration error (bad AGENTHUB_URL) is not disguised as unreachable: it throws with its message", async () => {
     envError = new Error("AGENTHUB_URL must be http://127.0.0.1:<port>")
     await expect(lookupAgentHubAdmin(COOKIE)).rejects.toThrow(/AGENTHUB_URL/)
+  })
+})
+
+describe("isValidEmail", () => {
+  it("accepts exactly 254 characters, rejects 255 (never truncated)", () => {
+    const at = (n: number) => `${"a".repeat(n - "@x.co".length)}@x.co`
+    expect(at(254)).toHaveLength(254)
+    expect(isValidEmail(at(254))).toBe(true)
+    expect(isValidEmail(at(255))).toBe(false)
   })
 })
 

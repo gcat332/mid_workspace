@@ -158,6 +158,8 @@ export const config = {
   // IP allowlist in lib/agent/auth.ts. Excluded here because Next clones and fully buffers the body of every
   // non-GET request the proxy matches (up to proxyClientMaxBodySize) before the route runs, which would defeat
   // the streamed agent upload and its early 413.
+  // Any path ending in one of those extensions also skips the gate (no re-verify, no CSRF check): today only dynamic
+  // [id]/[name] API segments could end that way, with no real resource behind them. Never rely on the proxy there.
   // "/" first: with a basePath, Next's compiled pattern for the second entry needs a "/" after "/midhub", so the
   // bare app root "/midhub" (the main entry, where AgentHub sign-in starts) would otherwise skip the proxy.
   matcher: ["/", "/((?!_next/static|_next/image|api/agent/|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf)$).*)"],

@@ -52,3 +52,8 @@ it("labels sign-in via AgentHub, denials and lock/unlock (AgentHub SSO)", () => 
   expect(detailPairs(JSON.stringify({ reason: "not_admin" }))).toEqual([["เหตุผล", "ไม่ใช่ admin ของ AgentHub"]])
   expect(detailPairs(JSON.stringify({ targetEmail: "m@x.com", lock: true }))).toEqual([["ผู้ใช้", "m@x.com"], ["ล็อก", "ใช่"]])
 })
+
+it("labels user.created (agent call created a MidHub admin) and its email detail", () => {
+  expect(actionLabel("user.created")).toBe("สร้างผู้ใช้ (admin จาก AgentHub)")
+  expect(detailPairs(JSON.stringify({ via: "agenthub", email: "new@x.com" }))).toEqual([["ผ่าน", "agenthub"], ["อีเมล", "new@x.com"]])
+})

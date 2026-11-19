@@ -23,6 +23,15 @@ describe("loadEnv", () => {
     expect(e.midhubRoot).toBe("/opt/midhub")
     expect(e.helperSocket).toBe("/run/midhub/helper.sock")
     expect(e.agenthubUrl).toBe("http://127.0.0.1:3000")
+    expect(e.agenthubServiceUser).toBe("bsmagenthub")
+  })
+  it("AGENTHUB_SERVICE_USER: default bsmagenthub (also when empty); only the literal none disables the listener check", () => {
+    expect(loadEnv({ ...required, AGENTHUB_SERVICE_USER: "" }).agenthubServiceUser).toBe("bsmagenthub")
+    expect(loadEnv({ ...required, AGENTHUB_SERVICE_USER: "agenthub_svc" }).agenthubServiceUser).toBe("agenthub_svc")
+    expect(loadEnv({ ...required, AGENTHUB_SERVICE_USER: "none" }).agenthubServiceUser).toBeNull()
+    for (const bad of ["NONE", "a b", "../x", "root:x", "-x"]) {
+      expect(() => loadEnv({ ...required, AGENTHUB_SERVICE_USER: bad }), bad).toThrow(/AGENTHUB_SERVICE_USER/)
+    }
   })
   it("rejects a short JWT_SECRET", () => {
     expect(() => loadEnv({ ...required, JWT_SECRET: "short" })).toThrow(/JWT_SECRET/)

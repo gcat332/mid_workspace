@@ -1,5 +1,5 @@
 // JWT sign/verify — dependency-light so it is safe for both Node and Edge runtimes.
-// No bcryptjs or Node-only imports here; password hashing lives in session.ts.
+// No Node-only imports here (there are no passwords any more: sign-in is through AgentHub, lib/auth/agenthub.ts).
 
 import * as jose from "jose"
 import { getJwtSecret } from "@/lib/auth/secret"

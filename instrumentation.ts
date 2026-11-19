@@ -28,6 +28,11 @@ export async function register(): Promise<void> {
   }
   // Surface a bad configuration (e.g. a non-loopback AGENTHUB_URL) in the boot log, not only on the first sign-in.
   await step("env", async () => (await import("@/lib/env")).loadEnv(process.env))
+  // An AGENTHUB_SERVICE_USER missing from /etc/passwd would fail every sign-in: say so at boot too.
+  await step("AGENTHUB_SERVICE_USER", async () => {
+    const user = (await import("@/lib/env")).loadEnv(process.env).agenthubServiceUser
+    if (user !== null) await (await import("@/lib/auth/listener-owner")).serviceUid(user)
+  })
   await kindStep("registerInstallKinds", async () => (await import("@/lib/jobs/install")).registerInstallKinds())
   await kindStep("registerUninstallKinds", async () => (await import("@/lib/jobs/uninstall")).registerUninstallKinds())
   if (kindsOk) {

@@ -49,7 +49,7 @@ Rules:
 | Client IP not in the MidHub IP allowlist | 403 | `ip_blocked` (body also has `ip`) |
 | `Host` or forwarding headers not loopback (call came via Caddy/proxy) | 403 | `agent_auth` |
 | `X-MidHub-Session-Id` missing/empty/invalid | 400 | `agent_auth` |
-| `X-MidHub-Actor-Role` missing or not exactly `admin` (message: "ต้องเป็น admin ของ AgentHub (บัญชี <email>)"), actor email empty, or the actor's MidHub account is locked | 403 | `agent_user` |
+| `X-MidHub-Actor-Role` missing or not exactly `admin` (message: "ต้องเป็น admin ของ AgentHub (บัญชี <email>)"), actor email missing, malformed or longer than 254 characters, or the actor's MidHub account is locked | 403 | `agent_user` |
 
 Through Caddy `/midhub/api/agent/*` is answered 404 by design (see `deploy/README.md`).
 
@@ -79,7 +79,9 @@ curl -s -H "Authorization: Bearer $AGENT_MIDHUB_TOKEN" \
   "http://127.0.0.1:3000/api/tasks/<taskId>/midhub/<path>"
 ```
 
-and the direct loopback form for debugging (not available to the agent; needs the secret):
+and the direct loopback form for debugging (not available to the agent; needs the secret). Use your own AgentHub
+admin email: like any agent call, it creates that email as a MidHub admin if it is new (audited `user.created`) or
+keeps it one, and MidHub users cannot be deleted (only locked):
 
 ```bash
 curl -s \
@@ -226,7 +228,7 @@ curl -s -X POST -H "Authorization: Bearer $AGENT_MIDHUB_TOKEN" \
 | `not_found` | 404 | feature off (secret unset), or unknown MID / file / path |
 | `agent_auth` | 401 / 403 / 400 | bad secret (401); not loopback Host/forwarding headers (403); bad session id (400) |
 | `ip_blocked` | 403 | client IP not in the MidHub IP allowlist |
-| `agent_user` | 403 | actor is not an AgentHub admin (`X-MidHub-Actor-Role` missing or not `admin`), or has a locked MidHub account |
+| `agent_user` | 403 | actor is not an AgentHub admin (`X-MidHub-Actor-Role` missing or not `admin`), actor email missing, malformed or longer than 254 characters, or a locked MidHub account |
 | `agent_check_failed` | 403 | checklist failed; body has `checks` |
 | `invalid_name` | 400 | MID name syntax |
 | (405, no body code) | 405 | method not supported on the route (e.g. PUT on `mids`, GET on `restart`) |
