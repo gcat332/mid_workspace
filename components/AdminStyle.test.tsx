@@ -29,6 +29,9 @@ describe("admin tables", () => {
     const th = screen.getByRole("columnheader", { name: "Time" })
     expect(th.closest("thead")!.className).toContain("bg-gray-50")
     expect(th.closest("thead")!.className).toMatch(/text-xs font-medium/)
+    const table = container.querySelector("table")!
+    expect(table.className).toContain("min-w-[56rem]")
+    expect(screen.getByText("x").closest("td")!.className).toContain("min-w-32")
     const card = container.querySelector("table")!.parentElement!
     expect(card.className).toContain("rounded-xl")
     expect(card.className).toContain(RESTING)

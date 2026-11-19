@@ -100,7 +100,7 @@ export function AuditLog() {
       </div>
       {error && <div className="mb-3"><ErrorNotice error={error} /></div>}
       <div className={tableCardCls}>
-        <table className="w-full text-left text-sm">
+        <table className="w-full min-w-[56rem] text-left text-sm">
           <thead className={theadCls}>
             <tr>
               <th className="px-3 py-2 font-medium">Time</th>
@@ -115,11 +115,11 @@ export function AuditLog() {
               <tr key={r.id} className={`align-top ${trHoverCls}`}>
                 <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-700">{formatBangkok(r.at)}</td>
                 <td className="px-3 py-2 whitespace-nowrap text-gray-900">{r.email}</td>
-                <td className="px-3 py-2 text-gray-900">
+                <td className="min-w-32 px-3 py-2 text-gray-900">
                   {actionLabel(r.action) ?? <span className="font-mono text-xs">{r.action}</span>}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-gray-700">{r.midName ?? <span className="text-gray-400">-</span>}</td>
-                <td className="px-3 py-2"><Detail detail={r.detail} /></td>
+                <td className="min-w-64 px-3 py-2"><Detail detail={r.detail} /></td>
               </tr>
             ))}
             {!loading && !error && items.length === 0 && !next && (

@@ -40,7 +40,7 @@ export function OverviewTab({ mid, jobShown = false, busyReason = null, onChange
   const running = mid.status.state === "running"
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-2 lg:grid-cols-4">
         <Tile label="Uptime">{running ? formatUptime(mid.status.since) : "-"}</Tile>
         <Tile label="Memory Usage">
           {formatBytes(mid.status.memoryBytes)} <span className="font-normal text-gray-600">of {mid.heapMb} MB heap</span>

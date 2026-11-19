@@ -140,12 +140,7 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
     document.getElementById(`tab-${TABS[i].id}`)?.focus()
   }
 
-  // Screen-reader text for the disabled header buttons (each also carries its reason as a title tooltip).
-  const reasons = [
-    busyReason,
-    !busyReason && !isUp ? RESTART_WHEN_UP : null,
-    uninstallReason && uninstallReason !== busyReason ? `Uninstall: ${uninstallReason}` : null,
-  ].filter(Boolean) as string[]
+  const restartDisabled = busy || !!busyReason || !isUp
 
   return (
     <section aria-label={`MID ${mid.name}`} className="min-w-0">
@@ -153,20 +148,20 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
         <h2 className="mr-2 min-w-0 break-all font-mono text-xl font-semibold text-gray-900">{mid.name}</h2>
         <StatusPill view={sv} />
         <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
-          <button type="button" onClick={() => request("restart")} disabled={busy || !!busyReason || !isUp}
-            aria-describedby="mid-btn-reasons" title={busyReason ?? (!isUp ? RESTART_WHEN_UP : undefined)}
+          <button type="button" onClick={() => request("restart")} disabled={restartDisabled}
+            aria-describedby={restartDisabled ? "mid-restart-reason" : undefined} title={busyReason ?? (!isUp ? RESTART_WHEN_UP : undefined)}
             className={`${hdrBtn} border-gray-300 text-gray-800 hover:bg-gray-50`}>
             <svg {...icon}><path d="M13 8a5 5 0 1 1-1.5-3.5M13 2.5V5h-2.5" /></svg>Restart
           </button>
           {isUp ? (
             <button type="button" onClick={() => request("stop")} disabled={busy || !!busyReason}
-              aria-describedby="mid-btn-reasons" title={busyReason ?? undefined}
+              aria-describedby={busyReason ? "mid-busy-reason" : undefined} title={busyReason ?? undefined}
               className={`${hdrBtn} border-red-300 text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40`}>
               <svg {...icon}><rect x="4" y="4" width="8" height="8" rx="1.5" /></svg>Stop
             </button>
           ) : (
             <button type="button" onClick={() => request("start")} disabled={busy || !!busyReason || startBlocked}
-              aria-describedby={startBlocked ? "mid-start-reason" : "mid-btn-reasons"}
+              aria-describedby={[busyReason && "mid-busy-reason", startBlocked && "mid-start-reason"].filter(Boolean).join(" ") || undefined}
               title={busyReason ?? (startBlocked ? startReason : undefined)}
               className={`${hdrBtn} border-success-solid bg-success-solid text-white hover:bg-success-solid-press`}>
               <svg {...icon}><path d="M5 3.5v9l7-4.5z" /></svg>Start
@@ -180,7 +175,8 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
           ]} />
         </div>
       </div>
-      <p id="mid-btn-reasons" className="sr-only">{reasons.join(" · ")}</p>
+      {busyReason && <p id="mid-busy-reason" className="sr-only">{busyReason}</p>}
+      {restartDisabled && <p id="mid-restart-reason" className="sr-only">{busyReason ?? RESTART_WHEN_UP}</p>}
       {startBlocked && <p id="mid-start-reason" className="mt-2 text-sm text-amber-700">{startReason}</p>}
       {holdsStale && (
         <p className="mt-1 text-xs text-gray-500">

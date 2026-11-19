@@ -43,7 +43,7 @@ describe("MidPanel lifecycle", () => {
     expect(screen.getByTestId("job-progress").textContent).toContain("j1")
     for (const n of ["Start", "Restart"]) expect(btn(n).disabled).toBe(true)
     for (const n of ["Repair Permissions", "Uninstall"]) expect(item(n).getAttribute("aria-disabled")).toBe("true")
-    expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("มีงานกำลังทำอยู่")
+    expect(document.getElementById("mid-busy-reason")!.textContent).toContain("มีงานกำลังทำอยู่")
     fireEvent.click(screen.getByRole("tab", { name: "Configuration" }))
     expect(screen.getByTestId("config-tab").textContent).toBe("มีงานกำลังทำอยู่")
     fireEvent.click(screen.getByRole("tab", { name: "Files" }))
@@ -83,13 +83,35 @@ describe("MidPanel lifecycle", () => {
   it("member: Uninstall disabled with 'ต้องเป็น Admin'", () => {
     panel(mk(), false)
     expect(item("Uninstall").getAttribute("aria-disabled")).toBe("true")
-    expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("ต้องเป็น Admin")
+    expect(item("Uninstall").getAttribute("title")).toContain("ต้องเป็น Admin")
+    expect(document.getElementById("mid-busy-reason")).toBeNull()
   })
 
   it("state other than installed|error: Uninstall disabled with the state reason", () => {
     panel(mk({ state: "upgrading" }))
     expect(item("Uninstall").getAttribute("aria-disabled")).toBe("true")
-    expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("ลบได้เฉพาะ MID ที่ติดตั้งเสร็จหรือมีปัญหา")
+    expect(item("Uninstall").getAttribute("title")).toContain("ลบได้เฉพาะ MID ที่ติดตั้งเสร็จหรือมีปัญหา")
+  })
+
+  it("each header button is described only by its own reason", () => {
+    panel(mk())
+    expect(btn("Restart").getAttribute("aria-describedby")).toBe("mid-restart-reason")
+    expect(document.getElementById("mid-restart-reason")!.textContent).toContain("Restart ใช้ได้เมื่อ MID กำลังรัน")
+    expect(btn("Start").getAttribute("aria-describedby")).toBeNull()
+    expect(document.getElementById("mid-busy-reason")).toBeNull()
+    cleanup()
+    panel(mk({ status: { state: "running", pid: 1, memoryBytes: null, since: null } }))
+    expect(btn("Restart").getAttribute("aria-describedby")).toBeNull()
+    expect(btn("Stop").getAttribute("aria-describedby")).toBeNull()
+    expect(document.getElementById("mid-restart-reason")).toBeNull()
+    cleanup()
+    panel(mk({ status: { state: "running", pid: 1, memoryBytes: null, since: null }, job: J("install", "waitConnected", "running") }))
+    expect(btn("Stop").getAttribute("aria-describedby")).toBe("mid-busy-reason")
+    expect(btn("Restart").getAttribute("aria-describedby")).toBe("mid-restart-reason")
+    expect(document.getElementById("mid-restart-reason")!.textContent).toBe(document.getElementById("mid-busy-reason")!.textContent)
+    cleanup()
+    panel(mk({ job: J("install", "extract", "running") }))
+    expect(btn("Start").getAttribute("aria-describedby")).toBe("mid-busy-reason")
   })
 
   it("overview shows the latest job with a link to its progress view", () => {
@@ -104,14 +126,14 @@ describe("MidPanel lifecycle", () => {
     expect(screen.getByTestId("job-progress")).toBeTruthy()
     expect(btn("Start").disabled).toBe(true)
     expect(item("Uninstall").getAttribute("aria-disabled")).toBe("true")
-    expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("มีงานกำลังทำอยู่")
+    expect(document.getElementById("mid-busy-reason")!.textContent).toContain("มีงานกำลังทำอยู่")
     expect(screen.queryByRole("link", { name: "View Progress" })).toBeNull()
   })
 
   it.each(["uninstall", "cancel_install"])("%s job failed: progress shown, tabs blocked with the retry/cancel wording, no link", (kind) => {
     panel(mk({ state: "uninstalling", job: J(kind, "archive", "failed") }))
     expect(screen.getByTestId("job-progress")).toBeTruthy()
-    expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("งานล้มเหลว — ลองใหม่หรือยกเลิกด้านล่าง")
+    expect(document.getElementById("mid-busy-reason")!.textContent).toContain("งานล้มเหลว — ลองใหม่หรือยกเลิกด้านล่าง")
     fireEvent.click(screen.getByRole("tab", { name: "Files" }))
     expect(screen.getByTestId("files-tab").textContent).toBe("งานล้มเหลว — ลองใหม่หรือยกเลิกด้านล่าง")
     expect(screen.queryByRole("link", { name: "View Progress" })).toBeNull()
@@ -119,8 +141,8 @@ describe("MidPanel lifecycle", () => {
 
   it("a failed install in a transitional state uses the failed wording, an active one the busy wording", () => {
     panel(mk({ state: "installing", job: J("install", "extract", "failed") }))
-    expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("งานล้มเหลว")
-    expect(document.getElementById("mid-btn-reasons")!.textContent).not.toContain("มีงานกำลังทำอยู่")
+    expect(document.getElementById("mid-busy-reason")!.textContent).toContain("งานล้มเหลว")
+    expect(document.getElementById("mid-busy-reason")!.textContent).not.toContain("มีงานกำลังทำอยู่")
   })
 
   it("jobOwnedElsewhere hides the panel's own progress but still blocks writes", () => {
@@ -133,7 +155,7 @@ describe("MidPanel lifecycle", () => {
     panel(mk(), true, vi.fn(), { optimisticBusy: true })
     expect(btn("Start").disabled).toBe(true)
     expect(item("Uninstall").getAttribute("aria-disabled")).toBe("true")
-    expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("มีงานกำลังทำอยู่")
+    expect(document.getElementById("mid-busy-reason")!.textContent).toContain("มีงานกำลังทำอยู่")
   })
 
   it("progress stays after the job ends (watched) until dismissed with onClose", () => {

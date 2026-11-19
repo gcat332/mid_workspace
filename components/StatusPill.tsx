@@ -7,15 +7,15 @@ const PILL: Record<Tone, string> = {
   busy: "bg-blue-50 text-blue-700",
   stopped: "bg-gray-100 text-gray-600",
   unknown: "bg-gray-100 text-gray-600",
-  failed: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300",
+  failed: "bg-red-50 text-red-700",
 }
 
 const DOT: Record<Tone, string> = {
-  running: "bg-[#2F5FA6]",
-  busy: "bg-[#2F5FA6] motion-safe:animate-pulse",
-  stopped: "bg-gray-400",
+  running: "bg-[#2F5FA6] dark:bg-blue-300",
+  busy: "bg-[#2F5FA6] dark:bg-blue-300 motion-safe:animate-pulse",
+  stopped: "bg-gray-500",
   unknown: "border border-gray-400 bg-transparent",
-  failed: "bg-red-600 dark:bg-red-400",
+  failed: "bg-red-600",
 }
 
 /** The status dot alone (the label lives elsewhere). */

@@ -54,14 +54,14 @@ export function MidActionsMenu({ items }: { items: MenuAction[] }) {
 
   return (
     <div ref={wrap} className="relative">
-      <button ref={trigger} type="button" aria-label="More actions" aria-haspopup="menu" aria-expanded={open}
+      <button ref={trigger} type="button" aria-label="More actions" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? `${uid}-menu` : undefined}
         onClick={() => setOpen((o) => !o)}
         className="inline-flex size-9 items-center justify-center rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 dark:text-neutral-200 dark:hover:bg-neutral-700">
         <svg aria-hidden viewBox="0 0 16 16" className="size-4" fill="currentColor"><circle cx="3" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" /><circle cx="13" cy="8" r="1.3" /></svg>
       </button>
       {open && (
         <>
-          <div role="menu" aria-label="More actions" onKeyDown={onArrow}
+          <div id={`${uid}-menu`} role="menu" aria-label="More actions" onKeyDown={onArrow}
             className="absolute right-0 z-30 mt-1 min-w-48 rounded-lg border border-gray-200 bg-white py-1 text-sm shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
             {items.map((it, i) => (
               <button key={it.label} type="button" role="menuitem" aria-disabled={it.disabled ? "true" : undefined} title={it.reason ?? undefined}

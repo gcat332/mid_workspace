@@ -46,7 +46,7 @@ export function editorLanguage(path: string): string {
   const name = (path.split("/").pop() ?? "").toLowerCase()
   if (BY_NAME[name]) return BY_NAME[name]
   const dot = name.lastIndexOf(".")
-  if (dot <= 0) return name.startsWith(".") ? (BY_NAME[name] ?? "plaintext") : "plaintext"
+  if (dot <= 0) return "plaintext"
   return BY_EXT[name.slice(dot + 1)] ?? "plaintext"
 }
 
