@@ -14,6 +14,8 @@ type Ctx = { params: Promise<{ name: string }> }
 export const dynamic = "force-dynamic"
 const MAX_TAILS = 20
 const WINDOW_BYTES = 256 * 1024
+/** Lines of the initial window actually sent; the UI keeps no more than this. */
+const INITIAL_LINES = 150
 const POLL_MS = 1000
 const PING_MS = 15_000
 const STALL_MS = 10_000
@@ -90,10 +92,21 @@ export async function GET(req: Request, ctx: Ctx) {
         send(": ok\n\n")
         void (async () => {
           try {
+            // The initial window arrives in several batches: hold them back and send only its last INITIAL_LINES.
+            let initial: string[] | null = []
+            const sendLines = (lines: string[]) => send(`data: ${JSON.stringify({ lines })}\n\n`)
             for await (const lines of tailFile(openOnce, {
               fromBytesBack: WINDOW_BYTES, pollMs: POLL_MS, signal: ac.signal,
               onStatus: (s) => send(`event: status\ndata: ${JSON.stringify({ state: s })}\n\n`),
-            })) send(`data: ${JSON.stringify({ lines })}\n\n`)
+              onCaughtUp: () => {
+                const held = initial
+                initial = null
+                if (held?.length) sendLines(held.slice(-INITIAL_LINES))
+              },
+            })) {
+              if (initial) initial = initial.concat(lines).slice(-INITIAL_LINES)
+              else sendLines(lines)
+            }
           } catch (e) {
             const me = e instanceof MidError ? e : null
             send(`event: error\ndata: ${JSON.stringify({ code: me?.code ?? "internal", message: me?.message ?? "อ่าน log ไม่สำเร็จ ลองใหม่อีกครั้ง" })}\n\n`)

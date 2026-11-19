@@ -25,7 +25,7 @@ const root = () => path.join(dir, "root")
 const openLog = () => openFile(log, "r", (real) => {
   if (!real.startsWith(root() + path.sep)) throw new MidError("path_outside")
 })
-const start = (o: { fromBytesBack?: number; maxLineBytes?: number; onStatus?: (s: "missing" | "live") => void } = {}) =>
+const start = (o: { fromBytesBack?: number; maxLineBytes?: number; onStatus?: (s: "missing" | "live") => void; onCaughtUp?: () => void } = {}) =>
   tailFile(openLog, { fromBytesBack: 1024, pollMs: 10, signal: ac.signal, ...o })
 
 /** Collects lines until `n` are seen (or 3 s). */
@@ -45,6 +45,17 @@ describe("tailFile", () => {
     await sleep(30)
     fs.appendFileSync(log, "a\nb\nc\n")
     expect(await p).toEqual(["a", "b", "c"])
+  })
+
+  it("calls onCaughtUp once, after the initial window and before later lines", async () => {
+    fs.writeFileSync(log, "a\nb\n")
+    const events: string[] = []
+    const p = collect(start({ onCaughtUp: () => events.push("caught-up") }), 3)
+    await sleep(60)
+    fs.appendFileSync(log, "c\n")
+    const it = await p
+    expect(it).toEqual(["a", "b", "c"])
+    expect(events).toEqual(["caught-up"])
   })
 
   it("starts within the byte window and drops the partial first line", async () => {

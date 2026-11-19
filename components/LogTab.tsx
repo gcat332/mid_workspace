@@ -3,26 +3,63 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { API_BASE, apiFetch } from "@/lib/ui/api"
+import { LOG_VIEW_LINES, tokenizeLogLine, type LogTokenKind } from "@/lib/ui/log-highlight"
 import { levelMatches, nextBackoff, shouldRetry } from "@/lib/ui/log-stream"
 
-const MAX_LINES = 5000
-const FILES = [{ id: "main", label: "agent (main)" }, { id: "wrapper", label: "wrapper" }] as const
-const LEVELS = [{ id: "", label: "ทั้งหมด" }, { id: "ERROR", label: "ERROR" }, { id: "WARN+", label: "WARN ขึ้นไป" }] as const
+const MAX_LINES = LOG_VIEW_LINES
+const FILES = [{ id: "main", label: "Agent Log" }, { id: "wrapper", label: "Wrapper Log" }] as const
+const LEVELS = [{ id: "", label: "All Levels" }, { id: "ERROR", label: "Errors" }, { id: "WARN+", label: "Warnings and Above" }] as const
 type Status = "connecting" | "live" | "missing"
 type Line = { id: number; text: string }
 
 const NETWORK: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กำลังลองเชื่อมต่อใหม่" }
 const ctl = "rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-800 hover:bg-gray-50"
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-const tone = (t: string) => (levelMatches(t, "ERROR") ? "text-red-700" : levelMatches(t, "WARN") ? "text-amber-700" : "text-gray-800")
+const KIND_COLOR: Record<LogTokenKind, string> = {
+  plain: "", time: "text-[#6a9955]", "level-error": "text-[#f48771] font-semibold", "level-warn": "text-[#cca700] font-semibold",
+  "level-info": "text-[#4fc1ff]", "level-debug": "text-[#808080]", thread: "text-[#c586c0]", class: "text-[#4ec9b0]",
+  number: "text-[#b5cea8]", string: "text-[#ce9178]", path: "text-[#9cdcfe]",
+}
+const MARK = "bg-[#623315] text-inherit"
 
-const Row = memo(function Row({ text, q }: { text: string; q: string }) {
-  let body: React.ReactNode = text
-  if (q) {
-    const parts = text.split(new RegExp(`(${esc(q)})`, "i"))
-    body = parts.map((p, i) => (i % 2 ? <mark key={i} className="bg-yellow-200">{p}</mark> : p))
+/** Match ranges of `q` over the whole line, so a match may span several coloured tokens. */
+function matchRanges(text: string, q: string): [number, number][] {
+  if (!q) return []
+  const out: [number, number][] = []
+  for (const m of text.matchAll(new RegExp(esc(q), "gi"))) out.push([m.index, m.index + m[0].length])
+  return out
+}
+
+/** `piece` is text[start, start + piece.length): wrap the parts inside a match range in <mark>. */
+function marked(piece: string, start: number, ranges: [number, number][]): React.ReactNode {
+  if (!ranges.length) return piece
+  const end = start + piece.length
+  const out: React.ReactNode[] = []
+  let pos = start
+  for (const [a, b] of ranges) {
+    const s = Math.max(a, pos), e = Math.min(b, end)
+    if (e <= s) continue
+    if (s > pos) out.push(piece.slice(pos - start, s - start))
+    out.push(<mark key={s} className={MARK}>{piece.slice(s - start, e - start)}</mark>)
+    pos = e
   }
-  return <div className={`whitespace-pre-wrap break-all ${tone(text)}`}>{body || " "}</div>
+  if (pos < end) out.push(piece.slice(pos - start))
+  return out
+}
+
+const Row = memo(function Row({ n, text, q }: { n: number; text: string; q: string }) {
+  const ranges = matchRanges(text, q)
+  const tokens = tokenizeLogLine(text)
+  const spans = tokens.map((t, i) => {
+    const start = tokens.slice(0, i).reduce((n, x) => n + x.text.length, 0)
+    return <span key={i} data-kind={t.kind} className={KIND_COLOR[t.kind]}>{marked(t.text, start, ranges)}</span>
+  })
+  return (
+    <div data-row className="grid grid-cols-[3.5rem_minmax(0,1fr)] hover:bg-white/5">
+      <span data-gutter className="select-none pr-3 text-right text-[#858585]">{n}</span>
+      <span className="whitespace-pre-wrap break-all">{spans.length ? spans : " "}</span>
+    </div>
+  )
 })
 
 export function LogTab({ midName }: { midName: string }) {
@@ -123,35 +160,36 @@ export function LogTab({ midName }: { midName: string }) {
     setFile(f); setLines([]); setErr(null)
   }
 
-  const statusText = paused ? "หยุดชั่วคราว" : status === "live" ? "สด" : status === "missing" ? "ไม่พบไฟล์ log" : "กำลังเชื่อมต่อ"
+  const statusText = paused ? "Paused" : status === "live" ? "Live" : status === "missing" ? "Log Not Found" : "Connecting…"
   const dot = paused ? "bg-gray-400" : status === "live" ? "bg-green-500" : status === "missing" ? "bg-amber-500" : "bg-blue-400"
 
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        <select aria-label="ไฟล์ log" value={file} onChange={(e) => switchFile(e.target.value as typeof file)} className={ctl}>
+        <select aria-label="Log file" value={file} onChange={(e) => switchFile(e.target.value as typeof file)} className={ctl}>
           {FILES.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
         </select>
-        <select aria-label="ระดับ log" value={level} onChange={(e) => setLevel(e.target.value)} className={ctl}>
+        <select aria-label="Log level" value={level} onChange={(e) => setLevel(e.target.value)} className={ctl}>
           {LEVELS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
         </select>
-        <input type="search" aria-label="ค้นหาใน log" placeholder="ค้นหา" value={q} onChange={(e) => setQ(e.target.value)}
+        <input type="search" aria-label="Search" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)}
           className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm" />
-        <button type="button" onClick={togglePause} aria-pressed={paused} className={ctl}>{paused ? "เลื่อนอัตโนมัติ" : "หยุดชั่วคราว"}</button>
+        <button type="button" onClick={togglePause} aria-pressed={paused} className={ctl}>{paused ? "Follow" : "Pause"}</button>
         {paused && newWhilePaused > 0 && (
-          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">มีบรรทัดใหม่ {newWhilePaused.toLocaleString()} บรรทัด</span>
+          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">{newWhilePaused.toLocaleString()} new lines</span>
         )}
-        <a href={`${API_BASE}${url}&download=1`} className={ctl}>ดาวน์โหลด</a>
+        <a href={`${API_BASE}${url}&download=1`} className={ctl}>Download</a>
         <span role="status" className="flex items-center gap-1.5 text-sm text-gray-600">
           <span aria-hidden className={`inline-block h-2 w-2 rounded-full ${dot}`} />{statusText}
         </span>
       </div>
       {err && <div className="mt-3"><ErrorNotice error={err} /></div>}
-      <div ref={box} tabIndex={0} aria-label="เนื้อหา log" className="mt-3 h-[28rem] overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-2 font-mono text-xs">
-        {shown.length === 0 && <p className="p-2 text-gray-500">{status === "missing" ? "ไม่พบไฟล์ log (MID อาจยังไม่เคยรัน)" : "ยังไม่มีบรรทัดที่ตรงเงื่อนไข"}</p>}
-        {shown.map((l) => <Row key={l.id} text={l.text} q={q} />)}
+      <div ref={box} tabIndex={0} aria-label="Log content"
+        className="mt-3 h-[max(32rem,calc(100svh-22rem))] overflow-auto rounded-lg border border-neutral-700 bg-[#1e1e1e] py-2 font-mono text-[12.5px] leading-5 text-[#d4d4d4]">
+        {shown.length === 0 && <p className="px-3 text-[#858585]">{status === "missing" ? "ไม่พบไฟล์ log (MID อาจยังไม่เคยรัน)" : "ยังไม่มีบรรทัดที่ตรงเงื่อนไข"}</p>}
+        {shown.map((l, i) => <Row key={l.id} n={i + 1} text={l.text} q={q} />)}
       </div>
-      <p className="mt-1 text-xs text-gray-500">แสดงล่าสุดสูงสุด {MAX_LINES.toLocaleString()} บรรทัด ({shown.length.toLocaleString()} ที่แสดง)</p>
+      <p className="mt-1 text-xs text-gray-500">Showing the latest {MAX_LINES} lines</p>
     </div>
   )
 }

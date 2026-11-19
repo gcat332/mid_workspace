@@ -13,6 +13,8 @@ export type TailOpts = {
   maxLineBytes?: number
   /** Called when the file disappears / appears (UI status). */
   onStatus?: (s: "missing" | "live") => void
+  /** Called once, after the initial window has been fully yielded (and before anything newer is). */
+  onCaughtUp?: () => void
 }
 
 const CHUNK = 64 * 1024
@@ -92,6 +94,7 @@ export async function* tailFile(open: OpenFn, opts: TailOpts): AsyncGenerator<st
   let status: "missing" | "live" | null = null
   const setStatus = (s: "missing" | "live") => { if (s !== status) { status = s; opts.onStatus?.(s) } }
   let first = true
+  let caughtUp = false
   let idle = 0
   let polls = 0
 
@@ -168,6 +171,7 @@ export async function* tailFile(open: OpenFn, opts: TailOpts): AsyncGenerator<st
       }
 
       const grew = yield* drainAll(cur)
+      if (!caughtUp) { caughtUp = true; opts.onCaughtUp?.() }
       idle = grew ? 0 : idle + 1
       polls++
       if (polls % REOPEN_EVERY === 0 || idle >= IDLE_REOPEN) {
