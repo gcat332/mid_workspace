@@ -56,6 +56,18 @@ describe("callHelper", () => {
     await serve('{"ok":false,"code":"systemctl_failed","message":"boom"}')
     await expect(callHelper({ op: "start", name: "abc" })).rejects.toMatchObject({ code: "systemctl_failed", message: "สั่ง systemd ไม่สำเร็จ ดูรายละเอียดด้านล่าง หรือแจ้ง Admin", detail: "boom" })
   })
+  it.each([
+    "systemctl start failed (code 1): Job for midhub-mid-abc.service failed because start of the service was attempted too often.",
+    "systemctl restart failed (code 1): midhub-mid-abc.service: Start request repeated too quickly.",
+    "systemctl start failed (code 1): unit entered failed state (Result: start-limit-hit)",
+  ])("systemctl_failed from the start limit -> same code, crash-loop message, raw text in detail: %s", async (raw) => {
+    await serve(JSON.stringify({ ok: false, code: "systemctl_failed", message: raw }))
+    const e = await callHelper({ op: "start", name: "abc" }).catch((x) => x)
+    expect(e).toMatchObject({ code: "systemctl_failed", status: 500, detail: raw })
+    expect(e.message).toContain("crash loop")
+    expect(e.message).toContain("Log")
+    expect(e.message).toContain("Start")
+  })
   it("garbage or wrong-shape reply -> helper_down with detail", async () => {
     for (const bad of ["nope", '{"ok":false}', '{"ok":"yes"}']) {
       await serve(bad)

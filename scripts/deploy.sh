@@ -35,10 +35,26 @@ on_exit() {
       echo
       echo "############################################################"
       echo "# DEPLOY FAILED (exit $rc) during: $STAGE"
-      echo "# The running MidHub process still works, but .next / node_modules may be incomplete."
-      echo "# Do NOT restart bsm-midhub (or run install.sh) until a deploy succeeds."
-      echo "# Fix the cause and re-run scripts/deploy.sh, or roll back:"
-      echo "#   sudo -u $APP_USER -H git -C $APP_DIR reset --hard $PREV_SHA   then re-run scripts/deploy.sh"
+      case $STAGE in
+        "install.sh" | "restart / health check")
+          # install.sh may already have try-restarted the app; the restart stage certainly did.
+          if [[ $STAGE == "install.sh" ]]; then
+            echo "# install.sh may already have restarted $SERVICE: check with  systemctl is-active $SERVICE"
+          else
+            echo "# $SERVICE WAS RESTARTED AND IS NOT HEALTHY: MidHub is probably DOWN right now."
+          fi
+          echo "# See why (e.g. a failed DB migration in ExecStartPre):  journalctl -u $SERVICE -n 100"
+          echo "# Fix the cause and re-run scripts/deploy.sh, or roll back to the previous version:"
+          echo "#   sudo -u $APP_USER -H git -C $APP_DIR reset --hard $PREV_SHA   then re-run scripts/deploy.sh"
+          echo "# (a DB migration that already ran is not undone by the rollback)"
+          ;;
+        *)
+          echo "# The running MidHub process still works, but .next / node_modules may be incomplete."
+          echo "# Do NOT restart $SERVICE (or run install.sh) until a deploy succeeds."
+          echo "# Fix the cause and re-run scripts/deploy.sh, or roll back:"
+          echo "#   sudo -u $APP_USER -H git -C $APP_DIR reset --hard $PREV_SHA   then re-run scripts/deploy.sh"
+          ;;
+      esac
       echo "############################################################"
     } >&2
   fi
@@ -83,6 +99,6 @@ for _ in $(seq 1 30); do
   if [[ "$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "http://127.0.0.1:${PORT:-3100}/midhub/login" || true)" == "200" ]]; then healthy=1; break; fi
   sleep 2
 done
-[[ $healthy -eq 1 ]] || { echo "Health check FAILED: /midhub/login never returned 200 within 60 s. See: journalctl -u $SERVICE -n 50" >&2; exit 1; }
+[[ $healthy -eq 1 ]] || { echo "Health check FAILED: /midhub/login never returned 200 within 60 s. See: journalctl -u $SERVICE -n 100" >&2; exit 1; }
 
 echo "==> Done."

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireUser } from "@/lib/auth/helpers"
 import { handleRouteError, readJsonObject } from "@/lib/http/route"
 import { loadConfigFiles, saveConfigFile, saveForm, type ConfigFile, type ConfigFormInput } from "@/lib/mids/config-service"
+import { assertSettled } from "@/lib/mids/lifecycle-gate"
 import { MidError } from "@/lib/mids/names"
 
 type Ctx = { params: Promise<{ name: string }> }
@@ -34,6 +35,7 @@ export async function PUT(req: Request, ctx: Ctx) {
   try {
     const user = await requireUser()
     const { name } = await ctx.params
+    await assertSettled(name) // a heap change rewrites the unit (helper installUnit): never during install/uninstall/error
     const body = await readJsonObject(req)
     if (!body) throw bad()
     const baseHash = str(body.baseHash)

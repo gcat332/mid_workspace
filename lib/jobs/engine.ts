@@ -194,6 +194,8 @@ export async function createJob(user: SessionPayload, kind: JobKind, midName: st
   return row
 }
 
+const RETRY_TOO_SOON = "งานยังปิดตัวไม่เสร็จ รอสักครู่แล้วกด ลองใหม่"
+
 export async function retryJob(user: SessionPayload, id: string): Promise<JobRow> {
   const job = await prisma.job.findUnique({ where: { id } })
   if (!job) throw new MidError("job_not_found")
@@ -205,7 +207,8 @@ export async function retryJob(user: SessionPayload, id: string): Promise<JobRow
   const row = await withMidLock(job.midName, async () => {
     assertNoZombie(job.midName)
     // Still in its failure end window (journal/onFailure): enqueue would be dropped, so ask the user to retry shortly.
-    if (state().running.has(id)) throw new MidError("job_running")
+    // Own text: the shared job_running message talks about cancelling.
+    if (state().running.has(id)) throw new MidError("job_running", 409, RETRY_TOO_SOON)
     const active = await prisma.job.findFirst({ where: { midName: job.midName, status: { in: ACTIVE } }, select: { id: true } })
     if (active) throw new MidError("job_active")
     const res = await prisma.job.updateMany({

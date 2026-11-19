@@ -128,10 +128,26 @@ describe("quota", () => {
 })
 
 describe("operations", () => {
-  it("start = enable then start", async () => {
+  it("start = reset-failed, enable, start (a manual start always gets a fresh start-limit budget)", async () => {
     install("aaa")
     await handleRequest({ op: "start", name: "aaa" }, deps())
-    expect(calls).toEqual([["enable", "midhub-mid-aaa.service"], ["start", "midhub-mid-aaa.service"]])
+    expect(calls).toEqual([["reset-failed", "midhub-mid-aaa.service"], ["enable", "midhub-mid-aaa.service"], ["start", "midhub-mid-aaa.service"]])
+  })
+  it("restart = reset-failed, enable, restart", async () => {
+    install("aaa")
+    setActive("aaa")
+    expect(await handleRequest({ op: "restart", name: "aaa" }, deps())).toEqual({ ok: true })
+    expect(calls).toEqual([["reset-failed", "midhub-mid-aaa.service"], ["enable", "midhub-mid-aaa.service"], ["restart", "midhub-mid-aaa.service"]])
+  })
+  it("a failing reset-failed (unit not failed / not loaded) does not fail start, restart or removeUnit", async () => {
+    install("aaa")
+    runResult = (a) => (a[0] === "reset-failed" ? { code: 1, stdout: "Failed to reset failed state of unit midhub-mid-aaa.service: Unit midhub-mid-aaa.service not loaded." } : { code: 0, stdout: "" })
+    expect(await handleRequest({ op: "start", name: "aaa" }, deps())).toEqual({ ok: true })
+    expect(await handleRequest({ op: "restart", name: "aaa" }, deps())).toEqual({ ok: true })
+    expect(calls.filter((c) => c[0] === "start" || c[0] === "restart")).toHaveLength(2)
+    expect(await handleRequest({ op: "removeUnit", name: "aaa" }, deps())).toEqual({ ok: true })
+    expect(fs.existsSync(path.join(tmp, "systemd", "midhub-mid-aaa.service"))).toBe(false)
+    expect(calls.filter((c) => c[0] === "reset-failed")).toHaveLength(3) // attempted every time, failure ignored
   })
   it("stop = disable then stop", async () => {
     install("aaa")
@@ -174,7 +190,8 @@ describe("operations", () => {
     calls = []
     expect(await handleRequest({ op: "removeUnit", name: "aaa" }, deps())).toEqual({ ok: true })
     expect(fs.existsSync(f)).toBe(false)
-    expect(calls).toEqual([["stop", "midhub-mid-aaa.service"], ["disable", "midhub-mid-aaa.service"], ["daemon-reload"]])
+    // reset-failed after stop/disable: a failed unit's start-limit state must not leak into a re-install of the name.
+    expect(calls).toEqual([["stop", "midhub-mid-aaa.service"], ["disable", "midhub-mid-aaa.service"], ["reset-failed", "midhub-mid-aaa.service"], ["daemon-reload"]])
   })
 })
 

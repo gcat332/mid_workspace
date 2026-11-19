@@ -78,6 +78,16 @@ async function sc(deps: HandlerDeps, args: string[]): Promise<HelperResponse | n
   return r.code === 0 ? null : fail("systemctl_failed", `systemctl ${args[0]} failed (code ${r.code}): ${r.stdout.trim().slice(0, 500)}`)
 }
 
+/**
+ * MID units carry StartLimitIntervalSec/StartLimitBurst so a crash-looping MID (Restart=always) stops eventually.
+ * systemd counts manual starts against the same budget, so every explicit start/restart (UI, AgentHub, install job)
+ * clears it first; only systemd's own automatic restarts stay rate-limited. A non-zero exit (unit not failed /
+ * not loaded) is expected and ignored.
+ */
+async function resetFailed(unit: string, deps: HandlerDeps): Promise<void> {
+  await deps.systemctl.run(["reset-failed", unit])
+}
+
 async function startLike(op: "start" | "restart", name: string, deps: HandlerDeps): Promise<HelperResponse> {
   const unit = unitName(name)
   if (!(await exists(unitPath(name, deps)))) return fail("not_found", "unit is not installed")
@@ -89,8 +99,10 @@ async function startLike(op: "start" | "restart", name: string, deps: HandlerDep
   if (op === "start") {
     // Already running: still enable so it comes back after reboot.
     if (active.includes(unit)) return (await sc(deps, ["enable", unit])) ?? OK
+    await resetFailed(unit, deps)
     return (await sc(deps, ["enable", unit])) ?? (await sc(deps, ["start", unit])) ?? OK
   }
+  await resetFailed(unit, deps)
   return (await sc(deps, ["enable", unit])) ?? (await sc(deps, ["restart", unit])) ?? OK
 }
 
@@ -127,6 +139,8 @@ async function removeUnit(name: string, deps: HandlerDeps): Promise<HelperRespon
       return fail("systemctl_failed", `systemctl ${verb} failed (code ${r.code}): ${r.stdout.trim().slice(0, 500)}`)
     }
   }
+  // A failed unit's start-limit counter must not carry over into a re-install of the same name.
+  await resetFailed(unit, deps)
   await fs.rm(unitPath(name, deps), { force: true })
   return (await sc(deps, ["daemon-reload"])) ?? OK
 }

@@ -86,6 +86,28 @@ else
   no "cannot read $HELPER_SERVICE capabilities (MainPID '${hpid:-}')"
 fi
 
+# ── Gate 3c: the helper unit runs the root-owned copy (not code from the app-writable checkout) ─
+hdr "Gate 3c — $HELPER_SERVICE ExecStart is $NODE_BIN $HELPER_LIB/helper/main.js"
+# install.sh copies the unit from the app-owned checkout, so whoever can write the checkout could point ExecStart
+# back at app-writable code; gate 3 alone would still pass. `systemctl show -p ExecStart` prints:
+#   ExecStart={ path=/usr/bin/node ; argv[]=/usr/bin/node /usr/local/lib/midhub-helper/helper/main.js ; ignore_errors=no ; ... }
+# Prints the reason and returns 1 unless there is exactly one command and it is exactly the expected one.
+helper_exec_check() {
+  local out="$1" n path argv want="$NODE_BIN $HELPER_LIB/helper/main.js"
+  n=$(grep -o '{ path=' <<<"$out" | wc -l)
+  [ "$n" = "1" ] || { echo "expected exactly one ExecStart command, found $n"; return 1; }
+  path=$(sed -n 's/^ExecStart={ path=\([^ ;]*\) ; .*/\1/p' <<<"$out")
+  argv=$(sed -n 's/.* ; argv\[\]=\(.*\) ; ignore_errors=.*/\1/p' <<<"$out")
+  if [ "$path" = "$NODE_BIN" ] && [ "$argv" = "$want" ]; then return 0; fi
+  echo "path='$path' argv='$argv'"
+  return 1
+}
+if why=$(helper_exec_check "$(systemctl show -p ExecStart "$HELPER_SERVICE" 2>/dev/null)"); then
+  ok "ExecStart runs $HELPER_LIB/helper/main.js"
+else
+  no "ExecStart is not the root-owned copy ($why). Fix: restore ExecStart=$NODE_BIN $HELPER_LIB/helper/main.js in deploy/$HELPER_SERVICE.service, check the checkout for tampering, then sudo deploy/install.sh"
+fi
+
 # ── Gate 4: fs.protected_hardlinks ────────────────────────────────────────────
 hdr "Gate 4 — fs.protected_hardlinks=1 (helper chown -R over MID trees depends on it)"
 ph=$(sysctl -n fs.protected_hardlinks 2>/dev/null)

@@ -247,6 +247,7 @@ curl -s -X POST -H "Authorization: Bearer $AGENT_MIDHUB_TOKEN" \
 | `not_a_mid`, `invalid_xml` | 400 | not raised by agent routes in practice (MID folder/config validation used by other MidHub flows) |
 | `helper_down` | 503 | root helper not responding |
 | `systemctl_failed`, `internal` | 500 | helper/system failure; `detail` has more |
+| `systemctl_failed` (start limit) | 500 | `detail` contains `start-limit-hit` / "attempted too often" / "repeated too quickly": the MID crashed and was auto-restarted 5 times in 10 minutes, so systemd stopped restarting it. `message` says it is in a crash loop. Do not retry in a loop: read `logs?file=main` and `logs?file=wrapper`, fix the cause (bad file, missing jar, wrong config), then call `restart` once. Each explicit start/restart resets the limit, so the call itself is never what is refused |
 
 ## 5. Limits
 

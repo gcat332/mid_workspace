@@ -36,7 +36,8 @@ export const JOB_STATUS_LABELS: Record<string, string> = {
 }
 export const jobStatusLabel = (status: string): string => JOB_STATUS_LABELS[status] ?? status
 
-const ACTIVE = new Set(["queued", "pending", "running"])
+export const ACTIVE_JOB_STATUSES = ["queued", "pending", "running"]
+const ACTIVE = new Set(ACTIVE_JOB_STATUSES)
 export const isActiveJobStatus = (status: string): boolean => ACTIVE.has(status)
 
 const REMOVAL_KINDS = new Set(["uninstall", "cancel_install"])

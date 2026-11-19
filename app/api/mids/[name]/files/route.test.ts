@@ -9,6 +9,8 @@ vi.mock("@/lib/mids/files", async (orig) => ({
   listDir: vi.fn(async () => [{ name: "mid.sh" }]), dirReadOnly: vi.fn(async (_n: string, rel: string) => rel === "agent/bin"),
 }))
 vi.mock("@/lib/mids/registry", () => ({ getMid: vi.fn() }))
+// The lifecycle gate itself is covered in ../lifecycle-gate.test.ts (real DB); here the MID is always settled.
+vi.mock("@/lib/mids/lifecycle-gate", () => ({ assertSettled: vi.fn(async () => {}) }))
 
 const ctx = { params: Promise.resolve({ name: "m1" }) }
 const FIFTY = 50 * 1024 * 1024

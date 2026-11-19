@@ -209,6 +209,13 @@ helper itself when the copy changed. Restarting the helper does not stop running
   `wrapper.java.maxmemory` and then restore the value (two saves; the second restart is yours to choose), or install a fresh
   MID. No migration touches running MIDs; `systemctl daemon-reload` is done by the helper. Until then a new/old MID that
   stops itself after its first connect needs one manual Start.
+- Start limit (`start-limit-hit`): `StartLimitBurst=5` / `StartLimitIntervalSec=600` stop systemd's automatic restarts when a MID
+  crashes 5 times in 10 minutes (crash loop); the unit is then `failed` with `Result: start-limit-hit`. The helper runs
+  `systemctl reset-failed <unit>` before every Start/Restart (UI, AgentHub, install job) and in `removeUnit`, so manual and
+  AgentHub starts never count against the limit. If a MID shows as failed with this result: read its log (Log tab, or
+  `journalctl -u midhub-mid-<name> -n 100`), fix the cause, then press Start once in MidHub (or AgentHub calls `restart` once).
+  The UI/API message for this case says the MID is in a crash loop. By hand: `sudo systemctl reset-failed midhub-mid-<name>`
+  followed by a Start in MidHub.
 - Known limitation (log retention): MidHub writes `com.service_now.mid.logging.MIDLogFileHandler.count` (and `SecurityLogFileHandler.count`)
   into `agent/properties/glide.properties`, but the instance's MID Server properties override them on first connect (the MID logs
   `Changed properties saved to MID glide.properties file: [...MIDLogFileHandler.count=10]`). To keep 3 files, set the MID Server

@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth/helpers"
 import { recordAudit } from "@/lib/audit"
 import { callHelper } from "@/lib/helper/client"
 import { handleRouteError, readJsonObject } from "@/lib/http/route"
+import { assertSettled } from "@/lib/mids/lifecycle-gate"
 import { getMid } from "@/lib/mids/registry"
 import { lowMemoryResponse, startNeedsMemory } from "@/lib/mids/memory-guard"
 
@@ -30,7 +31,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ name: string }
     if (!body) return invalid("คำสั่งไม่ถูกต้อง ต้องเป็น start, stop, restart หรือ fixOwnership")
     const { action, confirmLowMemory } = body
 
-    const mid = await getMid((await ctx.params).name)
+    const { name } = await ctx.params
+    // fixOwnership stays available: it is the repair step the error messages point to (e.g. after a failed install).
+    if (action !== "fixOwnership") await assertSettled(name)
+    const mid = await getMid(name)
 
     if (startNeedsMemory(action, mid.status.state) && !confirmLowMemory) {
       const low = await lowMemoryResponse("กดยืนยันถ้าต้องการทำต่อ")

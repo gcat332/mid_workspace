@@ -532,8 +532,9 @@ describe("review fixes", () => {
     eng.registerKind("cancel_install", [{ name: "c", run: async () => { calls.push("cancel") } }])
     const job = await eng.createJob(alice, "install", "m-a", {})
     await until(async () => (await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status === "failed")
-    await expect(eng.retryJob(alice, job.id)).rejects.toMatchObject({ code: "job_running" })
-    await expect(eng.cancelJob(alice, job.id)).rejects.toMatchObject({ code: "job_running" })
+    // Retry gets its own text (the shared job_running text says "cannot cancel", which is wrong for a retry).
+    await expect(eng.retryJob(alice, job.id)).rejects.toMatchObject({ code: "job_running", status: 409, message: "งานยังปิดตัวไม่เสร็จ รอสักครู่แล้วกด ลองใหม่" })
+    await expect(eng.cancelJob(alice, job.id)).rejects.toMatchObject({ code: "job_running", status: 409, message: "งานกำลังทำงานอยู่ ยกเลิกไม่ได้ในตอนนี้" })
     gate.resolve()
     await eng.__idleForTests()
     await eng.retryJob(alice, job.id)

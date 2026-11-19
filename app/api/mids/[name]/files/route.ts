@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth/helpers"
 import { recordAudit } from "@/lib/audit"
 import { handleRouteError, readJsonObject } from "@/lib/http/route"
 import { MAX_UPLOAD_BYTES, dirReadOnly, listDir, mkdir, readText, remove, rename, upload, writeText } from "@/lib/mids/files"
+import { assertSettled } from "@/lib/mids/lifecycle-gate"
 import { MidError } from "@/lib/mids/names"
 
 type Ctx = { params: Promise<{ name: string }> }
@@ -42,6 +43,7 @@ export async function PUT(req: Request, ctx: Ctx) {
   try {
     const user = await requireUser()
     const { name } = await ctx.params
+    await assertSettled(name) // writes need an installed MID with no lifecycle job; reads (GET, download) do not
     const b = await readJsonObject(req)
     if (!b) throw bad()
     const path = str(b.path)
@@ -57,6 +59,7 @@ export async function POST(req: Request, ctx: Ctx) {
   try {
     const user = await requireUser()
     const { name } = await ctx.params
+    await assertSettled(name)
     const type = req.headers.get("content-type") ?? ""
     if (type.startsWith("multipart/form-data")) {
       const lenHeader = req.headers.get("content-length")
@@ -103,6 +106,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
   try {
     const user = await requireUser()
     const { name } = await ctx.params
+    await assertSettled(name)
     const path = new URL(req.url).searchParams.get("path") ?? ""
     const r = await remove(name, path)
     await recordAudit(user, "file.delete", name, { path: r.path })

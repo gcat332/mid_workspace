@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { HostView, MidView } from "@/lib/ui/status-view"
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }))
@@ -58,6 +58,18 @@ describe("MidPanel lifecycle", () => {
     expect(btn("ลบ").disabled).toBe(false)
     fireEvent.click(screen.getByRole("tab", { name: "ตั้งค่า" }))
     expect(screen.getByTestId("config-tab").textContent).toBe("null")
+  })
+
+  it("a server-side lifecycle refusal (409 job_active, e.g. Start on an `error` MID) is shown in ErrorNotice", async () => {
+    const msg = "MID นี้ยังไม่พร้อมใช้งาน (ผิดพลาด) รอให้เสร็จหรือให้ Admin ตรวจสอบก่อน"
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ code: "job_active", message: msg }, { status: 409 })))
+    try {
+      panel(mk({ state: "error", job: J("install", "waitConnected", "failed") }))
+      fireEvent.click(btn("Start"))
+      await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(msg))
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("an old failed job on a healthy MID shows no progress", () => {

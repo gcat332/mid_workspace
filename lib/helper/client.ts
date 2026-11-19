@@ -7,6 +7,11 @@ import { CLIENT_TIMEOUT_MS, HELPER_ERROR_CODES, type HelperRequest, type HelperR
 const HELPER_HINT = "ตรวจด้วย: systemctl status bsm-midhub-helper (และ journalctl -u bsm-midhub-helper -n 50)"
 const helperDown = (extra?: string) => new MidError("helper_down", undefined, undefined, extra ? `${HELPER_HINT}\n${extra}` : HELPER_HINT)
 
+/** systemctl's wording when a unit hit StartLimitBurst (old: "repeated too quickly", new: "attempted too often"). */
+const START_LIMIT_RE = /start-limit-hit|attempted too often|repeated too quickly/i
+const START_LIMIT_MESSAGE =
+  "MID นี้ล้มแล้วเริ่มใหม่เองซ้ำหลายครั้งเกินกำหนด (crash loop) systemd จึงหยุดเริ่มให้ ดูสาเหตุในแท็บ Log แก้ไขแล้วกด Start อีกครั้ง"
+
 function parse(buf: string): HelperResponse | null {
   try {
     const v = JSON.parse(buf) as Record<string, unknown>
@@ -50,5 +55,8 @@ export async function callHelper(req: HelperRequest): Promise<{ ok: true }> {
   if (res.ok) return res
   const code = (HELPER_ERROR_CODES as readonly string[]).includes(res.code) ? res.code : "internal"
   // Known codes use the shared Thai message/status; the raw helper text goes to `detail`.
-  throw new MidError(code, undefined, code === "quota_full" ? quotaFullMessage(env.maxRunning) : undefined, res.message)
+  const thai = code === "quota_full" ? quotaFullMessage(env.maxRunning)
+    : code === "systemctl_failed" && START_LIMIT_RE.test(res.message) ? START_LIMIT_MESSAGE
+    : undefined
+  throw new MidError(code, undefined, thai, res.message)
 }
