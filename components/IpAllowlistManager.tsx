@@ -67,9 +67,9 @@ export function IpAllowlistManager() {
     setErr(null)
     const lockout = locksMeOut(entries.filter((x) => x.id !== e.id).map((x) => x.cidr))
     setPending({
-      title: `Remove ${e.cidr}?`,
+      title: `Delete ${e.cidr}?`,
       body: lockout ? lockoutText : "IP ในช่วงนี้จะเข้าใช้งานไม่ได้อีก (ถ้ายังมีรายการอื่นเหลืออยู่)",
-      confirmLabel: "Remove",
+      confirmLabel: "Delete",
       run: async () => { await call(`/admin/ip-allowlist?id=${encodeURIComponent(e.id)}`, { method: "DELETE" }) },
     })
   }
@@ -83,7 +83,7 @@ export function IpAllowlistManager() {
       {myIp && !isLoopback(myIp) && (
         <p className="mb-3 text-xs text-gray-600">
           IP ของคุณที่เซิร์ฟเวอร์เห็น: <span className="font-mono text-gray-900">{myIp}</span>{" "}
-          ({wouldAllow(myIp, entries.map((e) => e.cidr)) ? "อนุญาต" : "ไม่อยู่ในรายการ"}){" "}
+          ({wouldAllow(myIp, entries.map((e) => e.cidr)) ? "Allowed" : "Not Listed"}){" "}
           <button type="button" className="text-blue-600 dark:text-blue-400 hover:underline" onClick={() => setCidr(myIp)}>Use This IP</button>
         </p>
       )}
@@ -106,7 +106,7 @@ export function IpAllowlistManager() {
                 <td className="px-4 py-3 font-mono text-gray-900">{e.cidr}</td>
                 <td className="px-4 py-3 text-gray-500">{e.note || "—"}</td>
                 <td className="px-4 py-3 text-right">
-                  <button type="button" className="text-red-600 hover:underline" onClick={() => remove(e)}>Remove</button>
+                  <button type="button" className="text-red-600 hover:underline" onClick={() => remove(e)}>Delete</button>
                 </td>
               </tr>
             ))}

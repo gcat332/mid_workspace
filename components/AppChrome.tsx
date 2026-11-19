@@ -25,7 +25,7 @@ export function AppChrome({ user, children }: { user: { email: string; role: str
           <ProfileMenu email={user.email} role={user.role} />
         </div>
       </header>
-      <nav aria-label="หลัก" className="shrink-0 h-11 flex items-center gap-5 md:gap-7 px-4 md:px-8 overflow-x-auto bg-gray-50/80 border-b border-gray-200 dark:bg-neutral-900 dark:border-neutral-700">
+      <nav aria-label="Main" className="shrink-0 h-11 flex items-center gap-5 md:gap-7 px-4 md:px-8 overflow-x-auto bg-gray-50/80 border-b border-gray-200 dark:bg-neutral-900 dark:border-neutral-700">
         <NavLinks isAdmin={isAdmin} />
       </nav>
       <div className="flex-1 min-w-0">{children}</div>

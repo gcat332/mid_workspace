@@ -138,7 +138,7 @@ export function InstanceStep({ isAdmin, state, onChange, onLabel }: Props) {
                   </span>
                   <span className="mt-0.5 block break-all pl-6 text-xs text-gray-600">{host(i.url)}</span>
                   <span className="mt-0.5 block break-all pl-6 text-xs text-gray-500">
-                    build: {i.buildstamp ?? "ยังไม่ทราบ"}{i.hasPassword ? ` · ทดสอบตอนบันทึก ${date(i.createdAt)}` : ""}
+                    Build: {i.buildstamp ?? "Unknown"}{i.hasPassword ? ` · Tested ${date(i.createdAt)}` : ""}
                   </span>
                 </label>
               </li>

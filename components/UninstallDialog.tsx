@@ -93,7 +93,7 @@ export function UninstallDialog({ mid, jobId: initialJobId = null, onClose: clos
             <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
               <p>ลบ record นี้ใน instance เองถ้าไม่ใช้แล้ว</p>
               {record
-                ? <a href={record} target="_blank" rel="noopener noreferrer" className="inline-block break-all text-blue-700 underline">เปิด record ของ {mid.midName ?? mid.name} ใน instance</a>
+                ? <a href={record} target="_blank" rel="noopener noreferrer" className="inline-block break-all text-blue-700 underline">Open in ServiceNow</a>
                 : <p className="text-xs">หา record ใน ServiceNow ได้ที่ MID Server ชื่อ “{mid.midName ?? mid.name}”</p>}
             </div>
           )}

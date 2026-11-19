@@ -83,7 +83,7 @@ describe("UninstallDialog", () => {
     type("mid-a")
     fireEvent.click(confirmBtn())
     expect(await screen.findByText("ลบ record นี้ใน instance เองถ้าไม่ใช้แล้ว")).toBeTruthy()
-    const a = screen.getByRole("link", { name: /เปิด record/ }) as HTMLAnchorElement
+    const a = screen.getByRole("link", { name: "Open in ServiceNow" }) as HTMLAnchorElement
     expect(a.href).toBe("https://dev1.service-now.com/ecc_agent_list.do?sysparm_query=name=sn%20mid%26a")
   })
 

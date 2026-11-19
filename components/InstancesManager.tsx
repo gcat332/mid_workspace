@@ -141,7 +141,7 @@ export function InstancesManager() {
           <div>
             <label className={labelCls} htmlFor="e-pass">Password</label>
             <input id="e-pass" type="password" value={ePass} onChange={(e) => setEPass(e.target.value)} autoComplete="new-password"
-              placeholder={editing.hasPassword ? "Set (blank = keep)" : "Not Set"} className={inputCls} />
+              placeholder={editing.hasPassword ? "ตั้งไว้แล้ว (เว้นว่าง = ไม่เปลี่ยน)" : "Not Set"} className={inputCls} />
           </div>
           <div className="flex gap-2 sm:col-span-3">
             <button type="submit" disabled={busy} className="btn-primary px-4 py-2 text-sm font-medium">Test and Save</button>

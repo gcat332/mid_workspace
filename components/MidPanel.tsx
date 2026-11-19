@@ -24,7 +24,7 @@ type TabId = (typeof TABS)[number]["id"]
 type Action = "start" | "stop" | "restart"
 type Pending = { action: Action; lowMemory?: string }
 
-const ACTION_TH: Record<Action, string> = { start: "Start", stop: "Stop", restart: "Restart" }
+const ACTION_LABEL: Record<Action, string> = { start: "Start", stop: "Stop", restart: "Restart" }
 const HOST_UNKNOWN = "อ่านสถานะเครื่องไม่ได้ จึงยังกด Start ไม่ได้ รอสักครู่หรือรีเฟรชหน้า"
 const NOT_YET = "Upgrade ยังไม่เปิดให้ใช้ในเวอร์ชันนี้"
 const JOB_BUSY = "มีงานกำลังทำอยู่"
@@ -205,9 +205,9 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
       {pending && (
         // One dialog instance for both steps so the opener (and focus restore) survives the low-memory handoff.
         <ConfirmDialog
-          title={pending.lowMemory ? "Low RAM. Continue?" : `${ACTION_TH[pending.action]} ${mid.name}?`}
+          title={pending.lowMemory ? "Low RAM. Continue?" : `${ACTION_LABEL[pending.action]} ${mid.name}?`}
           danger busy={busy}
-          confirmLabel={pending.lowMemory ? "Confirm" : `${ACTION_TH[pending.action]}`}
+          confirmLabel={pending.lowMemory ? "Confirm" : `${ACTION_LABEL[pending.action]}`}
           onCancel={() => setPending(null)} onConfirm={() => void send(pending.action, !!pending.lowMemory)}>
           {pending.lowMemory ??
             (pending.action === "stop"

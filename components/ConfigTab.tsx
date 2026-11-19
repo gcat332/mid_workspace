@@ -135,7 +135,7 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
       {err && (
         <div className="space-y-2">
           <ErrorNotice error={err} />
-          {stale && <button type="button" onClick={() => void load()} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`} title="การแก้ไขที่ยังไม่บันทึกจะหาย">Reload</button>}
+          {stale && <button type="button" onClick={() => void load()} className={`${btn} border-gray-300 text-gray-800 hover:bg-gray-50`} title="การแก้ไขที่ยังไม่บันทึกจะหาย">Refresh</button>}
         </div>
       )}
 
@@ -148,7 +148,7 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
             <input className={input} value={form.url} onChange={(e) => setF("url", e.target.value)} /></label>
           <label className="text-sm text-gray-700">Username
             <input className={input} value={form.username} onChange={(e) => setF("username", e.target.value)} autoComplete="off" /></label>
-          <label className="text-sm text-gray-700">Password
+          <label className="text-sm text-gray-700">Password <span className="text-xs text-gray-500">(เว้นว่าง = ไม่เปลี่ยน)</span>
             <input className={input} type="password" value={pw.password} onChange={(e) => { setSaved(false); setPw({ ...pw, password: e.target.value }) }} autoComplete="new-password"
               placeholder={form.hasPassword ? KEEP_PW : "Not Set"} /></label>
           <label className="text-sm text-gray-700">MID Server Name
@@ -163,7 +163,7 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
                 <input className={input} inputMode="numeric" value={form.proxyPort} onChange={(e) => setF("proxyPort", e.target.value)} /></label>
               <label className="text-sm text-gray-700">Proxy username
                 <input className={input} value={form.proxyUser} onChange={(e) => setF("proxyUser", e.target.value)} autoComplete="off" /></label>
-              <label className="text-sm text-gray-700">Proxy Password
+              <label className="text-sm text-gray-700">Proxy Password <span className="text-xs text-gray-500">(เว้นว่าง = ไม่เปลี่ยน)</span>
                 <input className={input} type="password" value={pw.proxyPassword} onChange={(e) => { setSaved(false); setPw({ ...pw, proxyPassword: e.target.value }) }} autoComplete="new-password"
                   placeholder={form.hasProxyPassword ? KEEP_PW : "Not Set"} /></label>
             </div>
