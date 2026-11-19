@@ -178,6 +178,14 @@ describe("signInFromAgentHub", () => {
     expect(arg.create).not.toHaveProperty("lastLoginAt")
   })
 
+  it("recordLogin: false and an existing admin: no write at all", async () => {
+    findUnique.mockResolvedValue({ id: "u5", email: "boss@x.com", role: "admin", lockedAt: null })
+    const s = await signInFromAgentHub("Boss@X.com", { recordLogin: false })
+    expect(s).toMatchObject({ userId: "u5", email: "boss@x.com", role: "admin" })
+    expect(upsert).not.toHaveBeenCalled()
+    expect(update).not.toHaveBeenCalled()
+  })
+
   it("first sign-in race: a unique-constraint error on the upsert falls back to the row the other request created", async () => {
     upsert.mockRejectedValueOnce(Object.assign(new Error("Unique constraint failed"), { code: "P2002" }))
     const s = await signInFromAgentHub("Race@X.com")

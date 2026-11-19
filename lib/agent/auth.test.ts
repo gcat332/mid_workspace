@@ -19,6 +19,9 @@ vi.mock("@/lib/db/client", () => ({
   },
 }))
 
+const audit = vi.hoisted(() => vi.fn(async () => undefined))
+vi.mock("@/lib/audit", () => ({ recordAudit: audit }))
+
 import { authenticateAgent, parseSessionInstances, cameDirectlyOverLoopback } from "./auth"
 import { agentRoute } from "./http"
 
@@ -44,6 +47,7 @@ beforeEach(() => {
   dbUser = { id: "u1", email: "alice@x.com", role: "member", lockedAt: null }
   findUnique.mockClear()
   upsert.mockClear()
+  audit.mockClear()
   update.mockClear()
   cidrs = []
 })
@@ -133,6 +137,32 @@ describe("authenticateAgent", () => {
   })
   it("missing email -> 403 agent_user", async () => {
     expect(await fail(req({ "x-midhub-actor-email": null }))).toMatchObject({ code: "agent_user", status: 403 })
+  })
+  it("invalid actor email (junk, whitespace, over 254 chars) -> 403 agent_user, no DB access, never truncated", async () => {
+    for (const email of ["x", "a b", `${"a".repeat(300)}@x.com`, `${"a".repeat(250)}@x.com`]) {
+      const e = await fail(req({ "x-midhub-actor-email": email }))
+      expect(e).toMatchObject({ code: "agent_user", status: 403 })
+      expect(e!.message).toContain("อีเมล")
+    }
+    expect(findUnique).not.toHaveBeenCalled()
+    expect(upsert).not.toHaveBeenCalled()
+    expect(await fail(req({ "x-midhub-actor-email": "ok.user@x.com" }))).toBeNull()
+  })
+  it("a new user is audited once as user.created; an existing admin writes nothing", async () => {
+    dbUser = null
+    await authenticateAgent(req())
+    expect(audit).toHaveBeenCalledTimes(1)
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({ userId: "new1", email: "alice@x.com" }), "user.created", undefined, { via: "agenthub", email: "alice@x.com" })
+    audit.mockClear(); upsert.mockClear()
+    dbUser = { id: "u1", email: "alice@x.com", role: "admin", lockedAt: null }
+    await authenticateAgent(req())
+    expect(upsert).not.toHaveBeenCalled()
+    expect(update).not.toHaveBeenCalled()
+    expect(audit).not.toHaveBeenCalled()
+    dbUser = { id: "u1", email: "alice@x.com", role: "member", lockedAt: null }
+    await authenticateAgent(req())
+    expect(upsert).toHaveBeenCalledTimes(1)
+    expect(audit).not.toHaveBeenCalled()
   })
   it("admin with an unknown email -> ok and the user is created as admin (never opened MidHub)", async () => {
     dbUser = null

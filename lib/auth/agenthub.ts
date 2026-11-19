@@ -17,6 +17,8 @@ export type AgentHubDenial = "signed_out" | "not_admin" | "unreachable"
 export type AgentHubLookup = { ok: true; email: string } | { ok: false; reason: AgentHubDenial }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+$/
+/** Shared by the browser path and the Agent API: shape check plus the 254-char limit (never truncate). */
+export const isValidEmail = (v: string): boolean => v.length <= 254 && EMAIL_RE.test(v)
 // RFC 6265 cookie-octets (no CTLs, whitespace, DQUOTE, comma, semicolon, backslash): anything else could not have
 // come from AgentHub and must not be pasted into a header.
 const COOKIE_VALUE_RE = /^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]{1,4096}$/
@@ -55,7 +57,7 @@ export async function lookupAgentHubAdmin(sessionCookie: string | undefined): Pr
   }
   const { email, role } = (typeof body === "object" && body !== null ? body : {}) as { email?: unknown; role?: unknown }
   if (role !== "admin") return typeof role === "string" ? deny("not_admin") : unreachable("status 200 but no role")
-  if (typeof email !== "string" || email.length > 254 || !EMAIL_RE.test(email)) return unreachable("status 200 but no valid email")
+  if (typeof email !== "string" || !isValidEmail(email)) return unreachable("status 200 but no valid email")
   return { ok: true, email: email.toLowerCase() }
 }
 
@@ -74,17 +76,22 @@ function networkCause(err: unknown): string {
 
 /**
  * Turns a confirmed AgentHub admin into a MidHub session: upserts the user as admin (records last sign-in) and
- * returns the payload to sign. `recordLogin: false` (Agent API) skips lastLoginAt; callers write the auth.login audit row themselves. A MidHub lock still wins over AgentHub: throws MidError("account_locked").
+ * returns the payload to sign. `recordLogin: false` (Agent API) leaves lastLoginAt alone and skips the write for an existing admin; `onCreated` runs once when this call created the row. A MidHub lock still wins over AgentHub: throws MidError("account_locked").
  */
-export async function signInFromAgentHub(email: string, opts: { recordLogin?: boolean } = {}): Promise<SessionPayload> {
+export async function signInFromAgentHub(email: string, opts: { recordLogin?: boolean; onCreated?: (u: { userId: string; email: string }) => Promise<void> } = {}): Promise<SessionPayload> {
   const recordLogin = opts.recordLogin ?? true
   const addr = email.toLowerCase()
-  const existing = await prisma.user.findUnique({ where: { email: addr }, select: { lockedAt: true } })
+  const existing = await prisma.user.findUnique({ where: { email: addr }, select: { id: true, email: true, role: true, lockedAt: true } })
   if (existing && isLocked(existing.lockedAt)) throw new MidError("account_locked")
+  if (existing && existing.role === "admin" && !recordLogin) {
+    const at = Math.floor(Date.now() / 1000)
+    return { userId: existing.id, email: existing.email, role: "admin", authAt: at, ahAt: at }
+  }
   const now = new Date()
   // Agent API calls (recordLogin: false) are not sign-ins: they must not touch lastLoginAt.
   const update = recordLogin ? { role: "admin", lastLoginAt: now } : { role: "admin" }
   let user: { id: string; email: string }
+  let created = !existing
   try {
     user = await prisma.user.upsert({
       where: { email: addr },
@@ -96,8 +103,10 @@ export async function signInFromAgentHub(email: string, opts: { recordLogin?: bo
   } catch (e) {
     // Two first-ever sign-ins racing: the other request created the row between our lookup and insert.
     if ((e as { code?: string }).code !== "P2002") throw e
+    created = false
     user = await prisma.user.update({ where: { email: addr }, data: update, select: { id: true, email: true } })
   }
+  if (created) await opts.onCreated?.({ userId: user.id, email: user.email })
   const at = Math.floor(now.getTime() / 1000)
   return { userId: user.id, email: user.email, role: "admin", authAt: at, ahAt: at }
 }

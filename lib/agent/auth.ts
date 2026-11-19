@@ -1,9 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto"
 import { env } from "@/lib/env"
-import { signInFromAgentHub } from "@/lib/auth/agenthub"
+import { isValidEmail, signInFromAgentHub } from "@/lib/auth/agenthub"
 import type { SessionPayload } from "@/lib/auth/jwt"
 import { normalizeInstanceUrl } from "@/lib/instances/url"
 import { blockedClientIp, ipBlockedResponse } from "@/lib/net/ip-gate"
+import { recordAudit } from "@/lib/audit"
 import { MidError } from "@/lib/mids/names"
 
 export type AgentCaller = { user: SessionPayload; taskId: string; sessionInstances: string[] }
@@ -99,18 +100,25 @@ export async function authenticateAgent(req: Request): Promise<AgentCaller> {
     throw new MidError("agent_auth", 400, "AgentHub ส่ง X-MidHub-Session-Id ไม่ถูกต้อง ตรวจการตั้งค่าฝั่ง AgentHub")
   }
 
-  const email = (req.headers.get("x-midhub-actor-email") ?? "").trim().toLowerCase().slice(0, 254)
+  const email = (req.headers.get("x-midhub-actor-email") ?? "").trim().toLowerCase()
   // AgentHub sends the actor's role read from its own DB on this request (never from the JWT). Only exactly "admin" passes.
   if (!email || req.headers.get("x-midhub-actor-role") !== "admin") {
-    throw new MidError("agent_user", 403, `ต้องเป็น admin ของ AgentHub (บัญชี ${email || "(ไม่ระบุ)"})`)
+    throw new MidError("agent_user", 403, `ต้องเป็น admin ของ AgentHub (บัญชี ${email.slice(0, 80) || "(ไม่ระบุ)"})`)
+  }
+  if (!isValidEmail(email)) {
+    throw new MidError("agent_user", 403, "อีเมลผู้ใช้ที่ AgentHub ส่งมา (X-MidHub-Actor-Email) ไม่ถูกต้อง ตรวจการตั้งค่าฝั่ง AgentHub")
   }
   let user: SessionPayload
   try {
     // Upserts the admin (a first-time actor has never opened MidHub); no session, cookie or auth.login audit row.
-    user = await signInFromAgentHub(email, { recordLogin: false })
+    user = await signInFromAgentHub(email, {
+      recordLogin: false,
+      // Only a brand-new account is audited (traceability); calls for existing users write nothing.
+      onCreated: (u) => recordAudit({ userId: u.userId, email: u.email, role: "admin", ahAt: Math.floor(Date.now() / 1000) }, "user.created", undefined, { via: "agenthub", email: u.email }),
+    })
   } catch (e) {
     if (e instanceof MidError && e.code === "account_locked") {
-      throw new MidError("agent_user", 403, `บัญชี ${email} ถูกล็อกใน MidHub ให้ Admin ปลดล็อกในหน้า Users`)
+      throw new MidError("agent_user", 403, `บัญชี ${email} ถูกล็อกใน MidHub ให้ Admin ปลดล็อกที่หน้า Admin > ผู้ใช้`)
     }
     throw e
   }

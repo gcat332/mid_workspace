@@ -107,6 +107,8 @@ sub-task ที่ Java แยกส่งผ่าน `/subtasks` ได้ `AG
 | `agent_access` | MID เปิด "อนุญาตให้ AgentHub แก้ไฟล์" ไว้ | "MID นี้ยังไม่เปิดให้ AgentHub แก้ ให้เปิดในหน้า MidHub แท็บภาพรวม" |
 | `mid_ready` | MID ไม่ได้อยู่ระหว่าง job และ state = installed | "MID นี้กำลังมีงานอยู่ (<stage>) รอให้เสร็จก่อน" |
 
+_`user_registered` is superseded by docs/superpowers/specs/2026-11-19-midhub-agenthub-sso-design.md (actor must be an AgentHub admin)._
+
 - **`agent_access` เป็นสวิตช์ต่อ MID ค่าเริ่มต้นปิด** [ผู้ออกแบบ]: เพราะ spec หลักไม่แยกข้อมูลระหว่างผู้ใช้ สวิตช์นี้ทำให้ MID ของ POC อื่นที่ชี้ instance เดียวกันไม่ถูก Java ของคนอื่นแก้โดยไม่ตั้งใจ — member เปิด/ปิดได้ใน MidHub และบันทึก audit
 - `instance_match` คือการกันพลาด ไม่ใช่ขอบเขตสิทธิ์ (`.env` แก้ได้) สิทธิ์จริงมาจากบัญชี MidHub ของผู้ใช้ + `agent_access`
 
