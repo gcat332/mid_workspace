@@ -188,6 +188,33 @@ describe("fixOwnership", () => {
       { file: "/usr/bin/setpriv", args: ["--reuid=midsvc", "--regid=midhub", "--clear-groups", "/usr/bin/chmod", "-R", "g+rwX", "--", dir] },
     ])
   })
+  it("reports a chown failure as fix_ownership_failed with bounded detail", async () => {
+    fs.mkdirSync(path.join(tmp, "root", "mids", "aaa"))
+    const r = await handleRequest({ op: "fixOwnership", name: "aaa" }, deps({ exec: async () => ({ code: 1, stdout: "x".repeat(2000) }) }))
+    expect(r).toMatchObject({ ok: false, code: "fix_ownership_failed" })
+    const msg = (r as { message: string }).message
+    expect(msg).toContain("chown")
+    expect(msg.length).toBeLessThanOrEqual(300)
+  })
+  it("reports a chmod failure with command and stderr tail", async () => {
+    fs.mkdirSync(path.join(tmp, "root", "mids", "aaa"))
+    const exec = async (file: string) => (file.endsWith("setpriv") ? { code: 1, stdout: "chmod: changing permissions of 'f': Operation not permitted\n" } : { code: 0, stdout: "" })
+    const r = await handleRequest({ op: "fixOwnership", name: "aaa" }, deps({ exec }))
+    expect(r).toMatchObject({ ok: false, code: "fix_ownership_failed" })
+    expect((r as { message: string }).message).toMatch(/chmod.*Operation not permitted/)
+  })
+  it("tolerates chmod failing only on vanished files", async () => {
+    fs.mkdirSync(path.join(tmp, "root", "mids", "aaa"))
+    const exec = async (file: string) =>
+      file.endsWith("setpriv") ? { code: 1, stdout: "chmod: cannot access 'a/b': No such file or directory\nchmod: cannot access 'c': No such file or directory\n" } : { code: 0, stdout: "" }
+    expect(await handleRequest({ op: "fixOwnership", name: "aaa" }, deps({ exec }))).toEqual({ ok: true })
+  })
+  it("does not tolerate mixed ENOENT and other chmod errors", async () => {
+    fs.mkdirSync(path.join(tmp, "root", "mids", "aaa"))
+    const exec = async (file: string) =>
+      file.endsWith("setpriv") ? { code: 1, stdout: "chmod: cannot access 'a': No such file or directory\nchmod: changing permissions of 'b': Operation not permitted\n" } : { code: 0, stdout: "" }
+    expect(await handleRequest({ op: "fixOwnership", name: "aaa" }, deps({ exec }))).toMatchObject({ ok: false, code: "fix_ownership_failed" })
+  })
   it("refuses a symlinked MID dir", async () => {
     const target = path.join(tmp, "elsewhere")
     fs.mkdirSync(target)

@@ -131,6 +131,18 @@ async function removeUnit(name: string, deps: HandlerDeps): Promise<HelperRespon
   return (await sc(deps, ["daemon-reload"])) ?? OK
 }
 
+/** Failing command + tail of its output (stdout includes stderr), <= 300 chars; the dir path is the only variable part. */
+function failDetail(cmd: string, r: { code: number; stdout: string }): string {
+  const head = `${cmd} -R failed (code ${r.code}): `
+  const out = r.stdout.trim().replace(/\s+/g, " ")
+  return head + (out.length > 300 - head.length ? "..." + out.slice(-(300 - head.length - 3)) : out)
+}
+
+function onlyVanished(out: string): boolean {
+  const lines = out.split("\n").filter((l) => l.trim() !== "")
+  return lines.length > 0 && lines.every((l) => /: No such file or directory$/.test(l.trim()))
+}
+
 async function fixOwnership(name: string, deps: HandlerDeps): Promise<HelperResponse> {
   // SECURITY: <root>/mids is group-writable by the app group, so the app user could swap mids/<name> for a symlink
   // (e.g. to /etc) and have this root process chown it. Refuse unless every component is a real directory.
@@ -151,8 +163,10 @@ async function fixOwnership(name: string, deps: HandlerDeps): Promise<HelperResp
   }
   if ((await fs.realpath(dir)) !== path.resolve(dir)) return fail("invalid_request", "refusing: path resolves elsewhere")
   const chown = await deps.exec(CHOWN, ["-R", "-P", "-h", "midsvc:midhub", dir])
-  if (chown.code !== 0) return fail("systemctl_failed", `chown failed: ${chown.stdout.trim().slice(0, 500)}`)
+  if (chown.code !== 0) return fail("fix_ownership_failed", failDetail("chown", chown))
   const chmod = await deps.exec(SETPRIV, ["--reuid=midsvc", "--regid=midhub", "--clear-groups", CHMOD, "-R", "g+rwX", "--", dir])
-  if (chmod.code !== 0) return fail("systemctl_failed", `chmod failed: ${chmod.stdout.trim().slice(0, 500)}`)
+  // The running MID creates/deletes files while chmod -R walks the tree: a vanished entry makes GNU chmod exit 1 with
+  // only "No such file or directory" lines. That is harmless (nothing left to chmod), so only that case is tolerated.
+  if (chmod.code !== 0 && !onlyVanished(chmod.stdout)) return fail("fix_ownership_failed", failDetail("chmod", chmod))
   return OK
 }

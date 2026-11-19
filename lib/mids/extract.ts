@@ -30,7 +30,9 @@ export function checkListing(namesOut: string, longOut: string): void {
   let count = 0
   let total = 0
   for (const line of longOut.split("\n")) {
-    const m = /^([-dlcbps?][-rwxsStT]{9})\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\S+\s+\S+\s+\S+\s(.*)$/.exec(line)
+    // Unix modes are 10 chars; FAT/MS-DOS hosts print 7: [-d][-r][-w][-x][-a][-h][-s] (zipinfo(1): dir, r, w, x, archive,
+    // hidden, system). The FAT form can only be a file or directory, so link/device rejection below still holds.
+    const m = /^([-dlcbps?][-rwxsStT]{9}|[-d][-r][-w][-x][-a][-h][-s])\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\S+\s+\S+\s+\S+\s(.*)$/.exec(line)
     if (!m) continue
     count++
     if (!"-d?".includes(m[1][0])) throw bad(m[3]) // symlink, device, fifo ...

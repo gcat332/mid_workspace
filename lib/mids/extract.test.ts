@@ -185,3 +185,41 @@ describe("extractPackage", () => {
     expect(fs.existsSync(path.join(mids, "m1/agent/bin/mid.sh"))).toBe(true)
   })
 })
+
+describe("checkListing FAT (MS-DOS attribute) modes", () => {
+  const unx = (size: number, name: string) => `-rw-r--r--  3.0 unx ${String(size).padStart(8)} bl defN 26-Oct-13 16:48 ${name}`
+  const fat = (size: number, name: string, mode = "-rw----") => `${mode}     2.0 fat ${String(size).padStart(8)} bl defN 26-Oct-13 16:48 ${name}`
+  const meta = ["META-INF/MANIFEST.MF", "META-INF/GENERAL_.SF", "META-INF/GENERAL_.RSA"]
+  const agent = ["agent/bin/mid.sh", "agent/config.xml"]
+  it("accepts the real FAT META-INF lines mixed with unx lines", () => {
+    const names = [...meta, ...agent]
+    const long = [fat(134050, meta[0]), fat(134255, meta[1]), fat(11995, meta[2]), ...agent.map((n) => unx(10, n))].join("\n")
+    expect(() => checkListing(names.join("\n"), long)).not.toThrow()
+  })
+  it("does not silently count a FAT-form line with an unexpected type char", () => {
+    const names = [...meta, ...agent]
+    const long = [fat(1, meta[0], "lrw----"), fat(1, meta[1]), fat(1, meta[2]), ...agent.map((n) => unx(10, n))].join("\n")
+    expect(() => checkListing(names.join("\n"), long)).toThrow(expect.objectContaining({ code: "zip_invalid" }))
+  })
+  it("still rejects a Unix symlink and device", () => {
+    for (const t of ["l", "c"]) {
+      const long = [`${t}rwxrwxrwx  3.0 unx       10 bl defN 26-Oct-13 16:48 ${agent[0]}`, unx(1, agent[1])].join("\n")
+      expect(() => checkListing(agent.join("\n"), long)).toThrow(expect.objectContaining({ code: "zip_invalid" }))
+    }
+  })
+  it("passes a realistic slice of the real zipinfo output", () => {
+    const names = [...meta, ...agent, "agent/lib/wrapper.jar"]
+    const long = [
+      "Archive:  /opt/midhub/packages/x.zip",
+      "Zip file size: 488278604 bytes, number of entries: 6",
+      fat(134050, meta[0]),
+      fat(134255, meta[1]),
+      fat(11995, meta[2]),
+      `-rwxr-xr-x  3.0 unx     4096 bl defN 26-Oct-13 16:48 ${agent[0]}`,
+      unx(2048, agent[1]),
+      unx(99999, "agent/lib/wrapper.jar"),
+      "6 files, 400000 bytes uncompressed, 300000 bytes compressed:  25.0%",
+    ].join("\n")
+    expect(() => checkListing(names.join("\n"), long)).not.toThrow()
+  })
+})

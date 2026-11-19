@@ -50,6 +50,7 @@ const ERRORS = {
   agent_user: [403, "ผู้ใช้ยังไม่มีสิทธิ์ใช้ MidHub ให้ Admin เพิ่มในหน้า Users"],
   agent_check_failed: [403, "MID นี้ยังไม่ผ่านเงื่อนไขสำหรับ AgentHub ตรวจรายการเช็กแล้วลองใหม่"],
   exists: [409, "มีไฟล์ชื่อนี้อยู่แล้ว อ่านไฟล์ก่อนเพื่อเอา hash (content=1) แล้วส่ง hash นั้นเป็น baseHash เพื่อแก้ไขแทนการสร้างใหม่"],
+  fix_ownership_failed: [500, "ตั้งเจ้าของ/สิทธิ์ไฟล์ของ MID ไม่สำเร็จ (chown/chmod) ดูคำสั่งและข้อความผิดพลาดในรายละเอียด แล้วกด ซ่อมสิทธิ์ไฟล์ ใหม่ หากยังไม่ได้ให้แจ้ง Admin"],
   conflict: [409, "การดำเนินการนี้ขัดแย้งกับสถานะปัจจุบัน รีเฟรชหน้าแล้วลองใหม่"],
 } as const satisfies Record<string, readonly [number, string]>
 
@@ -57,7 +58,17 @@ export type MidErrorCode = keyof typeof ERRORS
 
 export { quotaFullMessage } from "./messages"
 
+// Next.js may bundle this module into several server chunks, giving several MidError classes; a plain `instanceof`
+// then fails across chunks. Every instance carries a global-registry brand and `instanceof MidError` checks it.
+const MID_ERROR_BRAND = Symbol.for("midhub.MidError")
+
 export class MidError extends Error {
+  readonly [MID_ERROR_BRAND] = true
+  static [Symbol.hasInstance](v: unknown): boolean {
+    // Subclasses (AgentCheckError ...) stay strict: only MidError itself accepts any branded object.
+    if (this === MidError) return typeof v === "object" && v !== null && (v as Record<symbol, unknown>)[MID_ERROR_BRAND] === true
+    return Function.prototype[Symbol.hasInstance].call(this, v)
+  }
   readonly code: string
   readonly status: number
   readonly detail?: string

@@ -203,7 +203,7 @@ export async function importMid(name: string, user: SessionPayload): Promise<Mid
     await callHelper({ op: "fixOwnership", name })
   } catch (e) {
     fixOwnership = `failed: ${(e as { code?: string }).code ?? "internal"}`
-    console.warn(`[registry] fixOwnership after importing ${name} failed:`, (e as Error).message)
+    console.warn(`[registry] fixOwnership after importing ${name} failed:`, (e as Error).message, (e as { detail?: string }).detail ?? "")
   }
   await recordAudit(user, "mid.import", name, { instanceUrl: url, revived: Boolean(existing), ...(fixOwnership ? { fixOwnership } : {}) })
   return summarize(row)

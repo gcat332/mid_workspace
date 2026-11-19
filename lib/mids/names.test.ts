@@ -59,3 +59,20 @@ it("quota_full text is built from the configured maximum (M4)", () => {
   expect(quotaFullMessage(6)).toBe("รันครบ 6 ตัวแล้ว ให้หยุดตัวอื่นก่อน")
   expect(new MidError("quota_full").message).not.toMatch(/\d/)
 })
+
+describe("MidError cross-chunk identity", () => {
+  it("accepts an object from a separately constructed copy (brand + fields)", async () => {
+    const { MidError } = await import("./names")
+    const foreign = Object.assign(new Error("x"), { code: "zip_invalid", status: 400, detail: "d" })
+    expect(foreign instanceof MidError).toBe(false)
+    Object.defineProperty(foreign, Symbol.for("midhub.MidError"), { value: true })
+    expect(foreign instanceof MidError).toBe(true)
+    expect((null as unknown as object) instanceof MidError).toBe(false)
+  })
+  it("keeps subclasses strict", async () => {
+    const { MidError } = await import("./names")
+    const { AgentCheckError } = await import("../agent/checks")
+    expect(new MidError("internal") instanceof AgentCheckError).toBe(false)
+    expect(new AgentCheckError("m", []) instanceof MidError).toBe(true)
+  })
+})
