@@ -36,7 +36,7 @@ vi.mock("@/lib/db/client", () => {
 import { MidError } from "./names"
 import { deps, getMid, hooks, importMid, listMids } from "./registry"
 
-const user = { userId: "u1", email: "a@x.com", role: "member" as const, authAt: 0 }
+const user = { userId: "u1", email: "a@x.com", role: "member" as const, authAt: 0, ahAt: 0 }
 const CFG = (url: string, name: string) =>
   `<parameters>\n<parameter name="url" value="${url}"/>\n<parameter name="name" value="${name}"/>\n</parameters>\n`
 const status = { state: "running" as const, pid: 1, memoryBytes: 10, since: null }

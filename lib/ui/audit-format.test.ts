@@ -44,3 +44,11 @@ it("shows via: agenthub and the taskId first in the detail pairs", () => {
     ["ผ่าน", "agenthub"], ["Task (AgentHub)", "t"], ["เช็กที่ไม่ผ่าน", "agent_access, mid_ready"],
   ])
 })
+
+it("labels sign-in via AgentHub, denials and lock/unlock (AgentHub SSO)", () => {
+  expect(actionLabel("auth.login")).toBe("เข้าสู่ระบบ (ผ่าน AgentHub)")
+  expect(actionLabel("auth.denied")).toBe("ถูกปฏิเสธการเข้าใช้ MidHub")
+  expect(detailPairs(JSON.stringify({ via: "agenthub" }))).toEqual([["ผ่าน", "agenthub"]])
+  expect(detailPairs(JSON.stringify({ reason: "not_admin" }))).toEqual([["เหตุผล", "ไม่ใช่ admin ของ AgentHub"]])
+  expect(detailPairs(JSON.stringify({ targetEmail: "m@x.com", lock: true }))).toEqual([["ผู้ใช้", "m@x.com"], ["ล็อก", "ใช่"]])
+})

@@ -44,7 +44,7 @@ model IpAllowlist {
 // Sign-in audit trail (same shape as AgentHub's AuthEvent).
 model AuthLog {
   id        String   @id @default(cuid())
-  event     String // login_ok | login_refused | sso_ok | sso_failed | unlocked
+  event     String // login_ok | login_refused | sso_ok | sso_failed | unlocked (no longer written: local login removed)
   reason    String   @default("")
   email     String   @default("")
   ip        String   @default("")

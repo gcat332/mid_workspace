@@ -16,7 +16,7 @@ process.env.MIDHUB_VAULT_KEY = Buffer.alloc(32, 7).toString("base64")
 const BS = "australia-02-11-2026__patch7-11-10-2026_11-12-2026_0100"
 const INST_PW = "inst-secret-PW-123"
 const PROXY_PW = "proxy-secret-PW-456"
-const admin = { userId: "admin1", email: "a@x.com", role: "admin" as const }
+const admin = { userId: "admin1", email: "a@x.com", role: "admin" as const, ahAt: 0 }
 
 let eng: typeof import("./engine")
 let inst: typeof import("./install")

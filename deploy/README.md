@@ -35,7 +35,7 @@ writable, `fs.protected_hardlinks=1`, SQLite `journal_mode=wal`, `better-sqlite3
 `/midhub/login` on loopback, `/midhub` + `/midhub/login` via Caddy on both sites (`https://10.4.150.142` with
 `-k`, `http://dev-agenthub.mfec.co.th` resolved to loopback), `/midhub/api/agent/mids` (also `%61gent`) = 404
 via Caddy, loopback agent API without the secret refused, AgentHub `/` still 200/307, `MIDHUB_AGENT_SECRET`
-absent or >= 32 chars, `.env.local` mode 0600. MANUAL: SSO redirect URI, admin password rotated, spike MID
+absent or >= 32 chars, `.env.local` mode 0600. MANUAL: an AgentHub admin can open /midhub, spike MID
 validated in the instance.
 
 ## 1. Build (as bsmmidhub, in APP_DIR)
@@ -59,19 +59,30 @@ if you want to run `prisma migrate deploy` before install.sh, create it yourself
     cat > .env.local <<ENV
     DATABASE_URL=file:/opt/midhub/db/midhub.db
     JWT_SECRET=$(openssl rand -base64 48)
-    ADMIN_EMAIL=you@example.com
-    ADMIN_PASSWORD=$(openssl rand -base64 18)
     MIDHUB_VAULT_KEY=$(openssl rand -base64 32)
     MIDHUB_ROOT=/opt/midhub
     MIDHUB_MAX_RUNNING=4
-    PUBLIC_URL=https://10.4.150.142
+    AGENTHUB_URL=http://127.0.0.1:3000
     ENV
     chmod 600 .env.local
 
 An absolute `file:` path resolves identically for the app and for `prisma migrate`. `JWT_SECRET` must
 be >= 32 chars; `MIDHUB_VAULT_KEY` is base64 of exactly 32 bytes (losing it makes stored instance
-passwords unrecoverable - back it up). `PUBLIC_URL` (a single value, scheme+host, no path) decides the
-host used in OIDC redirect URIs, so SSO works only when users reach MidHub via that hostname.
+passwords unrecoverable - back it up). `AGENTHUB_URL` (default `http://127.0.0.1:3000`) is where MidHub asks
+AgentHub who is signed in; it must be a loopback `http://` URL with a port (anything else is refused at start).
+`ADMIN_EMAIL`, `ADMIN_PASSWORD` and `PUBLIC_URL` are no longer used; if an older `.env.local` still has them they
+are ignored (remove them when convenient).
+
+### Who can sign in
+
+Only **AgentHub admins**, through their AgentHub session: MidHub has no login form, passwords, SSO or user
+management of its own. Opening `/midhub` without a MidHub session sends the browser to
+`/midhub/api/auth/agenthub`, which asks AgentHub (`GET $AGENTHUB_URL/api/auth/me` with the browser's AgentHub
+`session` cookie, over loopback) and either signs the admin in (the user row is created on first sign-in) or shows
+the access page `/midhub/login` with the reason (not signed in to AgentHub / not an AgentHub admin / AgentHub
+unreachable / locked in MidHub) and a link to AgentHub's `/login`. Every 5 minutes a session is re-checked with
+AgentHub: a demoted or signed-out admin loses MidHub on the next request. If AgentHub is down, MidHub cannot be
+used (fail closed). Logging out of MidHub clears only MidHub's cookie.
 
 ## 3. Install units (root)
 
@@ -155,9 +166,10 @@ Then:
 ## 5. Verify
 
 - `systemctl is-active bsm-midhub bsm-midhub-helper` -> `active active`
-- `https://<host>/midhub` shows the login page
-- AgentHub still works at `/`; its `session` cookie does not log you into MidHub (cookie is `midhub_session`, Path=/midhub)
-- Log in as admin; import `spike1`; Stop -> Start -> Restart work
+- `https://<host>/midhub` signed out of AgentHub shows the access page ("ยังไม่ได้เข้าสู่ระบบ AgentHub")
+- Sign in to AgentHub at `https://<host>/login` as an admin, then open `/midhub`: you are in (no second login).
+  A non-admin AgentHub account gets "ไม่ใช่ admin ของ AgentHub" instead
+- Import `spike1`; Stop -> Start -> Restart work
 - Starting a 5th MID is refused
 - Config edit + rollback works
 - Upload into `agent/extlib` works; into `agent/bin` is refused
@@ -170,15 +182,17 @@ Then:
 
 ### Locked out?
 
-Three wrong passwords lock an account for 15 minutes (SSO is refused while locked, too); it then unlocks by
-itself, or an admin can unlock it under Admin -> ผู้ใช้. Break-glass when the only admin is locked out:
-`sudo systemctl restart bsm-midhub` - on boot the app clears the lock on `ADMIN_EMAIL` (its password is never
-overwritten).
+There are no passwords to get wrong. An admin can lock a user under Admin -> ผู้ใช้ (that person then cannot use
+MidHub even while still an AgentHub admin) and unlock them there; a lock lasts until unlocked. Admins cannot lock
+themselves. Break-glass if every admin is locked, as `bsmmidhub` in APP_DIR:
+`echo 'UPDATE "User" SET "lockedAt" = NULL;' | DATABASE_URL=file:/opt/midhub/db/midhub.db npx prisma db execute --stdin`. To take someone's access away for good, remove their admin role in AgentHub.
 
-## 6. SSO (optional)
+## 6. Sign-in via AgentHub
 
-Add the redirect URI (`<PUBLIC_URL>/midhub/api/auth/oidc/callback`) in the IdP; configure it at `/midhub/admin/idp`; add a team member email under users;
-verify SSO login. An email not in the user table must get the message "ยังไม่ได้รับสิทธิ์".
+Nothing to configure beyond `AGENTHUB_URL`. The upgrade from the old local login (migration
+`agenthub_sso_clear_password_locks`) clears old password locks once; existing MidHub sessions become invalid and
+users simply open `/midhub` again while signed in to AgentHub. The old SSO settings (IdP) and stored passwords are
+no longer used.
 
 ## 7. Updating
 

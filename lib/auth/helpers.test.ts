@@ -22,7 +22,7 @@ vi.mock("@/lib/db/client", () => ({ prisma: { user: { findUnique: vi.fn(async ()
 describe("session revalidation against the DB", () => {
   beforeEach(async () => {
     dbUser = { email: "a@x.com", role: "admin", lockedAt: null, sessionsValidAfter: null }
-    cookieValue = await signToken({ userId: "u1", email: "stale@x.com", role: "admin" })
+    cookieValue = await signToken({ userId: "u1", email: "stale@x.com", role: "admin", ahAt: Math.floor(Date.now() / 1000) })
   })
 
   it("uses the DB's email and role, not the token's", async () => {
@@ -49,17 +49,33 @@ describe("session revalidation against the DB", () => {
     await expect(requireUser()).rejects.toMatchObject({ status: 401 })
   })
 
-  it("a lock older than 15 minutes has expired and no longer revokes the session (I3)", async () => {
-    dbUser = { ...dbUser!, lockedAt: new Date(Date.now() - 16 * 60_000) }
+  it("an admin's lock does not expire on its own (no password lockout any more)", async () => {
+    dbUser = { ...dbUser!, lockedAt: new Date(Date.now() - 30 * 24 * 3600_000) }
     const { requireUser } = await import("@/lib/auth/helpers")
-    await expect(requireUser()).resolves.toMatchObject({ userId: "u1" })
+    await expect(requireUser()).rejects.toMatchObject({ status: 401 })
+  })
+
+  it("sessionLocked: true only for a valid token whose user is locked", async () => {
+    const { sessionLocked } = await import("@/lib/auth/helpers")
+    expect(await sessionLocked()).toBe(false)
+    dbUser = { ...dbUser!, lockedAt: new Date() }
+    expect(await sessionLocked()).toBe(true)
+    cookieValue = "garbage"
+    expect(await sessionLocked()).toBe(false)
+    cookieValue = undefined
+    expect(await sessionLocked()).toBe(false)
+  })
+
+  it("the live session carries ahAt from the token", async () => {
+    const { getSessionUser } = await import("@/lib/auth/helpers")
+    expect((await getSessionUser())?.ahAt).toEqual(expect.any(Number))
   })
 
   it("token issued before sessionsValidAfter -> 401; a later login still works", async () => {
     const { requireUser } = await import("@/lib/auth/helpers")
     dbUser = { ...dbUser!, sessionsValidAfter: new Date(Date.now() + 60_000) }
     await expect(requireUser()).rejects.toMatchObject({ status: 401 })
-    cookieValue = await signToken({ userId: "u1", email: "a@x.com", role: "admin", authAt: Math.floor(Date.now() / 1000) + 120 })
+    cookieValue = await signToken({ userId: "u1", email: "a@x.com", role: "admin", authAt: Math.floor(Date.now() / 1000) + 120, ahAt: Math.floor(Date.now() / 1000) })
     await expect(requireUser()).resolves.toMatchObject({ userId: "u1" })
   })
 })

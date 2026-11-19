@@ -1,22 +1,45 @@
 import { NextRequest, NextResponse } from "next/server"
+import { decodeJwt } from "jose"
 // verifyToken, never a bare jwtVerify: the gate must apply the shape checks in lib/auth/jwt.ts
-// (issuer, no `purpose` claim, real userId/email/role), not merely confirm a token parses.
+// (issuer, no `purpose` claim, real userId/email/role, ahAt), not merely confirm a token parses.
 import { signToken, verifyToken, SESSION_COOKIE, type SessionPayload } from "@/lib/auth/jwt"
 import { sessionCookieOptions } from "@/lib/auth/cookie"
-import { validLoginNext, LOGIN_NEXT_COOKIE } from "@/lib/auth/login-next"
+import { AGENTHUB_SESSION_COOKIE, REVERIFY_SECONDS, lookupAgentHubAdmin } from "@/lib/auth/agenthub"
+import { auditDenied } from "@/lib/auth/denial-audit"
 import { blockedClientIp, ipBlockedResponse } from "@/lib/net/ip-gate"
+import { clientIpFrom } from "@/lib/net/ip-allowlist"
 
 // request.nextUrl.pathname excludes basePath ("/midhub"), so these are basePath-relative.
-const PUBLIC_PATHS = new Set(["/login", "/api/auth/login", "/api/auth/idp", "/api/auth/oidc/start", "/api/auth/oidc/callback"])
+// Neither is ever gated or re-verified, and neither redirects into the gate: no redirect loop is possible.
+const ACCESS_PAGE = "/login"
+const SIGN_IN_ROUTE = "/api/auth/agenthub"
 
-// This gate is JWT-only (it runs on the edge, no DB). Revocation (deleted/locked/demoted user, password
-// reset) is enforced by getSessionUser()/require*() in lib/auth/helpers.ts, which every API route and
-// admin page goes through. authAt is carried over so sliding never extends a revoked session's validity.
-// Re-mint the session cookie so its 4 h idle lifetime slides forward on every authenticated request.
-async function slideSession(res: NextResponse, payload: SessionPayload): Promise<void> {
-  const token = await signToken({ userId: payload.userId, email: payload.email, role: payload.role, authAt: payload.authAt })
-  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions())
+// This gate checks the JWT and, every REVERIFY_SECONDS, asks AgentHub whether the user is still an AgentHub
+// admin. Revocation inside MidHub (lock, deleted user) is enforced by getSessionUser()/require*() in
+// lib/auth/helpers.ts, which every API route and page goes through. authAt is carried over so sliding never
+// extends a revoked session's validity.
+
+// Re-mint the session cookie so its 4 h idle lifetime slides forward (expiresAt given: keep the old expiry).
+async function setSession(res: NextResponse, payload: SessionPayload, expiresAt?: number): Promise<void> {
+  const token = await signToken(
+    { userId: payload.userId, email: payload.email, role: payload.role, authAt: payload.authAt, ahAt: payload.ahAt },
+    { expiresAt },
+  )
+  const opts = sessionCookieOptions()
+  const maxAge = expiresAt === undefined ? opts.maxAge : Math.max(0, expiresAt - Math.floor(Date.now() / 1000))
+  res.cookies.set(SESSION_COOKIE, token, { ...opts, maxAge })
 }
+
+const clearSession = (res: NextResponse): NextResponse => {
+  res.cookies.set(SESSION_COOKIE, "", { ...sessionCookieOptions(), maxAge: 0 })
+  return res
+}
+
+const unauthenticated = (): NextResponse =>
+  clearSession(NextResponse.json(
+    { code: "unauthenticated", message: "เซสชันหมดอายุหรือยังไม่ได้เข้าสู่ระบบ กรุณาเปิด MidHub ใหม่อีกครั้ง" },
+    { status: 401 },
+  ))
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 
@@ -46,8 +69,21 @@ function redirectTo(req: NextRequest, path: string): NextResponse {
   return NextResponse.redirect(new URL(path === "/" ? base || "/" : base + path, req.url))
 }
 
+// No (valid) session on a page: sign in through AgentHub, then come back to this path + query (GET only).
+function toSignIn(req: NextRequest): NextResponse {
+  let target = SIGN_IN_ROUTE
+  if (req.method === "GET") {
+    const search = new URLSearchParams(req.nextUrl.search)
+    search.delete("_rsc") // Next's client-navigation marker, not part of the page address
+    const qs = search.toString()
+    target += "?" + new URLSearchParams({ next: req.nextUrl.pathname + (qs ? `?${qs}` : "") }).toString()
+  }
+  return clearSession(redirectTo(req, target))
+}
+
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
+  const isApi = pathname.startsWith("/api/")
 
   // 1) IP allowlist (empty = allow all, loopback always allowed), before auth.
   const ip = await blockedClientIp(req.headers)
@@ -55,50 +91,52 @@ export async function proxy(req: NextRequest) {
     // Echo the IP the gate checked so a blocked admin knows what to whitelist.
     // text/plain on purpose: X-Forwarded-For is client-supplied.
     const chain = req.headers.get("x-forwarded-for") ?? ""
-    if (pathname.startsWith("/api/")) return ipBlockedResponse(ip)
+    if (isApi) return ipBlockedResponse(ip)
     const body = `Access from your network is not allowed.\n\nYour IP as this server sees it: ${ip}` +
       (chain.includes(",") ? `\nX-Forwarded-For: ${chain}` : "") + "\n"
     return new NextResponse(body, { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8" } })
   }
 
-  // 2) CSRF: unsafe API methods must come from this origin (public login included).
-  if (pathname.startsWith("/api/") && !SAFE_METHODS.has(req.method) && crossOrigin(req)) {
+  // 2) CSRF: unsafe API methods must come from this origin (public routes included).
+  if (isApi && !SAFE_METHODS.has(req.method) && crossOrigin(req)) {
     return NextResponse.json(
       { code: "csrf", message: "คำขอนี้ไม่ได้มาจากหน้า MidHub เอง จึงถูกปฏิเสธ กรุณาเปิด MidHub แล้วทำรายการใหม่" },
       { status: 403 },
     )
   }
 
-  // 3) /login always renders. The JWT alone cannot tell a revoked user (locked/deleted/password reset) from a
-  // live one; the page asks the DB and sends a live user on to the app. Bouncing here caused a redirect loop.
-  if (pathname === "/login") return NextResponse.next()
+  // 3) The access page and the sign-in route always run (exact match, no loose prefix). The JWT alone cannot
+  // tell a revoked user from a live one; the access page asks the DB and sends a live user on to the app.
+  if (pathname === ACCESS_PAGE || pathname === SIGN_IN_ROUTE) return NextResponse.next()
 
+  // 4) Auth gate. A token without ahAt (old local login) fails verifyToken. APIs never start a sign-in.
   const token = req.cookies.get(SESSION_COOKIE)?.value
   const payload: SessionPayload | null = token ? await verifyToken(token) : null
+  if (!payload) return isApi ? unauthenticated() : toSignIn(req)
 
-  // 4) Other public paths (exact match, no loose prefix).
-  if (PUBLIC_PATHS.has(pathname)) return NextResponse.next()
+  // Logout clears the cookie itself; a fresh token here could win the Set-Cookie race and undo it.
+  if (pathname === "/api/auth/logout") return NextResponse.next()
+  // Background polls (X-Background: 1) are not user activity: they must not keep an idle session alive.
+  const background = req.headers.get("x-background") === "1"
 
-  // 5) Auth gate.
-  if (!payload) {
-    if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ code: "unauthorized", message: "เซสชันหมดอายุหรือยังไม่ได้เข้าสู่ระบบ กรุณาเข้าสู่ระบบใหม่" }, { status: 401 })
+  // 5) Re-verify with AgentHub once ahAt is older than REVERIFY_SECONDS (fail closed: AgentHub down = no access).
+  const now = Math.floor(Date.now() / 1000)
+  if (now - payload.ahAt > REVERIFY_SECONDS) {
+    const lookup = await lookupAgentHubAdmin(req.cookies.get(AGENTHUB_SESSION_COOKIE)?.value)
+    if (!lookup.ok) {
+      await auditDenied(lookup.reason, { email: payload.email, ip: clientIpFrom(req.headers) || "unknown" })
+      return isApi ? unauthenticated() : clearSession(redirectTo(req, `${ACCESS_PAGE}?reason=${lookup.reason}`))
     }
-    const res = redirectTo(req, "/login")
-    res.cookies.set(SESSION_COOKIE, "", { ...sessionCookieOptions(), maxAge: 0 })
-    // Preserve a safe deep link across the login round-trip (validLoginNext needs the /midhub prefix).
-    const next = validLoginNext(req.nextUrl.basePath + pathname + req.nextUrl.search)
-    if (req.method === "GET" && next) {
-      res.cookies.set(LOGIN_NEXT_COOKIE, next, { ...sessionCookieOptions(), maxAge: 600 })
-    }
+    // AgentHub is now signed in as someone else: this session is not theirs. Pages sign in afresh.
+    if (lookup.email !== payload.email.toLowerCase()) return isApi ? unauthenticated() : toSignIn(req)
+    const res = NextResponse.next()
+    await setSession(res, { ...payload, ahAt: now }, background ? decodeJwt(token!).exp : undefined)
     return res
   }
+
   const res = NextResponse.next()
-  // Logout clears the cookie itself; a fresh token here could win the Set-Cookie race and undo it.
-  if (pathname === "/api/auth/logout") return res
-  // Background polls (X-Background: 1) are not user activity: they must not keep an idle session alive.
-  if (req.headers.get("x-background") === "1") return res
-  await slideSession(res, payload)
+  if (background) return res
+  await setSession(res, payload)
   return res
 }
 
@@ -108,5 +146,7 @@ export const config = {
   // IP allowlist in lib/agent/auth.ts. Excluded here because Next clones and fully buffers the body of every
   // non-GET request the proxy matches (up to proxyClientMaxBodySize) before the route runs, which would defeat
   // the streamed agent upload and its early 413.
-  matcher: ["/((?!_next/static|_next/image|api/agent/|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf)$).*)"],
+  // "/" first: with a basePath, Next's compiled pattern for the second entry needs a "/" after "/midhub", so the
+  // bare app root "/midhub" (the main entry, where AgentHub sign-in starts) would otherwise skip the proxy.
+  matcher: ["/", "/((?!_next/static|_next/image|api/agent/|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf)$).*)"],
 }

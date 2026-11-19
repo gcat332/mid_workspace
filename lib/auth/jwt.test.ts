@@ -7,10 +7,22 @@ const sign = (claims: Record<string, unknown>, iss = "bsm-midhub/session") =>
   new jose.SignJWT(claims).setProtectedHeader({ alg: "HS256" }).setIssuer(iss).setExpirationTime("1h").sign(secret())
 
 describe("jwt", () => {
-  const p = { userId: "u1", email: "a@b.c", role: "admin" as const }
+  const p = { userId: "u1", email: "a@b.c", role: "admin" as const, ahAt: 1_800_000_000 }
 
   it("round-trips a session payload", async () => {
     expect(await verifyToken(await signToken(p))).toMatchObject(p)
+  })
+  it("an old-style session without ahAt (local login) is invalid", async () => {
+    const { ahAt: _drop, ...old } = p
+    void _drop
+    expect(await verifyToken(await sign(old))).toBeNull()
+    expect(await verifyToken(await sign({ ...old, ahAt: "1800000000" }))).toBeNull()
+  })
+  it("signToken can keep an existing expiry (re-verified background poll must not slide the idle timeout)", async () => {
+    const exp = Math.floor(Date.now() / 1000) + 600
+    const t = await signToken(p, { expiresAt: exp })
+    expect(jose.decodeJwt(t).exp).toBe(exp)
+    expect(await verifyToken(t)).toMatchObject(p)
   })
   it("rejects a foreign issuer", async () => {
     expect(await verifyToken(await sign(p, "ai-workspace/session"))).toBeNull()

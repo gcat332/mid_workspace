@@ -1,8 +1,5 @@
-export const LOGIN_NEXT_COOKIE = "login_next"
-
-// Only in-app paths under /midhub. The value round-trips through a cookie into a redirect,
-// so it must never become an open redirect: no protocol-relative (//), backslashes,
-// control characters or dot-segments.
+// Only in-app paths under /midhub. The value becomes a redirect Location after sign-in, so it must never become
+// an open redirect: no protocol-relative (//), backslashes, control characters or dot-segments.
 const NEXT_RE = /^\/midhub(\/.*)?$/
 
 export function validLoginNext(v: string | null | undefined): string | null {

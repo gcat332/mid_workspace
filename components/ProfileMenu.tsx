@@ -82,7 +82,8 @@ export function ProfileMenu({ email, role }: { email: string; role: string }) {
     } catch {
       setLogoutErr(true); return
     }
-    router.replace("/login"); router.refresh()
+    // Only MidHub's cookie is cleared; the access page says so and links back to AgentHub.
+    router.replace("/login?reason=logged_out"); router.refresh()
   }
 
   const name = email.split("@")[0] ?? email

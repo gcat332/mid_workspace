@@ -40,7 +40,7 @@ vi.mock("@/lib/db/client", () => {
 import { MidError } from "./names"
 import { getBackup, hooks, listBackups, loadConfigFiles, rollback, saveConfigFile, saveForm } from "./config-service"
 
-const user = { userId: "u1", email: "a@x.com", role: "member" as const, authAt: 0 }
+const user = { userId: "u1", email: "a@x.com", role: "member" as const, authAt: 0, ahAt: 0 }
 const sha = (s: string) => createHash("sha256").update(s).digest("hex")
 const XML = `<parameters>
   <parameter name="url" value="https://old.service-now.com/"/>

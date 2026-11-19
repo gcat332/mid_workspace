@@ -124,14 +124,14 @@ describe("authenticateAgent", () => {
     expect(e).toMatchObject({ code: "agent_user", status: 403 })
     expect(e!.message).toBe("ผู้ใช้ alice@x.com ยังไม่มีสิทธิ์ใช้ MidHub ให้ Admin เพิ่มในหน้า Users")
   })
-  it("an expired lock does not block", async () => {
+  it("a lock never expires on its own (admin lock, no password lockout any more)", async () => {
     dbUser = { id: "u1", email: "alice@x.com", role: "member", lockedAt: new Date(Date.now() - 3600_000) }
-    expect(await fail(req())).toBeNull()
+    expect(await fail(req())).toMatchObject({ code: "agent_user", status: 403 })
   })
   it("role and identity come from the DB; email is lowercased for the lookup; checked every call", async () => {
     dbUser = { id: "u9", email: "alice@x.com", role: "admin", lockedAt: null }
     const c = await authenticateAgent(req())
-    expect(c.user).toEqual({ userId: "u9", email: "alice@x.com", role: "admin" })
+    expect(c.user).toEqual({ userId: "u9", email: "alice@x.com", role: "admin", ahAt: expect.any(Number) })
     expect(c.taskId).toBe("task-1")
     expect(findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { email: "alice@x.com" } }))
     await authenticateAgent(req())

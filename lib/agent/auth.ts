@@ -108,7 +108,8 @@ export async function authenticateAgent(req: Request): Promise<AgentCaller> {
     throw new MidError("agent_user", 403, `ผู้ใช้ ${email.slice(0, 254) || "(ไม่ระบุ)"} ยังไม่มีสิทธิ์ใช้ MidHub ให้ Admin เพิ่มในหน้า Users`)
   }
   return {
-    user: { userId: user.id, email: user.email, role: user.role === "admin" ? "admin" : "member" },
+    // ahAt: AgentHub vouches for the actor on this very request (server-to-server, no MidHub session involved).
+    user: { userId: user.id, email: user.email, role: user.role === "admin" ? "admin" : "member", ahAt: Math.floor(Date.now() / 1000) },
     taskId,
     sessionInstances: parseSessionInstances(req.headers.get("x-midhub-session-instances")),
   }

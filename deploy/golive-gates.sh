@@ -152,7 +152,8 @@ c=$(code "http://127.0.0.1:$PORT/midhub/login")
 
 # ── Gate 8: via Caddy, both sites ─────────────────────────────────────────────
 hdr "Gate 8 — via Caddy on both sites (/midhub, /midhub/login = 200; /midhub/api/agent/mids = 404)"
-# Final status AND final URL after following redirects (/midhub may 308 → /midhub/login). A site whose
+# Final status AND final URL after following redirects (signed out: /midhub → /midhub/api/auth/agenthub →
+# /midhub/login?reason=signed_out). A site whose
 # MidHub handler is missing falls through to AgentHub (307 → /login = 200), so the final path must still
 # be under /midhub. The HTTP site is resolved to loopback so the check does not depend on DNS here.
 check_site() { # label, then curl base args (-k / --resolve), then base URL last
@@ -218,8 +219,7 @@ fi
 
 # ── Manual gates ──────────────────────────────────────────────────────────────
 hdr "Manual gates"
-man "SSO (if used): redirect URI <PUBLIC_URL>/midhub/api/auth/oidc/callback is registered in the IdP; SSO login works and an unknown email gets 'ยังไม่ได้รับสิทธิ์'"
-man "admin password rotated: log in with the ADMIN_PASSWORD from .env.local, change it, then remove/replace the value in .env.local"
+man "an AgentHub admin can open /midhub: sign in to AgentHub (/login) as an admin, open /midhub on both sites (no second login); a non-admin AgentHub account gets 'ไม่ใช่ admin ของ AgentHub'"
 man "validate the spike MID in the instance: import/start the spike MID, confirm it shows Up and validated in the ServiceNow instance"
 
 # ── Summary ───────────────────────────────────────────────────────────────────

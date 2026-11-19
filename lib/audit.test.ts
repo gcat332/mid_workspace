@@ -4,7 +4,7 @@ const create = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/db/client", () => ({ prisma: { auditLog: { create } } }))
 import { recordAudit } from "./audit"
 
-const user = { userId: "u1", email: "a@x.com", role: "member" as const, authAt: 0 }
+const user = { userId: "u1", email: "a@x.com", role: "member" as const, authAt: 0, ahAt: 0 }
 
 it("stores the entry", async () => {
   create.mockResolvedValueOnce({})

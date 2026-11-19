@@ -11,8 +11,9 @@ const jsonResponse = (code: string, message: string, status: number): Response =
 
 /**
  * The live user behind a session token, or null. The JWT only proves who signed in; role and standing come
- * from the DB so a delete, lock, demote or password reset takes effect immediately rather than when the token
- * expires. Exposed separately from getSessionUser so long-lived streams can re-check the token they started with.
+ * from the DB so a delete or lock takes effect immediately rather than when the token expires (AgentHub admin
+ * standing is re-checked by proxy.ts). Exposed separately from getSessionUser so long-lived streams can re-check
+ * the token they started with.
  */
 export async function userFromToken(token: string | undefined): Promise<SessionPayload | null> {
   if (!token) return null
@@ -25,7 +26,16 @@ export async function userFromToken(token: string | undefined): Promise<SessionP
   if (!user || isLocked(user.lockedAt)) return null
   if (user.sessionsValidAfter && (claims.authAt ?? 0) < Math.floor(user.sessionsValidAfter.getTime() / 1000)) return null
   const role = user.role === "admin" ? "admin" : "member"
-  return { userId: claims.userId, email: user.email, role, authAt: claims.authAt }
+  return { userId: claims.userId, email: user.email, role, authAt: claims.authAt, ahAt: claims.ahAt }
+}
+
+/** True when the request carries a valid MidHub token whose user is locked (the access page says why). */
+export async function sessionLocked(): Promise<boolean> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value
+  const claims = token ? await verifyToken(token) : null
+  if (!claims) return false
+  const user = await prisma.user.findUnique({ where: { id: claims.userId }, select: { lockedAt: true } })
+  return !!user && isLocked(user.lockedAt)
 }
 
 export async function getSessionUser(): Promise<SessionPayload | null> {

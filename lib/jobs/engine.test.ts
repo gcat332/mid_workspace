@@ -19,9 +19,9 @@ let eng: Eng
 let jn: Jn
 let prisma: typeof import("@/lib/db/client").prisma
 
-const admin = { userId: "admin1", email: "a@x.com", role: "admin" as const }
-const alice = { userId: "u-alice", email: "alice@x.com", role: "member" as const }
-const bob = { userId: "u-bob", email: "bob@x.com", role: "member" as const }
+const admin = { userId: "admin1", email: "a@x.com", role: "admin" as const, ahAt: 0 }
+const alice = { userId: "u-alice", email: "alice@x.com", role: "member" as const, ahAt: 0 }
+const bob = { userId: "u-bob", email: "bob@x.com", role: "member" as const, ahAt: 0 }
 
 type JE = { t: string; type: string; stage?: string; code?: string; detail?: string; level?: string; msg?: string; password?: string; nested?: unknown }
 const journal = async (id: string) => (await jn.readJournal(id)) as JE[]

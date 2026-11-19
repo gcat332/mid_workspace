@@ -19,6 +19,9 @@ const ACTION_LABELS: Record<string, string> = {
   "file.rename": "เปลี่ยนชื่อไฟล์",
   "file.delete": "ลบไฟล์",
   "file.mkdir": "สร้างโฟลเดอร์",
+  "auth.login": "เข้าสู่ระบบ (ผ่าน AgentHub)",
+  "auth.denied": "ถูกปฏิเสธการเข้าใช้ MidHub",
+  // user.create / user.delete / idp.update: no longer written (local login removed); kept for old rows.
   "user.create": "เพิ่มผู้ใช้",
   "user.update": "แก้ไขผู้ใช้",
   "user.delete": "ลบผู้ใช้",
@@ -57,6 +60,8 @@ const KEY_LABELS: Record<string, string> = {
   role: "สิทธิ์",
   ssoOnly: "SSO เท่านั้น",
   unlock: "ปลดล็อก",
+  lock: "ล็อก",
+  reason: "เหตุผล",
   passwordChanged: "เปลี่ยนรหัสผ่าน",
   cidr: "IP/CIDR",
   enabled: "เปิดใช้",
@@ -82,6 +87,12 @@ const KEY_LABELS: Record<string, string> = {
 }
 
 const ROLE_TH: Record<string, string> = { admin: "ผู้ดูแลระบบ", member: "สมาชิก" }
+const REASON_TH: Record<string, string> = {
+  signed_out: "ยังไม่ได้เข้าสู่ระบบ AgentHub",
+  not_admin: "ไม่ใช่ admin ของ AgentHub",
+  unreachable: "ติดต่อ AgentHub ไม่ได้",
+  locked: "บัญชีถูกล็อกใน MidHub",
+}
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`
@@ -94,6 +105,7 @@ function valueText(key: string, v: unknown): string {
   if (typeof v === "boolean") return v ? "ใช่" : "ไม่"
   if (key === "size" && typeof v === "number") return bytes(v)
   if (key === "role" && typeof v === "string") return ROLE_TH[v] ?? v
+  if (key === "reason" && typeof v === "string") return REASON_TH[v] ?? v
   if (v === null || v === undefined || v === "") return "-"
   if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v.length ? v.join(", ") : "-"
   return typeof v === "string" || typeof v === "number" ? String(v) : JSON.stringify(v)

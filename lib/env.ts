@@ -4,8 +4,6 @@ import { DEFAULT_MIDHUB_ROOT } from "@/lib/mids/names"
 export interface Env {
   databaseUrl: string
   jwtSecret: string
-  adminEmail: string
-  adminPassword: string
   vaultKey: string
   midhubRoot: string
   jobsDir: string
@@ -13,9 +11,26 @@ export interface Env {
   helperSocket: string
   /** Shared secret for AgentHub's /api/agent/* calls; null = feature off. */
   agentSecret: string | null
+  /** BSM AgentHub base URL (loopback only) asked for the signed-in user: GET <agenthubUrl>/api/auth/me. */
+  agenthubUrl: string
 }
 
-const REQUIRED = ["JWT_SECRET", "ADMIN_EMAIL", "ADMIN_PASSWORD", "MIDHUB_VAULT_KEY", "DATABASE_URL"] as const
+// ADMIN_EMAIL/ADMIN_PASSWORD are gone (sign-in is through AgentHub); old values left in .env.local are ignored.
+const REQUIRED = ["JWT_SECRET", "MIDHUB_VAULT_KEY", "DATABASE_URL"] as const
+
+// The AgentHub session cookie is forwarded to this URL, so it must stay on this host: plain http to a loopback
+// address with an explicit port, nothing else (no path, credentials, query or fragment).
+const AGENTHUB_URL_RE = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):([0-9]{1,5})\/?$/
+
+function agenthubUrlFrom(v: string | undefined): string {
+  const raw = v || "http://127.0.0.1:3000"
+  const m = AGENTHUB_URL_RE.exec(raw)
+  const port = m ? Number(m[2]) : 0
+  if (!m || port < 1 || port > 65535) {
+    throw new Error("AGENTHUB_URL must be http://127.0.0.1:<port>, http://localhost:<port> or http://[::1]:<port> (AgentHub on this host)")
+  }
+  return raw.replace(/\/$/, "")
+}
 
 export function loadEnv(src: Record<string, string | undefined>): Env {
   const missing = REQUIRED.filter((k) => !src[k])
@@ -38,14 +53,13 @@ export function loadEnv(src: Record<string, string | undefined>): Env {
   return {
     databaseUrl: src.DATABASE_URL as string,
     jwtSecret,
-    adminEmail: (src.ADMIN_EMAIL as string).toLowerCase(),
-    adminPassword: src.ADMIN_PASSWORD as string,
     vaultKey: src.MIDHUB_VAULT_KEY as string,
     midhubRoot,
     jobsDir: path.join(midhubRoot, "jobs"),
     maxRunning,
     helperSocket: src.MIDHUB_HELPER_SOCKET || "/run/midhub/helper.sock",
     agentSecret,
+    agenthubUrl: agenthubUrlFrom(src.AGENTHUB_URL),
   }
 }
 

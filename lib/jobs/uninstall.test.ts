@@ -15,7 +15,7 @@ process.env.ADMIN_EMAIL = "a@x.com"
 process.env.ADMIN_PASSWORD = "pw"
 process.env.MIDHUB_VAULT_KEY = Buffer.alloc(32, 7).toString("base64")
 
-const admin = { userId: "admin1", email: "a@x.com", role: "admin" as const }
+const admin = { userId: "admin1", email: "a@x.com", role: "admin" as const, ahAt: 0 }
 let eng: typeof import("./engine")
 let un: typeof import("./uninstall")
 let prisma: typeof import("@/lib/db/client").prisma
