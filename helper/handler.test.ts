@@ -209,6 +209,22 @@ describe("fixOwnership", () => {
       file.endsWith("setpriv") ? { code: 1, stdout: "chmod: cannot access 'a/b': No such file or directory\nchmod: cannot access 'c': No such file or directory\n" } : { code: 0, stdout: "" }
     expect(await handleRequest({ op: "fixOwnership", name: "aaa" }, deps({ exec }))).toEqual({ ok: true })
   })
+  it.each([
+    ["setpriv exit 127", 127, "setpriv: failed to execute /usr/bin/chmod: No such file or directory\n"],
+    ["fts_read failed", 1, "chmod: fts_read failed: No such file or directory\n"],
+    ["empty stderr, exit 1", 1, ""],
+    ["tolerated + other", 1, "chmod: cannot access 'x': No such file or directory\nchmod: changing permissions of 'x': Operation not permitted\n"],
+  ])("does not tolerate chmod failure: %s", async (_n, code, stdout) => {
+    fs.mkdirSync(path.join(tmp, "root", "mids", "aaa"))
+    const exec = async (file: string) => (file.endsWith("setpriv") ? { code, stdout } : { code: 0, stdout: "" })
+    expect(await handleRequest({ op: "fixOwnership", name: "aaa" }, deps({ exec }))).toMatchObject({ ok: false, code: "fix_ownership_failed" })
+  })
+  it("tolerates cannot read directory ENOENT lines", async () => {
+    fs.mkdirSync(path.join(tmp, "root", "mids", "aaa"))
+    const exec = async (file: string) =>
+      file.endsWith("setpriv") ? { code: 1, stdout: "chmod: cannot read directory 'd': No such file or directory\n" } : { code: 0, stdout: "" }
+    expect(await handleRequest({ op: "fixOwnership", name: "aaa" }, deps({ exec }))).toEqual({ ok: true })
+  })
   it("does not tolerate mixed ENOENT and other chmod errors", async () => {
     fs.mkdirSync(path.join(tmp, "root", "mids", "aaa"))
     const exec = async (file: string) =>

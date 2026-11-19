@@ -75,4 +75,13 @@ describe("MidError cross-chunk identity", () => {
     expect(new MidError("internal") instanceof AgentCheckError).toBe(false)
     expect(new AgentCheckError("m", []) instanceof MidError).toBe(true)
   })
+  it("brand is non-enumerable but instanceof still works", async () => {
+    const { MidError } = await import("./names")
+    const e = new MidError("zip_invalid", undefined, undefined, "d")
+    expect(Object.keys(e)).not.toContain(String(Symbol.for("midhub.MidError")))
+    expect(Object.getOwnPropertySymbols({ ...e })).toEqual([])
+    expect(Object.keys(e)).not.toContain("Symbol(midhub.MidError)")
+    expect(e instanceof MidError).toBe(true)
+    expect(Object.getOwnPropertyDescriptor(e, Symbol.for("midhub.MidError"))?.enumerable).toBe(false)
+  })
 })

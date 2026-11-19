@@ -63,7 +63,6 @@ export { quotaFullMessage } from "./messages"
 const MID_ERROR_BRAND = Symbol.for("midhub.MidError")
 
 export class MidError extends Error {
-  readonly [MID_ERROR_BRAND] = true
   static [Symbol.hasInstance](v: unknown): boolean {
     // Subclasses (AgentCheckError ...) stay strict: only MidError itself accepts any branded object.
     if (this === MidError) return typeof v === "object" && v !== null && (v as Record<symbol, unknown>)[MID_ERROR_BRAND] === true
@@ -76,6 +75,7 @@ export class MidError extends Error {
     const known = (ERRORS as Record<string, readonly [number, string]>)[code]
     super(thai ?? known?.[1] ?? code)
     this.name = "MidError"
+    Object.defineProperty(this, MID_ERROR_BRAND, { value: true, enumerable: false }) // non-enumerable: not in keys/spread/JSON
     this.code = code
     this.status = status ?? known?.[0] ?? 500
     this.detail = detail

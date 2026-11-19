@@ -138,9 +138,10 @@ function failDetail(cmd: string, r: { code: number; stdout: string }): string {
   return head + (out.length > 300 - head.length ? "..." + out.slice(-(300 - head.length - 3)) : out)
 }
 
-function onlyVanished(out: string): boolean {
-  const lines = out.split("\n").filter((l) => l.trim() !== "")
-  return lines.length > 0 && lines.every((l) => /: No such file or directory$/.test(l.trim()))
+function onlyVanished(r: { code: number; stdout: string }): boolean {
+  if (r.code !== 1) return false // e.g. 127 from setpriv, signals
+  const lines = r.stdout.split("\n").filter((l) => l.trim() !== "")
+  return lines.length > 0 && lines.every((l) => /^chmod: cannot (access|read directory) '.*': No such file or directory$/.test(l.trim()))
 }
 
 async function fixOwnership(name: string, deps: HandlerDeps): Promise<HelperResponse> {
@@ -166,7 +167,7 @@ async function fixOwnership(name: string, deps: HandlerDeps): Promise<HelperResp
   if (chown.code !== 0) return fail("fix_ownership_failed", failDetail("chown", chown))
   const chmod = await deps.exec(SETPRIV, ["--reuid=midsvc", "--regid=midhub", "--clear-groups", CHMOD, "-R", "g+rwX", "--", dir])
   // The running MID creates/deletes files while chmod -R walks the tree: a vanished entry makes GNU chmod exit 1 with
-  // only "No such file or directory" lines. That is harmless (nothing left to chmod), so only that case is tolerated.
-  if (chmod.code !== 0 && !onlyVanished(chmod.stdout)) return fail("fix_ownership_failed", failDetail("chmod", chmod))
+  // only "cannot access/read directory ...: No such file or directory" lines. That is harmless (nothing left to chmod), so only that case is tolerated.
+  if (chmod.code !== 0 && !onlyVanished(chmod)) return fail("fix_ownership_failed", failDetail("chmod", chmod))
   return OK
 }

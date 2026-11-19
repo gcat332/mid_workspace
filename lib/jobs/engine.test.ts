@@ -259,6 +259,28 @@ describe("engine", () => {
   })
 })
 
+describe("foreign MidError copy", () => {
+  it("keeps code and detail of a branded error from another chunk's class", async () => {
+    eng.registerKind("install", [
+      {
+        name: "a",
+        async run() {
+          const foreign = Object.assign(new Error("ไฟล์ MID ไม่ถูกต้อง"), { code: "zip_invalid", status: 400, detail: "listing mismatch" })
+          Object.defineProperty(foreign, Symbol.for("midhub.MidError"), { value: true })
+          throw foreign
+        },
+      },
+    ])
+    const job = await eng.createJob(alice, "install", "mid-one", {})
+    await eng.__idleForTests()
+    const row = await prisma.job.findUniqueOrThrow({ where: { id: job.id } })
+    expect(row.status).toBe("failed")
+    expect(row.error).toBe("ไฟล์ MID ไม่ถูกต้อง")
+    const err = (await journal(job.id)).find((e) => e.type === "error")
+    expect(err).toMatchObject({ code: "zip_invalid", detail: "listing mismatch" })
+  })
+})
+
 describe("cancelJob", () => {
   it("member cannot cancel another user's failed job (403); admin can", async () => {
     simpleKind("install", { name: "a", times: 5 })
