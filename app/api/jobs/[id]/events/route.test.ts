@@ -9,8 +9,6 @@ const dbUrl = `file:${join(dir, "t.db")}`
 process.env.DATABASE_URL = dbUrl
 process.env.MIDHUB_ROOT = join(dir, "root")
 process.env.JWT_SECRET = "x".repeat(40)
-process.env.ADMIN_EMAIL = "a@x.com"
-process.env.ADMIN_PASSWORD = "pw"
 process.env.MIDHUB_VAULT_KEY = "k"
 
 vi.mock("@/lib/auth/helpers", async (orig) => ({

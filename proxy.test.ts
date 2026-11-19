@@ -64,7 +64,12 @@ const location = (res: Response) => {
   return l ? new URL(l, "http://localhost:3100") : null
 }
 
+// Next's console patch (loaded via next internals) needs AsyncLocalStorage, which this test runtime lacks; the
+// lookup's console.warn diagnostics are asserted in lib/auth/agenthub.test.ts, so silence them here.
+let warn: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
+  warn?.mockRestore()
+  warn = vi.spyOn(console, "warn").mockImplementation(() => {})
   cidrs = []
   ah = { status: 200, body: '{"email":"a@x.com","role":"admin"}' }
   ahCalls = 0
@@ -126,6 +131,24 @@ describe("auth gate", () => {
   it("Next's RSC marker is not carried into next", async () => {
     const res = await proxy(req("/mids?_rsc=abc&x=1"))
     expect(location(res)!.searchParams.get("next")).toBe("/mids?x=1")
+  })
+
+  it.each([
+    ["Next-Router-Prefetch: 1", { "next-router-prefetch": "1" }],
+    ["Purpose: prefetch", { purpose: "prefetch" }],
+    ["Sec-Purpose: prefetch", { "sec-purpose": "prefetch" }],
+    ["Sec-Purpose: prefetch;prerender", { "sec-purpose": "prefetch;prerender" }],
+  ])("a link prefetch without a session (%s) does not start a sign-in: 204, no redirect", async (_l, h) => {
+    const res = await proxy(req("/mids/x", { headers: h }))
+    expect(res.status).toBe(204)
+    expect(res.headers.get("location")).toBeNull()
+    expect(res.headers.get("set-cookie")).toBeNull()
+    expect(ahCalls).toBe(0)
+  })
+
+  it("a prefetch with a valid session passes as usual", async () => {
+    const res = await proxy(req("/mids/x", { headers: await withCookie("midhub_session", { "next-router-prefetch": "1" }) }))
+    expect(res.status).toBe(200)
   })
 
   it("401 {code:'unauthenticated'} for an API call without a session; no sign-in attempt", async () => {
@@ -253,13 +276,17 @@ describe("AgentHub re-verification (ahAt older than 300 s)", () => {
 
   it("AgentHub unreachable -> access page reason=unreachable (fail closed), no 500, and the access page itself is not gated", async () => {
     const saved = ahBase
-    ahBase = "http://127.0.0.1:1"
+    const closed = http.createServer()
+    await new Promise<void>((r) => closed.listen(0, "127.0.0.1", r))
+    ahBase = `http://127.0.0.1:${(closed.address() as AddressInfo).port}`
+    await new Promise<void>((r) => closed.close(() => r()))
     try {
       const res = await proxy(req("/", { headers: await stale(301) }))
       expect(res.status).toBe(307)
       const l = location(res)!
       expect(l.pathname).toBe("/midhub/login")
       expect(l.searchParams.get("reason")).toBe("unreachable")
+      expect(String(warn.mock.calls[0]?.[0])).toMatch(/ECONNREFUSED/)
       // Following the redirect (cookie now cleared) renders the access page: no loop.
       const next = await proxy(req(l.pathname.replace("/midhub", "") + l.search))
       expect(next.status).toBe(200)

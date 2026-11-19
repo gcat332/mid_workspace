@@ -58,7 +58,7 @@ export function UsersManager({ myId }: { myId: string }) {
           <thead className="border-b border-gray-200 bg-gray-50 text-left text-gray-600">
             <tr>
               <th className="px-4 py-3">อีเมล</th><th className="px-4 py-3">สถานะ</th>
-              <th className="px-4 py-3">เข้าใช้ล่าสุด</th><th className="px-4 py-3"><span className="sr-only">จัดการ</span></th>
+              <th className="px-4 py-3">เข้าสู่ระบบล่าสุด</th><th className="px-4 py-3"><span className="sr-only">จัดการ</span></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">

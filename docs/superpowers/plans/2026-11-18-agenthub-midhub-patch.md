@@ -22,6 +22,7 @@
 - Session instance set = normalise to `https://<x>.service-now.com/` and dedupe, from: `Task.instanceHost`; `SN_INSTANCE_URL` in `<sessionDir>/.env`; `SN_INSTANCE_URL` in every `<sessionDir>/snow-projects/*/.env`. A sub-task uses its **parent** session's set and actor. Values that are not `*.service-now.com` are dropped.
 - Actor = the user whose message started the run; recovery or unknown → the task owner (`Task.userId`). Actor must still own or participate in the task at request time.
 - Forwarded path allowlist (relative to `/api/tasks/<id>/midhub/`): `mids`, `mids/<name>/files`, `mids/<name>/logs`, `mids/<name>/restart`, with `<name>` matching `^[a-z0-9][a-z0-9-]{1,39}$`. Anything else → 404 without contacting MidHub.
+- MidHub's browser sign-in depends on AgentHub's `GET /api/auth/me` reflecting the **DB** (Task 0): MidHub signs in only users that `/api/auth/me` reports with `role: "admin"`, and it re-asks every 5 minutes. Today `/api/auth/me` returns the role baked into the sliding session JWT, so a demoted or deleted AgentHub admin keeps MidHub access until their AgentHub session ends. Apply Task 0 first.
 - Stream request and response bodies (uploads up to 50 MiB); forward method, query string, `Content-Type`, `Content-Length`; return MidHub's status and body unchanged; 120 s timeout → 504 `{ error: "MidHub did not respond" }`; connection refused → 502 `{ error: "MidHub is not running" }`.
 
 ## Review Focus
@@ -31,6 +32,34 @@
 3. The secret never appears in the run env or prompt (grep the spawned env and the prompt builder output). Test in Task 2 and Task 4.
 4. A 50 MiB upload streams through without buffering the whole body in memory and the declared length reaches MidHub. Test in Task 3.
 5. MidHub down → Java gets a clear 502 message rather than a hang. Test in Task 3.
+
+---
+
+### Task 0: `/api/auth/me` reflects the DB
+
+MidHub (sign-in with AgentHub, admins only) asks `GET /api/auth/me` with the browser's `session` cookie and trusts
+`role`. It currently returns the JWT's claims (`getSessionUser()` = `verifyToken` only, and the proxy re-mints the
+cookie with the old role on every request), so demoting, locking or deleting an admin in AgentHub never reaches MidHub
+while that AgentHub session lives.
+
+**Files:**
+- Modify: `app/api/auth/me/route.ts`
+- Test: `app/api/auth/me/route.test.ts` (new)
+
+**Interfaces:**
+- Produces: `GET /api/auth/me` → `200 { email, role }` where `email` and `role` come from the `User` row looked up by the
+  JWT's `userId` (the JWT's subject) at request time; `401 { error: "Unauthorized" }` when there is no valid session, the
+  user no longer exists, or the user is locked (`lockedAt` set; AgentHub locks last until an admin unlocks). Response shape and
+  status codes are otherwise unchanged (MidHub maps 401/403 → signed out, 200 non-admin → not admin).
+
+- [ ] **Step 1: Failing tests** (mock prisma like `lib/auth/helpers.test.ts`): valid JWT with role `admin` but DB role
+  `user` → `200 { role: "user" }`; DB email differs in case → DB value returned; user deleted → 401; user locked → 401;
+  no cookie / garbage cookie → 401; the response never contains `passwordHash`.
+- [ ] **Step 2:** Run → FAIL. **Step 3:** Implement: `const s = await getSessionUser(); if (!s) 401;
+  const u = await prisma.user.findUnique({ where: { id: s.userId }, select: { email: true, role: true, lockedAt: true } });
+  if (!u || u.lockedAt) 401; return { email: u.email, role: u.role }`. Do not change `getSessionUser()` itself (other
+  callers keep their current behaviour). **Step 4:** PASS + full suite.
+- [ ] **Step 5:** Commit `fix(auth): /api/auth/me reports the user's current role from the DB`.
 
 ---
 

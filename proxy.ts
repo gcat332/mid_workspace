@@ -81,6 +81,13 @@ function toSignIn(req: NextRequest): NextResponse {
   return clearSession(redirectTo(req, target))
 }
 
+function isPrefetch(req: NextRequest): boolean {
+  const h = req.headers
+  return h.get("next-router-prefetch") === "1" ||
+    (h.get("purpose") ?? "").toLowerCase().includes("prefetch") ||
+    (h.get("sec-purpose") ?? "").toLowerCase().includes("prefetch")
+}
+
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
   const isApi = pathname.startsWith("/api/")
@@ -112,7 +119,12 @@ export async function proxy(req: NextRequest) {
   // 4) Auth gate. A token without ahAt (old local login) fails verifyToken. APIs never start a sign-in.
   const token = req.cookies.get(SESSION_COOKIE)?.value
   const payload: SessionPayload | null = token ? await verifyToken(token) : null
-  if (!payload) return isApi ? unauthenticated() : toSignIn(req)
+  if (!payload) {
+    if (isApi) return unauthenticated()
+    // A link prefetch must not start a sign-in (lookup, user upsert, auth.login row) for a page nobody opened.
+    if (isPrefetch(req)) return new NextResponse(null, { status: 204, headers: { "cache-control": "no-store" } })
+    return toSignIn(req)
+  }
 
   // Logout clears the cookie itself; a fresh token here could win the Set-Cookie race and undo it.
   if (pathname === "/api/auth/logout") return NextResponse.next()

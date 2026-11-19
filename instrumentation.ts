@@ -26,6 +26,8 @@ export async function register(): Promise<void> {
       console.error(`[boot] ${label} failed:`, err instanceof Error ? err.message : "unknown")
     }
   }
+  // Surface a bad configuration (e.g. a non-loopback AGENTHUB_URL) in the boot log, not only on the first sign-in.
+  await step("env", async () => (await import("@/lib/env")).loadEnv(process.env))
   await kindStep("registerInstallKinds", async () => (await import("@/lib/jobs/install")).registerInstallKinds())
   await kindStep("registerUninstallKinds", async () => (await import("@/lib/jobs/uninstall")).registerUninstallKinds())
   if (kindsOk) {

@@ -9,8 +9,6 @@ const dbUrl = `file:${join(dir, "t.db")}`
 process.env.DATABASE_URL = dbUrl
 process.env.MIDHUB_ROOT = join(dir, "root")
 process.env.JWT_SECRET = "x".repeat(40)
-process.env.ADMIN_EMAIL = "a@x.com"
-process.env.ADMIN_PASSWORD = "pw"
 process.env.MIDHUB_VAULT_KEY = Buffer.alloc(32, 7).toString("base64")
 
 const BS = "australia-02-11-2026__patch7-11-10-2026_11-12-2026_0100"

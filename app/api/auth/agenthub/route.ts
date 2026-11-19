@@ -16,10 +16,24 @@ export const dynamic = "force-dynamic"
 // the proxy never gates: no loop. Locations are relative, so the browser's own origin is kept behind Caddy.
 const see = (location: string) => new NextResponse(null, { status: 303, headers: { location } })
 
-/** `next` must be an in-app path ("/..." but not "//..."); anything else, or "/", goes to the app root. */
+/**
+ * `next` (basePath-relative path + query) → an ASCII Location inside the app, or the app root on any doubt.
+ * Percent-decoded once to find dot segments (`..`, `%2e%2e`), control characters and backslashes; characters
+ * outside printable ASCII are percent-encoded (a Location header must be a ByteString); existing escapes are kept.
+ */
 function nextLocation(raw: string | null): string {
   if (!raw || raw === "/" || !raw.startsWith("/") || raw.startsWith("//")) return BASE_PATH
-  return validLoginNext(BASE_PATH + raw) ?? BASE_PATH
+  try {
+    const decoded = decodeURIComponent(raw)
+    if (/[\x00-\x1f\x7f\\]/.test(decoded)) return BASE_PATH
+    if (decoded.split(/[?#]/)[0].split("/").some((seg) => seg === "." || seg === "..")) return BASE_PATH
+    const loc = BASE_PATH + raw.replace(/[^\x21-\x7e]/g, (c) => encodeURIComponent(c))
+    const resolved = new URL(loc, "http://x").pathname
+    if (resolved !== BASE_PATH && !resolved.startsWith(`${BASE_PATH}/`)) return BASE_PATH
+    return validLoginNext(loc) ?? BASE_PATH
+  } catch {
+    return BASE_PATH // malformed escape or lone surrogate
+  }
 }
 
 function toAccessPage(reason: DenialReason): NextResponse {

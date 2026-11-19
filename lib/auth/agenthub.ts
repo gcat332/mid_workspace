@@ -30,30 +30,46 @@ const deny = (reason: AgentHubDenial): AgentHubLookup => ({ ok: false, reason })
  */
 export async function lookupAgentHubAdmin(sessionCookie: string | undefined): Promise<AgentHubLookup> {
   if (!sessionCookie || !COOKIE_VALUE_RE.test(sessionCookie)) return deny("signed_out")
+  // Outside the try: a configuration error (bad AGENTHUB_URL) must surface as a 500 with its own message, not be
+  // reported to the user as "AgentHub unreachable".
+  const url = `${env.agenthubUrl}/api/auth/me`
   let res: Response
   try {
-    res = await fetch(`${env.agenthubUrl}/api/auth/me`, {
+    res = await fetch(url, {
       method: "GET",
       headers: { cookie: `${AGENTHUB_SESSION_COOKIE}=${sessionCookie}` },
       redirect: "manual",
       cache: "no-store",
       signal: AbortSignal.timeout(TIMEOUT_MS),
     })
-  } catch {
-    return deny("unreachable")
+  } catch (err) {
+    return unreachable(networkCause(err))
   }
   if (res.status === 401 || res.status === 403) return deny("signed_out")
-  if (res.status !== 200) return deny("unreachable")
+  if (res.status !== 200) return unreachable(`status ${res.status}`)
   let body: unknown
   try {
     body = await res.json()
   } catch {
-    return deny("unreachable")
+    return unreachable("status 200 but the body is not JSON")
   }
   const { email, role } = (typeof body === "object" && body !== null ? body : {}) as { email?: unknown; role?: unknown }
-  if (role !== "admin") return typeof role === "string" ? deny("not_admin") : deny("unreachable")
-  if (typeof email !== "string" || email.length > 254 || !EMAIL_RE.test(email)) return deny("unreachable")
+  if (role !== "admin") return typeof role === "string" ? deny("not_admin") : unreachable("status 200 but no role")
+  if (typeof email !== "string" || email.length > 254 || !EMAIL_RE.test(email)) return unreachable("status 200 but no valid email")
   return { ok: true, email: email.toLowerCase() }
+}
+
+// Diagnostics for ops: the cause only (status, timeout, connection error code). Never the cookie or any header.
+function unreachable(cause: string): AgentHubLookup {
+  console.warn(`[agenthub] GET /api/auth/me failed (AgentHub unreachable): ${cause}`)
+  return deny("unreachable")
+}
+
+function networkCause(err: unknown): string {
+  const e = err as { name?: unknown; cause?: { code?: unknown } }
+  if (e?.name === "TimeoutError" || e?.name === "AbortError") return `timeout after ${TIMEOUT_MS} ms`
+  const code = typeof e?.cause?.code === "string" ? e.cause.code : null
+  return code ? `connection error ${code}` : `connection error ${typeof e?.name === "string" ? e.name : "unknown"}`
 }
 
 /**
@@ -65,13 +81,21 @@ export async function signInFromAgentHub(email: string): Promise<SessionPayload>
   const existing = await prisma.user.findUnique({ where: { email: addr }, select: { lockedAt: true } })
   if (existing && isLocked(existing.lockedAt)) throw new MidError("account_locked")
   const now = new Date()
-  const user = await prisma.user.upsert({
-    where: { email: addr },
-    update: { role: "admin", lastLoginAt: now },
-    // passwordHash is NOT NULL in the schema; "" never matches anything and there is no password login anyway.
-    create: { email: addr, role: "admin", passwordHash: "", lastLoginAt: now },
-    select: { id: true, email: true },
-  })
+  const update = { role: "admin", lastLoginAt: now }
+  let user: { id: string; email: string }
+  try {
+    user = await prisma.user.upsert({
+      where: { email: addr },
+      update,
+      // passwordHash is NOT NULL in the schema; "" never matches anything and there is no password login anyway.
+      create: { email: addr, role: "admin", passwordHash: "", lastLoginAt: now },
+      select: { id: true, email: true },
+    })
+  } catch (e) {
+    // Two first-ever sign-ins racing: the other request created the row between our lookup and insert.
+    if ((e as { code?: string }).code !== "P2002") throw e
+    user = await prisma.user.update({ where: { email: addr }, data: update, select: { id: true, email: true } })
+  }
   const at = Math.floor(now.getTime() / 1000)
   return { userId: user.id, email: user.email, role: "admin", authAt: at, ahAt: at }
 }

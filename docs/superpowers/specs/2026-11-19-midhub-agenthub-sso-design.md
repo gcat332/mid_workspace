@@ -21,6 +21,12 @@ exactly AgentHub's **admins**. MidHub keeps no passwords, no SSO config and no u
   older than 5 minutes since `ahAt` re-ask AgentHub; not admin / 401 / AgentHub unreachable → session cleared
   (fail closed: option ข. accepts that MidHub is unusable while AgentHub is down). Logout from MidHub clears
   only MidHub's cookie.
+  **Limitation until the AgentHub patch plan's Task 0 is applied:** AgentHub's `/api/auth/me` currently returns the role
+  stored in its sliding session JWT, not the DB. A demoted (or deleted/locked) AgentHub admin therefore keeps MidHub
+  access until their AgentHub session ends (up to 4 h idle, indefinitely while they keep using AgentHub). To cut access
+  immediately, also lock them on MidHub's Users page. Once Task 0 is in, the 5-minute re-check is effective. An admin
+  who works only in MidHub must use AgentHub at least every 4 h (MidHub's checks do not extend AgentHub's session),
+  otherwise MidHub asks them to sign in again.
 - **No local login (option ข.).** Removed: password login, MidHub OIDC/IdP login and its admin page, password
   reset, user create/edit/role management UI and APIs, ADMIN_EMAIL/ADMIN_PASSWORD seeding and env requirement.
   Kept: Users page becomes read-only (who has signed in, last seen, lock/unlock), lockout of a MidHub user

@@ -69,7 +69,8 @@ if you want to run `prisma migrate deploy` before install.sh, create it yourself
 An absolute `file:` path resolves identically for the app and for `prisma migrate`. `JWT_SECRET` must
 be >= 32 chars; `MIDHUB_VAULT_KEY` is base64 of exactly 32 bytes (losing it makes stored instance
 passwords unrecoverable - back it up). `AGENTHUB_URL` (default `http://127.0.0.1:3000`) is where MidHub asks
-AgentHub who is signed in; it must be a loopback `http://` URL with a port (anything else is refused at start).
+AgentHub who is signed in; it must be a loopback `http://` URL with a port. Anything else is logged at start
+(`[boot] env failed: ...` in `journalctl -u bsm-midhub`) and every sign-in then fails with a 500 carrying that message.
 `ADMIN_EMAIL`, `ADMIN_PASSWORD` and `PUBLIC_URL` are no longer used; if an older `.env.local` still has them they
 are ignored (remove them when convenient).
 
@@ -81,8 +82,19 @@ management of its own. Opening `/midhub` without a MidHub session sends the brow
 `session` cookie, over loopback) and either signs the admin in (the user row is created on first sign-in) or shows
 the access page `/midhub/login` with the reason (not signed in to AgentHub / not an AgentHub admin / AgentHub
 unreachable / locked in MidHub) and a link to AgentHub's `/login`. Every 5 minutes a session is re-checked with
-AgentHub: a demoted or signed-out admin loses MidHub on the next request. If AgentHub is down, MidHub cannot be
-used (fail closed). Logging out of MidHub clears only MidHub's cookie.
+AgentHub: an admin who signed out of AgentHub loses MidHub on the next request. If AgentHub is down, MidHub cannot
+be used (fail closed). Logging out of MidHub clears only MidHub's cookie.
+
+**Demoting an admin - current limitation.** Until the AgentHub change "Task 0: `/api/auth/me` reflects the DB"
+(`docs/superpowers/plans/2026-11-18-agenthub-midhub-patch.md`) is applied, AgentHub's `/api/auth/me` reports the role
+stored in the person's AgentHub session, not the database. Demoting (or deleting/locking) an AgentHub admin then
+removes MidHub access only when their AgentHub session ends: up to 4 h after their last AgentHub activity, and longer
+while they keep using AgentHub. **To cut access immediately, also lock them on MidHub's Users page** (Admin ->
+ผู้ใช้). Once that AgentHub change is in, the 5-minute re-check is effective.
+
+**4 h idle.** MidHub's checks do not extend the AgentHub session (its cookie lasts 4 h from the last AgentHub
+request). An admin who works only in MidHub must use AgentHub at least every 4 h, or MidHub will ask them to sign
+in again ("ยังไม่ได้เข้าสู่ระบบ AgentHub").
 
 ## 3. Install units (root)
 
@@ -185,7 +197,7 @@ Then:
 There are no passwords to get wrong. An admin can lock a user under Admin -> ผู้ใช้ (that person then cannot use
 MidHub even while still an AgentHub admin) and unlock them there; a lock lasts until unlocked. Admins cannot lock
 themselves. Break-glass if every admin is locked, as `bsmmidhub` in APP_DIR:
-`echo 'UPDATE "User" SET "lockedAt" = NULL;' | DATABASE_URL=file:/opt/midhub/db/midhub.db npx prisma db execute --stdin`. To take someone's access away for good, remove their admin role in AgentHub.
+`echo 'UPDATE "User" SET "lockedAt" = NULL;' | DATABASE_URL=file:/opt/midhub/db/midhub.db npx prisma db execute --stdin`. To take someone's access away for good, lock them here and remove their admin role in AgentHub (see the limitation under "Who can sign in").
 
 ## 6. Sign-in via AgentHub
 

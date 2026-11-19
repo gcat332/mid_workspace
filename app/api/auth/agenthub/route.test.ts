@@ -65,6 +65,40 @@ it.each(["//evil.com", "/\\evil.com", "https://evil.com", "evil", "/a/../../x", 
     expect(res.headers.get("location")).toBe("/midhub")
   })
 
+it.each([
+  ["%2e%2e (percent-encoded dot segment)", "/%2e%2e/login"],
+  ["%2E%2E upper case", "/mids/%2E%2E/%2E%2E/login"],
+  [".. plain", "/mids/../../login"],
+  ["single dot segment", "/./login"],
+  ["CRLF", "/mids\r\nSet-Cookie: x=1"],
+  ["encoded CRLF", "/mids%0d%0aSet-Cookie:%20x=1"],
+  ["NUL", "/a%00b"],
+  ["bad percent escape", "/mids/%zz"],
+])("next with %s falls back to /midhub", async (_l, n) => {
+  lookupAgentHubAdmin.mockResolvedValue({ ok: true, email: "boss@x.com" })
+  const res = await GET(req("?next=" + encodeURIComponent(n)))
+  expect(res.status).toBe(303)
+  expect(res.headers.get("location")).toBe("/midhub")
+})
+
+it("a non-Latin-1 next (Thai) is percent-encoded instead of crashing the route", async () => {
+  lookupAgentHubAdmin.mockResolvedValue({ ok: true, email: "boss@x.com" })
+  const res = await GET(req("?next=" + encodeURIComponent("/mids/ก?q=ข ค")))
+  expect(res.status).toBe(303)
+  const loc = res.headers.get("location")!
+  expect(loc).toMatch(/^[\x21-\x7e]+$/)
+  const u = new URL(loc, "http://x")
+  expect(u.pathname).toBe("/midhub/mids/%E0%B8%81")
+  expect(u.searchParams.get("q")).toBe("ข ค")
+  expect(sessionFrom(res)).toBeTruthy()
+})
+
+it("an existing percent-encoding in next is kept as is (not double-encoded)", async () => {
+  lookupAgentHubAdmin.mockResolvedValue({ ok: true, email: "boss@x.com" })
+  const res = await GET(req("?next=" + encodeURIComponent("/mids/a%20b?x=%2F")))
+  expect(res.headers.get("location")).toBe("/midhub/mids/a%20b?x=%2F")
+})
+
 it.each(["signed_out", "not_admin", "unreachable"] as const)("%s -> 303 to the access page with that reason, no session", async (reason) => {
   lookupAgentHubAdmin.mockResolvedValue({ ok: false, reason })
   const res = await GET(req("?next=%2Fmids"))

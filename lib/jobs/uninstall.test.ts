@@ -11,8 +11,6 @@ const root = join(dir, "root")
 process.env.DATABASE_URL = dbUrl
 process.env.MIDHUB_ROOT = root
 process.env.JWT_SECRET = "x".repeat(40)
-process.env.ADMIN_EMAIL = "a@x.com"
-process.env.ADMIN_PASSWORD = "pw"
 process.env.MIDHUB_VAULT_KEY = Buffer.alloc(32, 7).toString("base64")
 
 const admin = { userId: "admin1", email: "a@x.com", role: "admin" as const, ahAt: 0 }
