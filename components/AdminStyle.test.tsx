@@ -68,4 +68,20 @@ describe("Configuration form", () => {
     expect(label.className).toContain("text-xs")
     expect(label.className).toContain("font-medium")
   })
+
+  it("groups fields into Instance, MID Server and Proxy sections in that order", async () => {
+    const f = { url: "https://x", username: "u", midName: "m", useProxy: true, proxyHost: "p", proxyPort: "3128", proxyUser: "", heapMb: 1024 }
+    mocked.mockImplementation((p) => json(String(p).endsWith("/backups") ? { backups: [] } : { files: { "config.xml": { content: "", hash: "a" }, "wrapper-override.conf": { content: "", hash: "b" } }, form: f }))
+    render(<ConfigTab midName="m" canRestart={false} onRestart={() => {}} />)
+    await screen.findByRole("button", { name: "Save" })
+    const groups = screen.getAllByRole("group").filter((g) => g.tagName === "FIELDSET")
+    expect(groups.map((g) => g.querySelector("legend")?.textContent)).toEqual(["Instance", "MID Server", "Proxy"])
+    const fieldsOf = (i: number) => [...groups[i].querySelectorAll("label")].map((l) => (l.textContent ?? "").replace("(เว้นว่าง = ไม่เปลี่ยน)", "").trim())
+    expect(fieldsOf(0)).toEqual(["Instance URL", "Username", "Password"])
+    expect(fieldsOf(1)).toEqual(["MID Server Name", "Heap (MB)"])
+    expect(fieldsOf(2)).toEqual(["Use Proxy", "Proxy Host", "Proxy Port", "Proxy Username", "Proxy Password"])
+    // Instance URL spans the full row; the heap range is helper text, not part of the label.
+    expect(screen.getByText("Instance URL").closest("label")!.className).toContain("lg:col-span-2")
+    expect(screen.getByText(/256–8192 MB/)).toBeTruthy()
+  })
 })

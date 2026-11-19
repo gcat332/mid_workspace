@@ -29,6 +29,9 @@ const LANG: Record<ConfigFile, string> = { "config.xml": "xml", "wrapper-overrid
 const NETWORK: ApiError = { message: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่" }
 const input = `mt-1 ${inputCls} disabled:bg-gray-50 dark:disabled:bg-neutral-800`
 const fieldCls = "text-xs font-medium text-gray-600 dark:text-neutral-300"
+/** One section of the form: a titled group laid out in two columns from lg. */
+const sectionCls = "grid gap-x-4 gap-y-3 lg:grid-cols-2"
+const legendCls = "mb-2 text-sm font-semibold text-gray-900 dark:text-neutral-100"
 const btn = "rounded-lg border px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
 const fmt = (iso: string) => new Date(iso).toLocaleString("th-TH")
 const KEEP_PW = "•••••••• (ตั้งไว้แล้ว — เว้นว่าง = ไม่เปลี่ยน)"
@@ -141,42 +144,57 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
       )}
 
       {mode === "form" ? (
-        <form className="grid max-w-4xl gap-x-4 gap-y-3 lg:grid-cols-2" onSubmit={(e) => {
+        <form className="max-w-4xl space-y-5" onSubmit={(e) => {
           e.preventDefault()
           void put({ baseHash: data.files["config.xml"].hash, wrapperBaseHash: data.files["wrapper-override.conf"].hash, form: { ...form, password: pw.password, proxyPassword: pw.proxyPassword } })
         }}>
-          <label className={fieldCls}>Instance URL
-            <input className={input} value={form.url} onChange={(e) => setF("url", e.target.value)} /></label>
-          <label className={fieldCls}>Username
-            <input className={input} value={form.username} onChange={(e) => setF("username", e.target.value)} autoComplete="off" /></label>
-          <label className={fieldCls}>Password <span className="font-normal text-gray-500">(เว้นว่าง = ไม่เปลี่ยน)</span>
-            <input className={input} type="password" value={pw.password} onChange={(e) => { setSaved(false); setPw({ ...pw, password: e.target.value }) }} autoComplete="new-password"
-              placeholder={form.hasPassword ? KEEP_PW : "Not Set"} /></label>
-          <label className={fieldCls}>MID Server Name
-            <input className={input} value={form.midName} onChange={(e) => setF("midName", e.target.value)} /></label>
-          <label className="flex items-center gap-2 text-sm text-gray-700 lg:col-span-2">
-            <input type="checkbox" checked={form.useProxy} onChange={(e) => setF("useProxy", e.target.checked)} /> Use Proxy</label>
-          {form.useProxy && (
-            <div className="grid gap-x-4 gap-y-3 rounded-lg border border-gray-200 p-3 lg:col-span-2 lg:grid-cols-2">
-              <label className={fieldCls}>Proxy host
-                <input className={input} value={form.proxyHost} onChange={(e) => setF("proxyHost", e.target.value)} /></label>
-              <label className={fieldCls}>Proxy port
-                <input className={input} inputMode="numeric" value={form.proxyPort} onChange={(e) => setF("proxyPort", e.target.value)} /></label>
-              <label className={fieldCls}>Proxy username
-                <input className={input} value={form.proxyUser} onChange={(e) => setF("proxyUser", e.target.value)} autoComplete="off" /></label>
-              <label className={fieldCls}>Proxy Password <span className="font-normal text-gray-500">(เว้นว่าง = ไม่เปลี่ยน)</span>
-                <input className={input} type="password" value={pw.proxyPassword} onChange={(e) => { setSaved(false); setPw({ ...pw, proxyPassword: e.target.value }) }} autoComplete="new-password"
-                  placeholder={form.hasProxyPassword ? KEEP_PW : "Not Set"} /></label>
+          <fieldset className={sectionCls}>
+            <legend className={legendCls}>Instance</legend>
+            <label className={`${fieldCls} lg:col-span-2`}>Instance URL
+              <input className={input} value={form.url} onChange={(e) => setF("url", e.target.value)} /></label>
+            <label className={fieldCls}>Username
+              <input className={input} value={form.username} onChange={(e) => setF("username", e.target.value)} autoComplete="off" /></label>
+            <label className={fieldCls}>Password <span className="font-normal text-gray-500">(เว้นว่าง = ไม่เปลี่ยน)</span>
+              <input className={input} type="password" value={pw.password} onChange={(e) => { setSaved(false); setPw({ ...pw, password: e.target.value }) }} autoComplete="new-password"
+                placeholder={form.hasPassword ? KEEP_PW : "Not Set"} /></label>
+          </fieldset>
+
+          <fieldset className={sectionCls}>
+            <legend className={legendCls}>MID Server</legend>
+            <label className={fieldCls}>MID Server Name
+              <input className={input} value={form.midName} onChange={(e) => setF("midName", e.target.value)} /></label>
+            <div>
+              <label className={`${fieldCls} block`}>Heap (MB)
+                <input className={input} type="number" min={MIN_HEAP_MB} max={MAX_HEAP_MB} step={64} value={Number.isNaN(form.heapMb) ? "" : form.heapMb}
+                  onChange={(e) => setF("heapMb", e.target.valueAsNumber)} aria-invalid={!heapOk} aria-describedby="heap-range heap-note" /></label>
+              <p id="heap-range" className="mt-1 text-xs text-gray-500">{MIN_HEAP_MB}–{MAX_HEAP_MB} MB</p>
             </div>
-          )}
-          <label className={fieldCls}>Heap (MB), {MIN_HEAP_MB}-{MAX_HEAP_MB}
-            <input className={input} type="number" min={MIN_HEAP_MB} max={MAX_HEAP_MB} step={64} value={Number.isNaN(form.heapMb) ? "" : form.heapMb}
-              onChange={(e) => setF("heapMb", e.target.valueAsNumber)} aria-invalid={!heapOk} aria-describedby="heap-note" /></label>
-          {!heapOk && <p className="text-xs text-red-700 lg:col-span-2">RAM ต้องเป็นจำนวนเต็ม {MIN_HEAP_MB}-{MAX_HEAP_MB} MB</p>}
-          <p id="heap-note" className={`text-xs lg:col-span-2 ${heapChanged ? "text-amber-700" : "text-gray-500"}`}>
-            เปลี่ยน RAM แล้ว ระบบจะเขียน systemd unit ของ MID นี้ใหม่จากแม่แบบของ MidHub (unit ที่แก้เองบนเครื่องจะถูกทับ)
-          </p>
-          <div className="flex justify-end gap-2 lg:col-span-2"><button type="submit" disabled={busy || !heapOk || !!busyReason} className={`btn-primary px-4 py-2 text-sm`}>
+            {!heapOk && <p className="text-xs text-red-700 lg:col-span-2">RAM ต้องเป็นจำนวนเต็ม {MIN_HEAP_MB}-{MAX_HEAP_MB} MB</p>}
+            <p id="heap-note" className={`text-xs lg:col-span-2 ${heapChanged ? "text-amber-700" : "text-gray-500"}`}>
+              เปลี่ยน RAM แล้ว ระบบจะเขียน systemd unit ของ MID นี้ใหม่จากแม่แบบของ MidHub (unit ที่แก้เองบนเครื่องจะถูกทับ)
+            </p>
+          </fieldset>
+
+          <fieldset className={sectionCls}>
+            <legend className={legendCls}>Proxy</legend>
+            <label className="flex items-center gap-2 text-sm text-gray-700 lg:col-span-2">
+              <input type="checkbox" checked={form.useProxy} onChange={(e) => setF("useProxy", e.target.checked)} /> Use Proxy</label>
+            {form.useProxy && (
+              <>
+                <label className={fieldCls}>Proxy Host
+                  <input className={input} value={form.proxyHost} onChange={(e) => setF("proxyHost", e.target.value)} /></label>
+                <label className={fieldCls}>Proxy Port
+                  <input className={input} inputMode="numeric" value={form.proxyPort} onChange={(e) => setF("proxyPort", e.target.value)} /></label>
+                <label className={fieldCls}>Proxy Username
+                  <input className={input} value={form.proxyUser} onChange={(e) => setF("proxyUser", e.target.value)} autoComplete="off" /></label>
+                <label className={fieldCls}>Proxy Password <span className="font-normal text-gray-500">(เว้นว่าง = ไม่เปลี่ยน)</span>
+                  <input className={input} type="password" value={pw.proxyPassword} onChange={(e) => { setSaved(false); setPw({ ...pw, proxyPassword: e.target.value }) }} autoComplete="new-password"
+                    placeholder={form.hasProxyPassword ? KEEP_PW : "Not Set"} /></label>
+              </>
+            )}
+          </fieldset>
+
+          <div className="flex justify-end gap-2 border-t border-gray-200 pt-4"><button type="submit" disabled={busy || !heapOk || !!busyReason} className={`btn-primary px-4 py-2 text-sm`}>
             {busy ? "Saving…" : "Save"}</button></div>
         </form>
       ) : (
