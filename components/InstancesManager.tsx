@@ -82,7 +82,7 @@ export function InstancesManager() {
       setErr({ message: "ต้องใส่ password ด้วยเมื่อตั้ง MID user ครั้งแรก" }); return
     }
     if (Object.keys(body).length === 0) { setEditing(null); return }
-    const res = await call(`/instances/${encodeURIComponent(editing.id)}`, jsonInit("PATCH", body))
+    const res = await call(`/instances/${encodeURIComponent(editing.id)}`, jsonInit("POST", body) /* not PATCH: the F5 WAF rejects it */)
     if (!res) return
     setEditing(null); setEPass("")
     setInfo("บันทึกแล้ว")

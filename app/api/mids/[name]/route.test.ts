@@ -44,6 +44,13 @@ beforeEach(async () => {
 })
 
 describe("PATCH /api/mids/[name] agentAccess", () => {
+  it("POST is the same handler (the corporate F5 WAF rejects PATCH, so the browser sends POST)", async () => {
+    await mk("m1")
+    const res = await (await import("./route")).POST(
+      new Request("http://x/api/mids/m1", { method: "POST", body: JSON.stringify({ agentAccess: true }) }), ctx("m1"))
+    expect(res.status).toBe(200)
+    expect((await prisma.midServer.findUniqueOrThrow({ where: { name: "m1" } })).agentAccess).toBe(true)
+  })
   it("defaults to false, toggles on and off, returns the value and audits", async () => {
     await mk("m1")
     expect((await prisma.midServer.findUniqueOrThrow({ where: { name: "m1" } })).agentAccess).toBe(false)

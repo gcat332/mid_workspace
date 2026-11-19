@@ -31,7 +31,7 @@ export function UsersManager({ myId }: { myId: string }) {
     setErr(null); setBusy(true)
     try {
       const res = await apiFetch(`/admin/users/${encodeURIComponent(user.id)}`, {
-        method: "PATCH",
+        method: "POST", // not PATCH: the F5 WAF rejects it
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(lock ? { lock: true } : { unlock: true }),
       })

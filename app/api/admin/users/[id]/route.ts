@@ -41,3 +41,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
     return handleRouteError(e)
   }
 }
+
+// The corporate F5 WAF in front of the domain rejects every PATCH (its "Request Rejected" page, status 200), so
+// the browser sends POST; PATCH stays for API clients that are not behind it.
+export const POST = PATCH

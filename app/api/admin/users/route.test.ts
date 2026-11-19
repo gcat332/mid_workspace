@@ -55,7 +55,8 @@ it("create, edit, role, password and delete are gone", async () => {
   const list = await import("./route")
   const one = await import("./[id]/route")
   expect(Object.keys(list)).toEqual(["GET"])
-  expect(Object.keys(one)).toEqual(["PATCH"])
+  expect(Object.keys(one).sort()).toEqual(["PATCH", "POST"])
+  expect(one.POST).toBe(one.PATCH) // POST = PATCH because the F5 WAF rejects PATCH; still lock/unlock only
   const { PATCH } = one
   for (const body of [{ role: "member" }, { password: "newpassword" }, { email: "x@y.z" }, {}, { lock: true, unlock: true }, { lock: "yes" }]) {
     const res = await PATCH(json("PATCH", body), ctx("u2"))
@@ -102,7 +103,10 @@ it("PATCH 404 for an unknown user (P2025)", async () => {
 describe("the users page is read-only apart from lock/unlock", () => {
   it("UsersManager has no create/role/password/delete controls", async () => {
     const src = (await import("node:fs")).readFileSync(new URL("../../../../components/UsersManager.tsx", import.meta.url), "utf8")
-    for (const gone of ["รหัสผ่าน", "เพิ่ม", "ลบผู้ใช้", "เลื่อนเป็น", "ลดเป็น", '"POST"', '"DELETE"', "password"]) expect(src, gone).not.toContain(gone)
+    for (const gone of ["รหัสผ่าน", "เพิ่ม", "ลบผู้ใช้", "เลื่อนเป็น", "ลดเป็น", '"DELETE"', "password"]) expect(src, gone).not.toContain(gone)
+    // POST appears once: the lock/unlock call (sent as POST because the F5 WAF rejects PATCH), not a create.
+    expect(src.match(/"POST"/g) ?? []).toHaveLength(1)
+    expect(src).toContain("JSON.stringify(lock ? { lock: true } : { unlock: true })")
     expect(src).toContain("ปลดล็อก")
     expect(src).toContain("ล็อก")
   })

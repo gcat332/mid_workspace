@@ -20,7 +20,7 @@ describe("AgentAccessSwitch", () => {
     expect(screen.queryByText(new RegExp(AGENT_ACCESS_NOTE))).toBeNull()
   })
 
-  it("turning on flips at once, PATCHes, shows the note, no confirm dialog", async () => {
+  it("turning on flips at once, POSTs (the F5 WAF rejects PATCH), shows the note, no confirm dialog", async () => {
     let release!: (r: Response) => void
     apiFetch.mockReturnValue(new Promise<Response>((r) => { release = r }))
     const onChanged = vi.fn()
@@ -29,7 +29,7 @@ describe("AgentAccessSwitch", () => {
     expect(sw().getAttribute("aria-checked")).toBe("true")
     expect(screen.getByText(new RegExp(AGENT_ACCESS_NOTE))).toBeTruthy()
     expect(screen.queryByRole("dialog")).toBeNull()
-    expect(apiFetch).toHaveBeenCalledWith("/mids/m1", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ agentAccess: true }) }))
+    expect(apiFetch).toHaveBeenCalledWith("/mids/m1", expect.objectContaining({ method: "POST", body: JSON.stringify({ agentAccess: true }) }))
     release(ok())
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
     expect(sw().getAttribute("aria-checked")).toBe("true")

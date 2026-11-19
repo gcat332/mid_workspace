@@ -97,7 +97,7 @@ export function InstanceStep({ isAdmin, state, onChange, onLabel }: Props) {
     setInfo("เชื่อมต่อสำเร็จและบันทึก instance แล้ว")
   }
   async function saveCreds(i: InstanceItem) {
-    const res = await call(`/instances/${encodeURIComponent(i.id)}`, jsonInit("PATCH", { midUser: fixUser, password: fixPass }))
+    const res = await call(`/instances/${encodeURIComponent(i.id)}`, jsonInit("POST", { midUser: fixUser, password: fixPass }) /* not PATCH: the F5 WAF rejects it */)
     if (!res) return
     const updated = (await res.json()) as InstanceItem
     setFixUser(""); setFixPass("")

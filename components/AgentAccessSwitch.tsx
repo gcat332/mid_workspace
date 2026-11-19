@@ -35,7 +35,7 @@ export function AgentAccessSwitch({ midName, enabled, disabledReason = null, onC
     setErr(null); setOptimistic(next); setSaving(true)
     try {
       const res = await apiFetch(`/mids/${encodeURIComponent(midName)}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agentAccess: next }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agentAccess: next }),
       })
       if (res.ok) { onChanged(); return }
       setOptimistic(null); setErr(await readApiError(res))
