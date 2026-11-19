@@ -6,12 +6,11 @@ import { createPortal } from "react-dom"
 import { ErrorNotice, type ApiError } from "../ErrorNotice"
 import { IconClose, IconDownload, IconSave } from "../icons"
 import { useIsDark } from "@/lib/ui/use-is-dark"
+import { editorLanguage, isCodeLanguage } from "@/lib/ui/editor-language"
 
 const EDITOR_LOADING = <p className="p-3 text-sm text-gray-500 dark:text-neutral-400">Loading…</p>
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false, loading: () => EDITOR_LOADING })
 
-const LANGS: Record<string, string> = { xml: "xml", json: "json", conf: "ini", properties: "ini", sh: "shell", js: "javascript", yaml: "yaml", yml: "yaml", md: "markdown", log: "plaintext" }
-const lang = (n: string) => LANGS[n.split(".").pop()?.toLowerCase() ?? ""] ?? "plaintext"
 
 type Props = {
   midName: string
@@ -40,7 +39,11 @@ const hdrBtn = "inline-flex items-center gap-1 rounded px-2.5 py-1 text-xs text-
 
 /** Full-screen editor sheet (AgentHub's maximised editor): Monaco plus a header with status and actions. */
 export function FileEditorModal(p: Props) {
-  const dark = useIsDark()
+  const appDark = useIsDark()
+  const language = editorLanguage(p.path)
+  // Code files always get the dark VS Code look (the `dark` class re-points the tokens inside the sheet); plain text follows the app.
+  const code = isCodeLanguage(language)
+  const dark = code || appDark
   const overlayRef = useRef<HTMLDivElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const saveRef = useRef(p.onSave)
@@ -69,12 +72,12 @@ export function FileEditorModal(p: Props) {
   const canSave = !p.readOnly && p.dirty && !p.saving && !p.busyReason
   return createPortal(
     // A backdrop click closes, but only when the press also started there (not a text selection dragged out of Monaco).
-    <div ref={overlayRef} className="fixed inset-0 z-[60] flex flex-col bg-black/40 backdrop-blur-sm p-2 sm:p-8"
+    <div ref={overlayRef} className={`fixed inset-0 z-[60] flex flex-col bg-black/40 backdrop-blur-sm p-2 sm:p-8${code ? " dark" : ""}`}
       onMouseDown={(e) => { pressedBackdrop.current = e.target === e.currentTarget }}
       onClick={(e) => { if (pressedBackdrop.current && e.target === e.currentTarget) p.onClose() }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="file-editor-title" tabIndex={-1}
-        className="flex min-h-0 flex-1 flex-col rounded-xl overflow-hidden bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700 shadow-2xl focus:outline-none">
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-gray-200 bg-gray-50 px-4 py-2.5 dark:border-neutral-700 dark:bg-neutral-800">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="file-editor-title" tabIndex={-1} data-code={code ? "true" : undefined}
+        className={`flex min-h-0 flex-1 flex-col rounded-xl overflow-hidden border shadow-2xl focus:outline-none ${code ? "border-[#3c3c3c] bg-[#1e1e1e] text-[#cccccc]" : "bg-white dark:bg-neutral-900 border-gray-200 dark:border-neutral-700"}`}>
+        <div className={`flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2.5 ${code ? "border-[#3c3c3c] bg-[#252526]" : "border-gray-200 bg-gray-50 dark:border-neutral-700 dark:bg-neutral-800"}`}>
           <h2 id="file-editor-title" className="min-w-0 flex-1 truncate font-mono text-sm text-gray-700 dark:text-neutral-200">{p.path}</h2>
           {p.dirty && (
             <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
@@ -111,7 +114,7 @@ export function FileEditorModal(p: Props) {
           </div>
         )}
         <div className="min-h-0 flex-1">
-          <MonacoEditor theme={dark ? "vs-dark" : "vs"} height="100%" language={lang(p.path)} path={`${p.midName}/${p.path}`} value={p.value} loading={EDITOR_LOADING}
+          <MonacoEditor theme={dark ? "vs-dark" : "vs"} height="100%" language={language} path={`${p.midName}/${p.path}`} value={p.value} loading={EDITOR_LOADING}
             onChange={(v) => p.onChange(v ?? "")}
             options={{ fontSize: 14, wordWrap: "on", minimap: { enabled: true }, scrollBeyondLastLine: false, automaticLayout: true, readOnly: p.readOnly }} />
         </div>
