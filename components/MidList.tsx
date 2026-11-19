@@ -26,7 +26,7 @@ export function MidList({ mids, selected, onSelect }: Props) {
                   <StatusDot tone={sv.tone} />
                   <span className={`truncate font-mono ${active ? "font-semibold text-brand-navy dark:text-blue-300" : "font-medium text-gray-900"}`}>{m.name}</span>
                   {m.agentAccess && (
-                    <span className="shrink-0 rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700">AgentHub</span>
+                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-medium text-blue-700 ${active ? "bg-white ring-1 ring-blue-300 dark:bg-neutral-900" : "bg-blue-50"}`}>AgentHub</span>
                   )}
                   <span className={jobNote ? "shrink-0 text-xs font-normal text-gray-600" : "sr-only"}>{sv.label}</span>
                 </span>

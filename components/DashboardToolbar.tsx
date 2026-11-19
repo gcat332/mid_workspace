@@ -22,7 +22,7 @@ export function DashboardToolbar({ host, mids, onImport, onCreate }: Props) {
   const q = host ? quotaView(host.quotaUsed, host.maxRunning) : null
   const midRam = mids.reduce((s, m) => s + (m.status.memoryBytes ?? 0), 0)
   const lowRam = host !== null && host.availableBytes < GIB
-  const usedPct = host && host.totalBytes > 0 ? Math.min(100, Math.round((midRam / host.totalBytes) * 100)) : 0
+  const usedPct = host && host.totalBytes > 0 ? Math.min(100, Math.round(((host.totalBytes - host.availableBytes) / host.totalBytes) * 100)) : 0
   const diskLow = host?.disk?.freeBytes != null && host.disk.freeBytes < MIN_FREE_BYTES
 
   return (
@@ -42,7 +42,7 @@ export function DashboardToolbar({ host, mids, onImport, onCreate }: Props) {
               {formatBytes(midRam)} MID{" "}
               <span className="text-xs font-normal text-gray-600">· {formatBytes(host.availableBytes)} free of {formatBytes(host.totalBytes)}</span>
             </span>
-            <span role="meter" aria-label="Memory used by MID" aria-valuemin={0} aria-valuemax={100} aria-valuenow={usedPct}
+            <span role="meter" aria-label="Memory in use" aria-valuemin={0} aria-valuemax={100} aria-valuenow={usedPct}
               className="mt-1 block h-1 overflow-hidden rounded-full bg-gray-200">
               <span className="block h-full rounded-full bg-blue-600" style={{ width: `${usedPct}%` }} />
             </span>

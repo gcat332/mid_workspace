@@ -140,7 +140,7 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
     document.getElementById(`tab-${TABS[i].id}`)?.focus()
   }
 
-  // Visible reasons for disabled header buttons (a title tooltip alone is invisible on touch and to many users).
+  // Screen-reader text for the disabled header buttons (each also carries its reason as a title tooltip).
   const reasons = [
     busyReason,
     !busyReason && !isUp ? RESTART_WHEN_UP : null,

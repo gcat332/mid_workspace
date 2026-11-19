@@ -32,7 +32,7 @@ describe("MidPanel lifecycle", () => {
     const onUninstall = vi.fn()
     panel(mk(), true, onUninstall)
     expect(btn("Start").disabled).toBe(false)
-    expect(item("Uninstall").disabled).toBe(false)
+    expect(item("Uninstall").getAttribute("aria-disabled")).toBeNull()
     expect(screen.queryByTestId("job-progress")).toBeNull()
     fireEvent.click(item("Uninstall"))
     expect(onUninstall).toHaveBeenCalledTimes(1)
@@ -42,7 +42,7 @@ describe("MidPanel lifecycle", () => {
     panel(mk({ state: "installing", job: J("install", "extract", "running") }))
     expect(screen.getByTestId("job-progress").textContent).toContain("j1")
     for (const n of ["Start", "Restart"]) expect(btn(n).disabled).toBe(true)
-    for (const n of ["Repair Permissions", "Uninstall"]) expect(item(n).disabled).toBe(true)
+    for (const n of ["Repair Permissions", "Uninstall"]) expect(item(n).getAttribute("aria-disabled")).toBe("true")
     expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("มีงานกำลังทำอยู่")
     fireEvent.click(screen.getByRole("tab", { name: "Configuration" }))
     expect(screen.getByTestId("config-tab").textContent).toBe("มีงานกำลังทำอยู่")
@@ -58,7 +58,7 @@ describe("MidPanel lifecycle", () => {
   it("failed install: progress (retry/cancel live inside it) is shown, Uninstall stays available to admins, tabs not blocked", () => {
     panel(mk({ state: "error", job: J("install", "extract", "failed") }))
     expect(screen.getByTestId("job-progress")).toBeTruthy()
-    expect(item("Uninstall").disabled).toBe(false)
+    expect(item("Uninstall").getAttribute("aria-disabled")).toBeNull()
     fireEvent.click(screen.getByRole("tab", { name: "Configuration" }))
     expect(screen.getByTestId("config-tab").textContent).toBe("null")
   })
@@ -82,13 +82,13 @@ describe("MidPanel lifecycle", () => {
 
   it("member: Uninstall disabled with 'ต้องเป็น Admin'", () => {
     panel(mk(), false)
-    expect(item("Uninstall").disabled).toBe(true)
+    expect(item("Uninstall").getAttribute("aria-disabled")).toBe("true")
     expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("ต้องเป็น Admin")
   })
 
   it("state other than installed|error: Uninstall disabled with the state reason", () => {
     panel(mk({ state: "upgrading" }))
-    expect(item("Uninstall").disabled).toBe(true)
+    expect(item("Uninstall").getAttribute("aria-disabled")).toBe("true")
     expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("ลบได้เฉพาะ MID ที่ติดตั้งเสร็จหรือมีปัญหา")
   })
 
@@ -103,7 +103,7 @@ describe("MidPanel lifecycle", () => {
     panel(mk({ state: "uninstalling", job: J(kind, "archive", "running") }))
     expect(screen.getByTestId("job-progress")).toBeTruthy()
     expect(btn("Start").disabled).toBe(true)
-    expect(item("Uninstall").disabled).toBe(true)
+    expect(item("Uninstall").getAttribute("aria-disabled")).toBe("true")
     expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("มีงานกำลังทำอยู่")
     expect(screen.queryByRole("link", { name: "View Progress" })).toBeNull()
   })
@@ -132,7 +132,7 @@ describe("MidPanel lifecycle", () => {
   it("optimisticBusy blocks writes before the poll reports the job", () => {
     panel(mk(), true, vi.fn(), { optimisticBusy: true })
     expect(btn("Start").disabled).toBe(true)
-    expect(item("Uninstall").disabled).toBe(true)
+    expect(item("Uninstall").getAttribute("aria-disabled")).toBe("true")
     expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("มีงานกำลังทำอยู่")
   })
 
@@ -169,7 +169,7 @@ describe("MidPanel header (option A)", () => {
     panel(mk())
     expect(screen.queryByText(/ยังไม่เปิดให้ใช้ในเวอร์ชันนี้/, { selector: "p" })).toBeNull()
     const up = item("Upgrade")
-    expect(up.disabled).toBe(true)
+    expect(up.getAttribute("aria-disabled")).toBe("true")
     expect(up.title).toBe("Upgrade ยังไม่เปิดให้ใช้ในเวอร์ชันนี้")
     expect(document.getElementById(up.getAttribute("aria-describedby")!)!.textContent).toBe(up.title)
   })
@@ -189,10 +189,36 @@ describe("MidPanel header (option A)", () => {
   it("Repair Permissions from the menu posts fixOwnership", async () => {
     const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }))
     vi.stubGlobal("fetch", fetchMock)
-    panel(mk())
-    fireEvent.click(item("Repair Permissions"))
-    await waitFor(() => expect(screen.getByText(/ซ่อมสิทธิ์ไฟล์แล้ว/)).toBeTruthy())
-    expect(JSON.stringify(fetchMock.mock.calls)).toContain("fixOwnership")
-    vi.unstubAllGlobals()
+    try {
+      panel(mk())
+      fireEvent.click(item("Repair Permissions"))
+      await waitFor(() => expect(screen.getByText(/ซ่อมสิทธิ์ไฟล์แล้ว/)).toBeTruthy())
+      expect(JSON.stringify(fetchMock.mock.calls)).toContain("fixOwnership")
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("an all-disabled menu still takes focus, arrows/Home/End move, Tab closes, activating a disabled item does nothing", () => {
+    const onUninstall = vi.fn()
+    panel(mk(), false, onUninstall, { optimisticBusy: true })
+    openMenu()
+    const items = screen.getAllByRole("menuitem")
+    expect(items.every((i) => i.getAttribute("aria-disabled") === "true")).toBe(true)
+    expect(document.activeElement).toBe(items[0])
+    const menu = screen.getByRole("menu")
+    fireEvent.keyDown(menu, { key: "ArrowDown" })
+    expect(document.activeElement).toBe(items[1])
+    fireEvent.keyDown(menu, { key: "End" })
+    expect(document.activeElement).toBe(items[2])
+    fireEvent.keyDown(menu, { key: "Home" })
+    expect(document.activeElement).toBe(items[0])
+    fireEvent.keyDown(menu, { key: "ArrowUp" })
+    expect(document.activeElement).toBe(items[2])
+    fireEvent.click(items[2])
+    expect(onUninstall).not.toHaveBeenCalled()
+    expect(screen.getByRole("menu")).toBeTruthy()
+    fireEvent.keyDown(menu, { key: "Tab" })
+    expect(screen.queryByRole("menu")).toBeNull()
   })
 })

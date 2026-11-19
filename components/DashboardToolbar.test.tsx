@@ -22,7 +22,7 @@ describe("DashboardToolbar strip", () => {
     expect(strip.textContent).toContain("6.0 GB free of 10.0 GB")
     expect(strip.textContent).toContain("Packages 2.0 GB")
     const meter = screen.getByRole("meter")
-    expect(meter.getAttribute("aria-valuenow")).toBe("10")
+    expect(meter.getAttribute("aria-valuenow")).toBe("40")
     expect(screen.getByRole("button", { name: "New MID Server" })).toBeTruthy()
     expect(screen.queryByText("Low RAM")).toBeNull()
   })
