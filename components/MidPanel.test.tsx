@@ -21,6 +21,8 @@ const mk = (over: Partial<MidView> = {}): MidView => ({
 })
 const J = (kind: string, stage: string, status: string) => ({ id: "j1", kind, stage, status, createdAt: "2026-11-18T05:00:00.000Z" })
 const btn = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement
+const openMenu = () => { if (!screen.queryByRole("menu")) fireEvent.click(screen.getByRole("button", { name: "More actions" })) }
+const item = (name: string) => { openMenu(); return screen.getByRole("menuitem", { name }) as HTMLButtonElement }
 type Extra = { jobOwnedElsewhere?: boolean; optimisticBusy?: boolean }
 const panel = (mid: MidView, isAdmin = true, onUninstall = vi.fn(), extra: Extra = {}) =>
   render(<MidPanel userId="u1" mid={mid} host={host} isAdmin={isAdmin} onChanged={() => {}} onUninstall={onUninstall} {...extra} />)
@@ -30,16 +32,17 @@ describe("MidPanel lifecycle", () => {
     const onUninstall = vi.fn()
     panel(mk(), true, onUninstall)
     expect(btn("Start").disabled).toBe(false)
-    expect(btn("Uninstall").disabled).toBe(false)
+    expect(item("Uninstall").disabled).toBe(false)
     expect(screen.queryByTestId("job-progress")).toBeNull()
-    fireEvent.click(btn("Uninstall"))
+    fireEvent.click(item("Uninstall"))
     expect(onUninstall).toHaveBeenCalledTimes(1)
   })
 
   it("active job: progress shown, Start/Restart/fix/Uninstall disabled with the visible reason, tabs get busyReason", () => {
     panel(mk({ state: "installing", job: J("install", "extract", "running") }))
     expect(screen.getByTestId("job-progress").textContent).toContain("j1")
-    for (const n of ["Start", "Restart", "Repair Permissions", "Uninstall"]) expect((screen.getByRole("button", { name: n }) as HTMLButtonElement).disabled).toBe(true)
+    for (const n of ["Start", "Restart"]) expect(btn(n).disabled).toBe(true)
+    for (const n of ["Repair Permissions", "Uninstall"]) expect(item(n).disabled).toBe(true)
     expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("มีงานกำลังทำอยู่")
     fireEvent.click(screen.getByRole("tab", { name: "Configuration" }))
     expect(screen.getByTestId("config-tab").textContent).toBe("มีงานกำลังทำอยู่")
@@ -55,7 +58,7 @@ describe("MidPanel lifecycle", () => {
   it("failed install: progress (retry/cancel live inside it) is shown, Uninstall stays available to admins, tabs not blocked", () => {
     panel(mk({ state: "error", job: J("install", "extract", "failed") }))
     expect(screen.getByTestId("job-progress")).toBeTruthy()
-    expect(btn("Uninstall").disabled).toBe(false)
+    expect(item("Uninstall").disabled).toBe(false)
     fireEvent.click(screen.getByRole("tab", { name: "Configuration" }))
     expect(screen.getByTestId("config-tab").textContent).toBe("null")
   })
@@ -79,13 +82,13 @@ describe("MidPanel lifecycle", () => {
 
   it("member: Uninstall disabled with 'ต้องเป็น Admin'", () => {
     panel(mk(), false)
-    expect(btn("Uninstall").disabled).toBe(true)
+    expect(item("Uninstall").disabled).toBe(true)
     expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("ต้องเป็น Admin")
   })
 
   it("state other than installed|error: Uninstall disabled with the state reason", () => {
     panel(mk({ state: "upgrading" }))
-    expect(btn("Uninstall").disabled).toBe(true)
+    expect(item("Uninstall").disabled).toBe(true)
     expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("ลบได้เฉพาะ MID ที่ติดตั้งเสร็จหรือมีปัญหา")
   })
 
@@ -100,7 +103,7 @@ describe("MidPanel lifecycle", () => {
     panel(mk({ state: "uninstalling", job: J(kind, "archive", "running") }))
     expect(screen.getByTestId("job-progress")).toBeTruthy()
     expect(btn("Start").disabled).toBe(true)
-    expect(btn("Uninstall").disabled).toBe(true)
+    expect(item("Uninstall").disabled).toBe(true)
     expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("มีงานกำลังทำอยู่")
     expect(screen.queryByRole("link", { name: "View Progress" })).toBeNull()
   })
@@ -129,7 +132,7 @@ describe("MidPanel lifecycle", () => {
   it("optimisticBusy blocks writes before the poll reports the job", () => {
     panel(mk(), true, vi.fn(), { optimisticBusy: true })
     expect(btn("Start").disabled).toBe(true)
-    expect(btn("Uninstall").disabled).toBe(true)
+    expect(item("Uninstall").disabled).toBe(true)
     expect(document.getElementById("mid-btn-reasons")!.textContent).toContain("มีงานกำลังทำอยู่")
   })
 
@@ -148,5 +151,48 @@ describe("MidPanel lifecycle", () => {
     cleanup()
     panel(mk({ state: "error", job: J("install", "extract", "failed") })) // shown in the panel already
     expect(screen.queryByRole("link", { name: "View Progress" })).toBeNull()
+  })
+})
+
+describe("MidPanel header (option A)", () => {
+  it("shows a mono name, Restart/Start visible and a More actions menu with the three items", () => {
+    panel(mk())
+    expect(screen.getByRole("heading", { name: "m1" }).className).toContain("font-mono")
+    expect(btn("Restart")).toBeTruthy()
+    expect(screen.queryByRole("menu")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Uninstall" })).toBeNull()
+    fireEvent.click(btn("More actions"))
+    expect(screen.getAllByRole("menuitem").map((e) => e.textContent)).toEqual(["Repair Permissions", "Upgrade", "Uninstall"])
+  })
+
+  it("Upgrade is disabled, its reason is the title and screen-reader text; the old note line is gone", () => {
+    panel(mk())
+    expect(screen.queryByText(/ยังไม่เปิดให้ใช้ในเวอร์ชันนี้/, { selector: "p" })).toBeNull()
+    const up = item("Upgrade")
+    expect(up.disabled).toBe(true)
+    expect(up.title).toBe("Upgrade ยังไม่เปิดให้ใช้ในเวอร์ชันนี้")
+    expect(document.getElementById(up.getAttribute("aria-describedby")!)!.textContent).toBe(up.title)
+  })
+
+  it("the menu closes on Escape (focus back on the button) and on an outside press", () => {
+    panel(mk())
+    fireEvent.click(btn("More actions"))
+    expect(screen.getByRole("menu")).toBeTruthy()
+    fireEvent.keyDown(document, { key: "Escape" })
+    expect(screen.queryByRole("menu")).toBeNull()
+    expect(document.activeElement).toBe(btn("More actions"))
+    fireEvent.click(btn("More actions"))
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByRole("menu")).toBeNull()
+  })
+
+  it("Repair Permissions from the menu posts fixOwnership", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+    panel(mk())
+    fireEvent.click(item("Repair Permissions"))
+    await waitFor(() => expect(screen.getByText(/ซ่อมสิทธิ์ไฟล์แล้ว/)).toBeTruthy())
+    expect(JSON.stringify(fetchMock.mock.calls)).toContain("fixOwnership")
+    vi.unstubAllGlobals()
   })
 })

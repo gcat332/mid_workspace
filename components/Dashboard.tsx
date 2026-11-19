@@ -172,11 +172,11 @@ export function Dashboard({ email, userId, isAdmin }: { email: string; userId: s
             </button>
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-[14rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)]">
-            <nav aria-label="MID" className="min-w-0 rounded-xl border border-gray-200 bg-white dark:bg-neutral-800 p-2">
+          <div className="grid items-start gap-4 md:grid-cols-[14rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)]">
+            <nav aria-label="MID" className="min-w-0 rounded-xl border border-gray-200 bg-white p-1.5 shadow-[0_1px_2px_rgba(23,35,50,0.06)] dark:bg-neutral-800">
               <MidList mids={mids} selected={selected} onSelect={pick} />
             </nav>
-            <div ref={panelRef} className="min-w-0 scroll-mt-4 rounded-xl border border-gray-200 bg-white dark:bg-neutral-800 p-4 sm:p-5">
+            <div ref={panelRef} className="min-w-0 scroll-mt-4 rounded-xl border border-gray-200 bg-white p-4 shadow-[0_1px_2px_rgba(23,35,50,0.06)] dark:bg-neutral-800 sm:p-5">
               {current
                 ? <MidPanel key={current.name} mid={current} host={host} isAdmin={isAdmin} userId={userId} onChanged={() => void refresh()} onUninstall={(m) => setUninstalling({ mid: m, jobId: null })}
                     jobOwnedElsewhere={uninstalling?.mid.name === current.name} optimisticBusy={optimistic?.name === current.name} />

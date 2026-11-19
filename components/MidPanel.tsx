@@ -9,6 +9,7 @@ import { LogTab } from "./LogTab"
 import { JobProgress } from "./JobProgress"
 import { OverviewTab } from "./OverviewTab"
 import { apiFetch } from "@/lib/ui/api"
+import { MidActionsMenu } from "./MidActionsMenu"
 import { StatusPill } from "@/components/StatusPill"
 import { failedJobShown, jobIsActive, statusView, type HostView, type MidView } from "@/lib/ui/status-view"
 import { tabKeyTarget } from "@/lib/ui/tabs"
@@ -33,7 +34,8 @@ const JOB_FAILED = "งานล้มเหลว — ลองใหม่ห�
 const NEED_ADMIN = "ต้องเป็น Admin"
 const UNINSTALL_STATE = "ลบได้เฉพาะ MID ที่ติดตั้งเสร็จหรือมีปัญหา"
 const RESTART_WHEN_UP = "Restart ใช้ได้เมื่อ MID กำลังรัน (ตอนนี้ใช้ Start แทน)"
-const hdrBtn = "rounded-lg border px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+const hdrBtn = "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
+const icon = { "aria-hidden": true, viewBox: "0 0 16 16", className: "size-3.5", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round" } as const
 
 type Props = {
   mid: MidView
@@ -142,42 +144,50 @@ export function MidPanel({ mid, host, isAdmin, userId, onChanged, onUninstall, j
   const reasons = [
     busyReason,
     !busyReason && !isUp ? RESTART_WHEN_UP : null,
-    NOT_YET,
     uninstallReason && uninstallReason !== busyReason ? `Uninstall: ${uninstallReason}` : null,
   ].filter(Boolean) as string[]
 
   return (
     <section aria-label={`MID ${mid.name}`} className="min-w-0">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="mr-2 min-w-0 break-all text-xl font-semibold text-gray-900">{mid.name}</h2>
+        <h2 className="mr-2 min-w-0 break-all font-mono text-xl font-semibold text-gray-900">{mid.name}</h2>
         <StatusPill view={sv} />
-        <div className="flex flex-wrap gap-2 sm:ml-auto">
+        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
           <button type="button" onClick={() => request("restart")} disabled={busy || !!busyReason || !isUp}
-            aria-describedby="mid-btn-reasons"
-            className={`${hdrBtn} border-gray-300 text-gray-800 hover:bg-gray-50`}>Restart</button>
+            aria-describedby="mid-btn-reasons" title={busyReason ?? (!isUp ? RESTART_WHEN_UP : undefined)}
+            className={`${hdrBtn} border-gray-300 text-gray-800 hover:bg-gray-50`}>
+            <svg {...icon}><path d="M13 8a5 5 0 1 1-1.5-3.5M13 2.5V5h-2.5" /></svg>Restart
+          </button>
           {isUp ? (
             <button type="button" onClick={() => request("stop")} disabled={busy || !!busyReason}
-              className={`${hdrBtn} border-red-300 text-red-700 hover:bg-red-50`}>Stop</button>
+              aria-describedby="mid-btn-reasons" title={busyReason ?? undefined}
+              className={`${hdrBtn} border-red-300 text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40`}>
+              <svg {...icon}><rect x="4" y="4" width="8" height="8" rx="1.5" /></svg>Stop
+            </button>
           ) : (
             <button type="button" onClick={() => request("start")} disabled={busy || !!busyReason || startBlocked}
-              aria-describedby={startBlocked ? "mid-start-reason" : undefined}
-              className={`${hdrBtn} border-success-solid bg-success-solid text-white hover:bg-success-solid-press`}>Start</button>
+              aria-describedby={startBlocked ? "mid-start-reason" : "mid-btn-reasons"}
+              title={busyReason ?? (startBlocked ? startReason : undefined)}
+              className={`${hdrBtn} border-success-solid bg-success-solid text-white hover:bg-success-solid-press`}>
+              <svg {...icon}><path d="M5 3.5v9l7-4.5z" /></svg>Start
+            </button>
           )}
-          <button type="button" onClick={() => void fixOwnership()} disabled={fixing || !!busyReason}
-            title="ให้ไฟล์ทั้งหมดของ MID เป็นของ midsvc:midhub และกลุ่มแก้ไขได้ (ใช้เมื่อแก้ไฟล์ไม่ได้เพราะสิทธิ์)"
-            className={`${hdrBtn} border-gray-300 text-gray-800 hover:bg-gray-50`}>{fixing ? "Repairing…" : "Repair Permissions"}</button>
-          <button type="button" disabled aria-describedby="mid-btn-reasons" className={`${hdrBtn} border-gray-300 text-gray-800`}>Upgrade</button>
-          <button type="button" onClick={() => onUninstall(mid)} disabled={uninstallReason !== null} aria-describedby="mid-btn-reasons"
-            className={`${hdrBtn} border-red-300 text-red-700 hover:bg-red-50`}>Uninstall</button>
+          <MidActionsMenu items={[
+            { label: fixing ? "Repairing…" : "Repair Permissions", onSelect: () => void fixOwnership(), disabled: fixing || !!busyReason,
+              reason: busyReason ?? "ให้ไฟล์ทั้งหมดของ MID เป็นของ midsvc:midhub และกลุ่มแก้ไขได้ (ใช้เมื่อแก้ไฟล์ไม่ได้เพราะสิทธิ์)" },
+            { label: "Upgrade", onSelect: () => {}, disabled: true, reason: NOT_YET },
+            { label: "Uninstall", onSelect: () => onUninstall(mid), disabled: uninstallReason !== null, reason: uninstallReason, danger: true },
+          ]} />
         </div>
       </div>
-      <p id="mid-btn-reasons" className="mt-1 text-xs text-gray-500">{reasons.join(" · ")}</p>
+      <p id="mid-btn-reasons" className="sr-only">{reasons.join(" · ")}</p>
       {startBlocked && <p id="mid-start-reason" className="mt-2 text-sm text-amber-700">{startReason}</p>}
       {holdsStale && (
         <p className="mt-1 text-xs text-gray-500">
           MID ที่ล่มหรือหยุดเองยังนับเป็น 1 ช่องจนกว่าจะกด Stop
         </p>
       )}
+      {fixing && <p role="status" className="mt-2 text-sm text-gray-600">Repairing…</p>}
       {fixed && <p role="status" className="mt-2 text-sm text-emerald-700">ซ่อมสิทธิ์ไฟล์แล้ว ลองทำรายการเดิมอีกครั้ง</p>}
       {err && <div className="mt-3"><ErrorNotice error={err} /></div>}
       {showJob && mid.job && (
