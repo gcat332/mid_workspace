@@ -91,7 +91,7 @@
 - Test: `lib/providers/pty-manager.test.ts` additions
 
 **Interfaces:**
-- Produces: doc text (English) with: when to use it (custom app work that needs files on a MID Server); always start with `GET …/midhub/mids` and only use MIDs whose `usable` is true, explaining failed checks to the user using the returned messages; one curl example per endpoint using `$AGENT_MIDHUB_TOKEN` and the literal taskId; limits (no `agent/config.xml`, `agent/conf/wrapper-override.conf`, `agent/bin|lib|jre`; uploads ≤ 50 MiB with `--data-binary @file`; restart is subject to the 4-running quota; ask the user before restart).
+- Produces: doc text (English) with: when to use it (custom app work that needs files on a MID Server); always start with `GET …/midhub/mids` and only use MIDs whose `usable` is true, explaining failed checks to the user using the returned messages; one curl example per endpoint using `$AGENT_MIDHUB_TOKEN` and the literal taskId; limits (no `agent/config.xml`, `agent/conf/wrapper-override.conf`, `agent/bin|lib|jre`; uploads ≤ 50 MiB with `--data-binary @file`; a jar put in `agent/extlib` is deleted on the next MID start unless it is registered in the instance as a MID Server JAR File (`ecc_agent_jar`; ServiceNow's `FileSync:ecc_agent_jar`); restart is subject to the 4-running quota; ask the user before restart).
   - Logs: `GET …/mids/<name>/logs` returns `{ lines: [] }` when the log file does not exist yet (not an error, and not a sign the MID is idle).
 
 - [ ] **Step 1: Failing tests:** doc present only when enabled; contains the taskId literal and `$AGENT_MIDHUB_TOKEN`; never contains the secret or `MIDHUB_URL` value.

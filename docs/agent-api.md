@@ -158,7 +158,9 @@ curl -s -X PUT -H "Authorization: Bearer $AGENT_MIDHUB_TOKEN" -H "Content-Type: 
 ### POST mids/&lt;name&gt;/files?dir=&filename= (raw upload)
 
 Upload a binary file; the body is the raw bytes (not multipart) and `Content-Length` is required (curl sets it for
-`--data-binary @file`; chunked uploads get 411). Replaces an existing file of the same name atomically (keeps its mode).
+`--data-binary @file`; chunked uploads get 411).
+**Java jars (`agent/extlib`):** on every MID start ServiceNow's `FileSync:ecc_agent_jar` deletes any jar in `agent/extlib` that is not
+registered in the instance as a MID Server JAR File (`ecc_agent_jar`). Register the jar there, or expect it to vanish on the next MID start. Replaces an existing file of the same name atomically (keeps its mode).
 Audit `agent.file.upload`. Response `{ "size": 1234, "path": "agent/extlib/foo.jar" }`.
 
 ```bash

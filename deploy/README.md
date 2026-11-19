@@ -199,9 +199,27 @@ helper itself when the copy changed. Restarting the helper does not stop running
   free per install. The instance credentials must be able to read `sys_properties` `glide.war` for the buildstamp; if they
   cannot, set the buildstamp by hand in Admin > Instances.
 - Set MID user/password on instances created by an import (they have none) before installing.
-- Imported MIDs have no `version`, so the package cache GC does not keep their build's package.
-- Known issue as of 2026-11-19 (`e2fc6d9`): a new MID stops itself ~40 s after its first connect (the instance's property sync
-  triggers a MID restart that ends the systemd unit); press Start once (`docs/spike-mid-linux.md`, "Phase 2 verification", Bug 5).
+- Package cache GC keeps the package of a MID that has no `version` (imported MIDs) via the cached `Instance.buildstamp` of its
+  instance. Keep the instance's buildstamp set (Admin > Instances) or its package is re-downloaded on the next install.
+- MID units now use `Restart=always` + `RestartSec=10` (and `StartLimitBurst=5` in 10 min), so the MID's own restart after the
+  instance's first property sync (the wrapper exits 0) no longer leaves it stopped. An explicit Stop (`systemctl stop`) is still
+  respected. **Existing MID units keep the old `Restart=on-failure` until re-rendered.** Re-rendering happens on the next heap
+  change saved in `wrapper-override.conf` (config-service calls `installUnit`) or when the MID is reinstalled. To re-render
+  one now without touching the MID's data: in the MID's config editor, save `wrapper-override.conf` with a changed
+  `wrapper.java.maxmemory` and then restore the value (two saves; the second restart is yours to choose), or install a fresh
+  MID. No migration touches running MIDs; `systemctl daemon-reload` is done by the helper. Until then a new/old MID that
+  stops itself after its first connect needs one manual Start.
+- Known limitation (log retention): MidHub writes `com.service_now.mid.logging.MIDLogFileHandler.count` (and `SecurityLogFileHandler.count`)
+  into `agent/properties/glide.properties`, but the instance's MID Server properties override them on first connect (the MID logs
+  `Changed properties saved to MID glide.properties file: [...MIDLogFileHandler.count=10]`). To keep 3 files, set the MID Server
+  property for that setting (`com.service_now.mid.logging.MIDLogFileHandler.count`, plus the `mid.log.file.count` property if your
+  instance uses it) in the instance. `wrapper.logfile.maxfiles` and the security log count are not overridden.
+
+### Cloning a MID and `agent/extlib`
+
+On every start, ServiceNow's `FileSync:ecc_agent_jar` deletes each jar in `agent/extlib` that is not registered in the instance as a
+MID Server JAR File (`ecc_agent_jar`). Jars copied by a MID clone, or uploaded through the Files tab or AgentHub, vanish at the next
+start unless they are registered there.
 
 ## 8. Rollback / uninstall
 

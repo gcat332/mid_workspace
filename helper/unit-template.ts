@@ -14,6 +14,8 @@ export function renderUnit({ heapMb, midRoot }: { name: string; heapMb: number; 
 Description=MidHub MID Server
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -25,7 +27,10 @@ UMask=0002
 # Confirmed in spike 2026-11-18 (docs/spike-mid-linux.md)
 ExecStart=${midRoot}/${EXEC_START_REL}
 MemoryMax=${heapMb + 512}M
-Restart=on-failure
+# always (not on-failure): the MID restarts itself after the instance syncs properties (wrapper exits 0).
+# An explicit systemctl stop is never auto-restarted. A crash loop still stops at StartLimitBurst.
+Restart=always
+RestartSec=10
 NoNewPrivileges=yes
 PrivateTmp=yes
 

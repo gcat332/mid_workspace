@@ -191,11 +191,17 @@ function jobBuildstamp(params: string): string | null {
 
 export async function gcPackages(): Promise<string[]> {
   const [mids, jobs] = await Promise.all([
-    prisma.midServer.findMany({ where: { removedAt: null }, select: { version: true } }),
+    prisma.midServer.findMany({ where: { removedAt: null }, select: { version: true, instanceId: true } }),
     prisma.job.findMany({ where: { status: { in: ["queued", "running", "failed"] } }, select: { params: true } }),
   ])
   const keep = new Set<string>()
   for (const m of mids) if (m.version) keep.add(m.version)
+  // Imported MIDs have version null: keep the build their Instance last reported (Instance.buildstamp is a cached field).
+  const instanceIds = [...new Set(mids.flatMap((m) => (m.instanceId ? [m.instanceId] : [])))]
+  if (instanceIds.length) {
+    const insts = await prisma.instance.findMany({ where: { id: { in: instanceIds } }, select: { buildstamp: true } })
+    for (const i of insts) if (i.buildstamp) keep.add(i.buildstamp)
+  }
   for (const j of jobs) {
     const b = jobBuildstamp(j.params)
     if (b) keep.add(b)

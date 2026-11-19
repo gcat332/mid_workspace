@@ -188,6 +188,8 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
         </p>
       )}
 
+      {dir === EXTLIB && <p className="text-sm text-gray-600">jar ใน extlib จะถูกลบตอน MID เริ่มทำงาน ถ้าไม่ได้ลงทะเบียนเป็น MID Server JAR File ใน instance</p>}
+
       {err && !newFolder && !renaming && <ErrorNotice error={err} />}
 
       {entries === null ? (

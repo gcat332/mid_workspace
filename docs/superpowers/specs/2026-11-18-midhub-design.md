@@ -214,7 +214,7 @@ MID แต่ละตัว = systemd unit  midhub-mid-<name>.service  รั�
 
 **ทำใน Phase 2**
 1. **archive/backup เฉพาะไฟล์ที่แก้ได้**: `agent/config.xml`, `agent/conf/`, `agent/extlib/`, `agent/security/`, `agent/properties/`, `agent/logs/` — ไม่เก็บ `lib/`, `jre/`, `bin/` เพราะดึงจาก package ได้ (archive จาก ~500 MB เหลือไม่กี่ MB)
-2. **จำกัดจำนวนไฟล์ log ตั้งแต่ติดตั้ง** (ค่าเริ่มต้น 3, ปรับได้ 1–10 ใน "ตั้งค่าขั้นสูง"): `wrapper.logfile.maxfiles` ใน `conf/wrapper-override.conf` และ `com.service_now.mid.logging.MIDLogFileHandler.count` / `SecurityLogFileHandler.count` ใน `agent/properties/glide.properties` (log สูงสุด ~300 → ~90 MB ต่อ MID)
+2. **จำกัดจำนวนไฟล์ log ตั้งแต่ติดตั้ง** (ข้อจำกัดที่ทราบ: ค่า `MIDLogFileHandler.count` ใน `glide.properties` ถูก MID Server property ของ instance เขียนทับเมื่อ MID connect ครั้งแรก — ถ้าต้องการให้เหลือ 3 ไฟล์ ให้ตั้ง MID Server property `com.service_now.mid.logging.MIDLogFileHandler.count` ใน instance; `wrapper.logfile.maxfiles` ไม่ถูกทับ) (ค่าเริ่มต้น 3, ปรับได้ 1–10 ใน "ตั้งค่าขั้นสูง"): `wrapper.logfile.maxfiles` ใน `conf/wrapper-override.conf` และ `com.service_now.mid.logging.MIDLogFileHandler.count` / `SecurityLogFileHandler.count` ใน `agent/properties/glide.properties` (log สูงสุด ~300 → ~90 MB ต่อ MID)
 3. **เก็บ package เฉพาะเวอร์ชันที่ยังมี MID (ที่ยังไม่ถูกลบ) หรือ job ที่ค้างอยู่ใช้** ลบที่เหลือหลัง install/uninstall สำเร็จ และตอน boot
 4. แสดงพื้นที่ที่ MidHub ใช้ (`/opt/midhub` แยก mids/packages/archive) และพื้นที่ว่างที่ top bar, precheck ยังต้องการ ≥ 2 GB
 

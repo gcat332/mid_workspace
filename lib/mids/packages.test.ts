@@ -144,6 +144,25 @@ it("gcPackages keeps installed/queued/failed buildstamps, deletes unused and sta
   expect(fs.existsSync(fresh)).toBe(true)
 })
 
+it("gcPackages keeps the package of an imported MID (version null) via its Instance buildstamp; unreferenced packages still go", async () => {
+  const { gcPackages, packagePath, listPackages } = await import("./packages")
+  const { prisma } = await import("@/lib/db/client")
+  const IMP = "australia-02-11-2026__patch3-09-30-2026_10-02-2026_0100"
+  const GONE = "australia-02-11-2026__patch2-09-20-2026_09-22-2026_0100"
+  const UNREF = "australia-02-11-2026__patch1-09-10-2026_09-12-2026_0100"
+  const inst = await prisma.instance.create({ data: { label: "i", url: "https://imp.service-now.com", buildstamp: IMP, createdBy: "u" } })
+  const inst2 = await prisma.instance.create({ data: { label: "i2", url: "https://gone.service-now.com", buildstamp: GONE, createdBy: "u" } })
+  await prisma.midServer.create({ data: { name: "imp1", dir: "/x", serviceName: "s", instanceId: inst.id, version: null, createdBy: "u" } })
+  await prisma.midServer.create({ data: { name: "imp2", dir: "/x", serviceName: "s", instanceId: inst2.id, version: null, createdBy: "u", removedAt: new Date() } })
+  fs.mkdirSync(pkgDir(), { recursive: true })
+  for (const b of [IMP, GONE, UNREF]) fs.writeFileSync(packagePath(b), "z")
+  const deleted = (await gcPackages()).sort().filter((n) => [IMP, GONE, UNREF].some((b) => n.startsWith(b)))
+  expect(deleted).toEqual([`${GONE}.zip`, `${UNREF}.zip`].sort())
+  expect((await listPackages()).map((x) => x.buildstamp).filter((x) => [IMP, GONE, UNREF].includes(x))).toEqual([IMP])
+  await prisma.midServer.deleteMany({ where: { name: { in: ["imp1", "imp2"] } } })
+  await prisma.instance.deleteMany({ where: { id: { in: [inst.id, inst2.id] } } })
+})
+
 it("gcPackages never deletes a package being downloaded", async () => {
   mode = "slow"
   const { gcPackages, ensurePackage } = await import("./packages")

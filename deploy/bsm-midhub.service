@@ -21,6 +21,8 @@ Environment=CHECKPOINT_DISABLE=1
 ExecStartPre=@APP_DIR@/node_modules/.bin/prisma migrate deploy
 ExecStart=/usr/bin/node @APP_DIR@/node_modules/next/dist/bin/next start
 Restart=on-failure
+# SIGTERM on stop makes node exit 143; that is a clean stop, not a failure.
+SuccessExitStatus=143
 RestartSec=5
 # Hardening. The app reads /proc/self/fd and /proc/meminfo and runs `systemctl show` /
 # `list-units`, so ProtectProc/ProcSubset are deliberately NOT set.

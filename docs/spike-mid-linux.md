@@ -97,14 +97,14 @@ or uploaded by AgentHub survive only until the next sync unless they are registe
 3. Fixed (`33971b9`/`08d3718`): chown/chmod failures were reported as `systemctl_failed` without detail.
 4. Fixed (`e2fc6d9`): the helper unit's `User=root` + `NoNewPrivileges` + `ProtectKernelModules` dropped CAP_SETUID on systemd 255, so
    `setpriv` in `fixOwnership` failed (also the cause of the spike1 import's fixOwnership failure).
-5. **Open:** a new MID stops itself after the instance's first property sync. About 30-40 s after the first connect the MID logs
+5. **Fixed (unit `Restart=always`; see deploy/README.md):** a new MID stops itself after the instance's first property sync. About 30-40 s after the first connect the MID logs
    `Changed properties saved to MID glide.properties file: [com.service_now.mid.logging.MIDLogFileHandler.count=10]` and
    `Restarting MID Server as MID glide.properties file has been updated with settings from the Instance`. The wrapper then gets
    TERM, exits 0, and systemd marks the unit inactive (`Restart=on-failure` does not fire). Seen on p2test, p2clone and p2resume
    (3/3). The job already reported `succeeded` and MidHub then shows "stopped". One manual Start fixes it (no further restart).
    The trigger is MidHub writing `MIDLogFileHandler.count=3` while the instance enforces 10, so the requested log retention also
    does not stick for the MID log (`SecurityLogFileHandler.count` stayed 3).
-6. **Open:** imported MIDs get `version = NULL`, so `gcPackages` does not count them. Uninstalling the last MidHub-installed MID of
+6. **Fixed (GC keeps the Instance.buildstamp package):** imported MIDs get `version = NULL`, so `gcPackages` does not count them. Uninstalling the last MidHub-installed MID of
    a build deleted that build's package although imported spike1 runs it. Not harmful to spike1; the next install re-downloads ~488 MB.
 
 ### Other observations
