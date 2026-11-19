@@ -16,6 +16,8 @@ const MAX_TAILS = 20
 const WINDOW_BYTES = 256 * 1024
 /** Lines of the initial window actually sent; the UI keeps no more than this. */
 const INITIAL_LINES = 150
+/** The held initial lines go out in frames of at most about this many bytes (150 lines of 16 KiB would otherwise trip the stall check). */
+const MAX_FRAME_BYTES = 200 * 1024
 const POLL_MS = 1000
 const PING_MS = 15_000
 const STALL_MS = 10_000
@@ -98,10 +100,22 @@ export async function GET(req: Request, ctx: Ctx) {
             for await (const lines of tailFile(openOnce, {
               fromBytesBack: WINDOW_BYTES, pollMs: POLL_MS, signal: ac.signal,
               onStatus: (s) => send(`event: status\ndata: ${JSON.stringify({ state: s })}\n\n`),
-              onCaughtUp: () => {
+              onCaughtUp: async () => {
                 const held = initial
                 initial = null
-                if (held?.length) sendLines(held.slice(-INITIAL_LINES))
+                if (!held?.length) return
+                let chunk: string[] = []
+                let bytes = 0
+                for (const l of held.slice(-INITIAL_LINES)) {
+                  const b = Buffer.byteLength(l)
+                  if (chunk.length && bytes + b > MAX_FRAME_BYTES) {
+                    sendLines(chunk); chunk = []; bytes = 0
+                    // Let the client drain before the next chunk, or the whole window would sit in the queue at once.
+                    while (!ac.signal.aborted && (controller.desiredSize ?? 1) <= 0) await new Promise((r) => setTimeout(r, 20))
+                  }
+                  chunk.push(l); bytes += b
+                }
+                sendLines(chunk)
               },
             })) {
               if (initial) initial = initial.concat(lines).slice(-INITIAL_LINES)

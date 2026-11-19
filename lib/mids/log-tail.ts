@@ -13,8 +13,8 @@ export type TailOpts = {
   maxLineBytes?: number
   /** Called when the file disappears / appears (UI status). */
   onStatus?: (s: "missing" | "live") => void
-  /** Called once, after the initial window has been fully yielded (and before anything newer is). */
-  onCaughtUp?: () => void
+  /** Called once, after the initial window has been fully yielded (and before anything newer is); the tail waits for it. */
+  onCaughtUp?: () => void | Promise<void>
 }
 
 const CHUNK = 64 * 1024
@@ -171,7 +171,7 @@ export async function* tailFile(open: OpenFn, opts: TailOpts): AsyncGenerator<st
       }
 
       const grew = yield* drainAll(cur)
-      if (!caughtUp) { caughtUp = true; opts.onCaughtUp?.() }
+      if (!caughtUp) { caughtUp = true; await opts.onCaughtUp?.() }
       idle = grew ? 0 : idle + 1
       polls++
       if (polls % REOPEN_EVERY === 0 || idle >= IDLE_REOPEN) {

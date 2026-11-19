@@ -8,22 +8,27 @@ vi.mock("@/lib/auth/helpers", () => ({
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (n: string) => (n === "midhub_session" ? { value: "tok" } : undefined) }) }))
 vi.mock("@/lib/mids/registry", () => ({ getMid: vi.fn(async () => ({})) }))
 vi.mock("@/lib/mids/files", () => ({ isLogKey: (k: string) => k === "main" || k === "wrapper", openLog: vi.fn(async () => async () => ({ h: { close: async () => {} }, st: {} })), openDownload: vi.fn() }))
-const stalled = vi.hoisted(() => ({ mode: "idle" as "idle" | "one-big" | "flood" | "replay", signal: undefined as AbortSignal | undefined }))
+const stalled = vi.hoisted(() => ({ mode: "idle" as "idle" | "one-big" | "flood" | "replay" | "replay-big", signal: undefined as AbortSignal | undefined }))
 vi.mock("@/lib/mids/log-tail", () => ({
   // idle: never yields; one-big: one 100 KB batch; flood: 300 KB batches. Ends when aborted.
   // replay: a 1,000-line initial window in two batches, then onCaughtUp, then one appended line.
-  tailFile: async function* (_o: unknown, opts: { signal: AbortSignal; onCaughtUp?: () => void }) {
+  tailFile: async function* (_o: unknown, opts: { signal: AbortSignal; onCaughtUp?: () => void | Promise<void> }) {
     stalled.signal = opts.signal
+    if (stalled.mode === "replay-big") {
+      yield Array.from({ length: 150 }, (_, i) => `${String(i).padStart(3, "0")}${"z".repeat(16 * 1024 - 3)}`)
+      await opts.onCaughtUp?.()
+      yield ["appended"]
+    }
     if (stalled.mode === "replay") {
       const all = Array.from({ length: 1000 }, (_, i) => `line ${i + 1}`)
       yield all.slice(0, 400)
       yield all.slice(400)
-      opts.onCaughtUp?.()
+      await opts.onCaughtUp?.()
       yield ["appended"]
     }
     const big = ["x".repeat(100_000)]
     if (stalled.mode === "one-big") yield big
-    opts.onCaughtUp?.() // the (real) initial window is over; everything after this streams unbuffered
+    await opts.onCaughtUp?.() // the (real) initial window is over; everything after this streams unbuffered
     while (stalled.mode === "flood" && !opts.signal.aborted) {
       yield ["y".repeat(300_000)]
       await new Promise((r) => setTimeout(r, 5))
@@ -109,6 +114,24 @@ it("sends only the last 150 lines of the initial window as the first frame, then
   expect(frames[0].lines[0]).toBe("line 851")
   expect(frames[0].lines.at(-1)).toBe("line 1000")
   expect(frames[1].lines).toEqual(["appended"])
+  ac.abort()
+  await rd.cancel().catch(() => {})
+})
+
+it("a 150 x 16 KiB initial window is split into frames, not aborted, and arrives complete and in order", async () => {
+  stalled.mode = "replay-big"
+  const ac = new AbortController()
+  const res = await get("?file=main", ac)
+  const rd = res.body!.pipeThrough(new TextDecoderStream()).getReader()
+  let text = ""
+  while (!text.includes("appended")) { const { done, value } = await rd.read(); if (done) break; text += value }
+  expect(stalled.signal?.aborted).toBe(false)
+  const frames = [...text.matchAll(/^data: (.*)$/gm)].map((m) => JSON.parse(m[1]) as { lines: string[] })
+  expect(frames.length).toBeGreaterThan(2)
+  expect(frames.slice(0, -1).every((f) => f.lines.join("").length <= 220 * 1024)).toBe(true)
+  const initial = frames.slice(0, -1).flatMap((f) => f.lines)
+  expect(initial).toHaveLength(150)
+  expect(initial.map((l) => l.slice(0, 3))).toEqual(Array.from({ length: 150 }, (_, i) => String(i).padStart(3, "0")))
   ac.abort()
   await rd.cancel().catch(() => {})
 })
