@@ -22,7 +22,6 @@ export function AgentAccessSwitch({ midName, enabled, disabledReason = null, onC
   const [err, setErr] = useState<ApiError | null>(null)
   const [saving, setSaving] = useState(false)
   const inFlight = useRef(false)
-  const labelId = useId()
   const noteId = useId()
   // The optimistic value is dropped as soon as the server value catches up with it.
   if (optimistic !== null && optimistic === enabled && !saving) setOptimistic(null)
@@ -47,25 +46,18 @@ export function AgentAccessSwitch({ midName, enabled, disabledReason = null, onC
     }
   }
 
+  // Switch only (the row is already labelled "AgentHub"); the explanation lives in the tooltip and for screen readers.
+  const note = `${on ? AGENT_ACCESS_NOTE : "ปิดอยู่: AgentHub จะแก้ไฟล์ของ MID นี้ไม่ได้"} · ต้องใช้ session ที่ SN_INSTANCE_URL ตรงกับ instance ของ MID`
   return (
     <div className="space-y-2">
-      <div className="flex items-start gap-3">
-        <button type="button" role="switch" aria-checked={on} aria-labelledby={labelId}
-          aria-describedby={`${noteId}${disabledReason ? " agent-access-reason" : ""}`}
-          disabled={!!disabledReason} onClick={() => void toggle()}
-          className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 ${on ? "border-brand-sky bg-brand-sky" : "border-gray-300 bg-gray-200 dark:border-neutral-600 dark:bg-neutral-700"}`}>
-          <span aria-hidden className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${on ? "translate-x-6" : "translate-x-1"}`} />
-        </button>
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-gray-900">
-            <span id={labelId}>{AGENT_ACCESS_LABEL}</span> <span className={`ml-1 text-xs font-semibold ${on ? "text-brand-navy dark:text-brand-sky-soft" : "text-gray-500"}`}>{on ? "On" : "Off"}</span>
-          </p>
-          <p id={noteId} className="mt-0.5 text-xs text-gray-500">
-            {on ? AGENT_ACCESS_NOTE : "ปิดอยู่: AgentHub จะแก้ไฟล์ของ MID นี้ไม่ได้"} · ต้องใช้ session ที่ SN_INSTANCE_URL ตรงกับ instance ของ MID
-          </p>
-          {disabledReason && <p id="agent-access-reason" className="mt-0.5 text-xs text-amber-700">{disabledReason}</p>}
-        </div>
-      </div>
+      <button type="button" role="switch" aria-checked={on} aria-label={AGENT_ACCESS_LABEL} title={note}
+        aria-describedby={`${noteId}${disabledReason ? " agent-access-reason" : ""}`}
+        disabled={!!disabledReason} onClick={() => void toggle()}
+        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 ${on ? "border-brand-sky bg-brand-sky" : "border-gray-300 bg-gray-200 dark:border-neutral-600 dark:bg-neutral-700"}`}>
+        <span aria-hidden className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${on ? "translate-x-6" : "translate-x-1"}`} />
+      </button>
+      <span id={noteId} className="sr-only">{note}</span>
+      {disabledReason && <p id="agent-access-reason" className="text-xs text-amber-700">{disabledReason}</p>}
       {err && <ErrorNotice error={err} />}
     </div>
   )

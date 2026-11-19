@@ -20,6 +20,15 @@ describe("AgentAccessSwitch", () => {
     expect(screen.queryByText(new RegExp(AGENT_ACCESS_NOTE))).toBeNull()
   })
 
+  it("shows only the switch: no visible label, On/Off text or note (the note is the tooltip and screen-reader text)", () => {
+    const { container } = render(<AgentAccessSwitch midName="m1" enabled onChanged={() => {}} />)
+    expect(screen.queryByText(AGENT_ACCESS_LABEL)).toBeNull()
+    expect(screen.queryByText(/^(On|Off)$/)).toBeNull()
+    expect(sw().getAttribute("title")).toContain(AGENT_ACCESS_NOTE)
+    const visible = [...container.querySelectorAll("p, span")].filter((e) => !e.closest(".sr-only") && !e.closest("[role=switch]"))
+    expect(visible.map((e) => e.textContent).join("")).toBe("")
+  })
+
   it("turning on flips at once, POSTs (the F5 WAF rejects PATCH), shows the note, no confirm dialog", async () => {
     let release!: (r: Response) => void
     apiFetch.mockReturnValue(new Promise<Response>((r) => { release = r }))

@@ -172,7 +172,7 @@ export function Dashboard({ email, userId, isAdmin }: { email: string; userId: s
             </button>
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)]">
+          <div className="grid gap-4 md:grid-cols-[14rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)]">
             <nav aria-label="MID" className="min-w-0 rounded-xl border border-gray-200 bg-white dark:bg-neutral-800 p-2">
               <MidList mids={mids} selected={selected} onSelect={pick} />
             </nav>
