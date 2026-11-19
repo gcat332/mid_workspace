@@ -1,5 +1,5 @@
-// Server-side lifecycle gate (final review M1): browser writes on a MID are refused while it is not `installed`
-// or a lifecycle job is active. Real SQLite (project migrations), real routes, real config-service and files
+// Server-side lifecycle gate (final review M1): browser writes on a MID are refused unless it is `installed` or
+// `error` (a failed install stays stoppable and fixable) with no active lifecycle job. Real SQLite (project migrations), real routes, real config-service and files
 // over a temp MID tree; only auth, audit, the root helper and systemctl are faked.
 import { execFileSync } from "node:child_process"
 import fs from "node:fs"
@@ -98,14 +98,24 @@ it("config rollback is gated too (it can rewrite the unit through installUnit)",
   expect((await res.json()).code).toBe("job_active")
 })
 
-it("file write / delete / mkdir on a MID in `error` state -> 409; reads stay allowed", async () => {
+it("file write / mkdir / delete on an `error` MID with no active job -> allowed (a failed install stays fixable)", async () => {
   const files = await import("./files/route")
-  await setMid("error")
+  await setMid("error", { kind: "install", stage: "waitConnected", status: "failed" })
+  const put = await files.PUT(json("PUT", "/api/mids/m1/files", { path: "agent/note.txt", content: "changed\n", baseHash: sha256(NOTE) }), ctx)
+  expect(put.status).toBe(200)
+  expect(fs.readFileSync(notePath, "utf8")).toBe("changed\n")
+  expect((await files.POST(json("POST", "/api/mids/m1/files", { op: "mkdir", parent: "agent", name: "x" }), ctx)).status).toBe(200)
+  expect((await files.DELETE(new Request("http://x/api/mids/m1/files?path=agent/note.txt", { method: "DELETE" }), ctx)).status).toBe(200)
+})
+
+it("file write / delete / mkdir on an `installing` MID -> 409; reads stay allowed", async () => {
+  const files = await import("./files/route")
+  await setMid("installing")
   const put = await files.PUT(json("PUT", "/api/mids/m1/files", { path: "agent/note.txt", content: "changed\n", baseHash: sha256(NOTE) }), ctx)
   expect(put.status).toBe(409)
   const body = await put.json()
   expect(body.code).toBe("job_active")
-  expect(body.message).toContain("ผิดพลาด")
+  expect(body.message).toContain("กำลังติดตั้ง")
   expect(fs.readFileSync(notePath, "utf8")).toBe(NOTE)
   expect((await files.DELETE(new Request("http://x/api/mids/m1/files?path=agent/note.txt", { method: "DELETE" }), ctx)).status).toBe(409)
   expect(fs.existsSync(notePath)).toBe(true)
@@ -114,10 +124,6 @@ it("file write / delete / mkdir on a MID in `error` state -> 409; reads stay all
   const read = await files.GET(new Request("http://x/api/mids/m1/files?path=agent/note.txt&content=1"), ctx)
   expect(read.status).toBe(200)
   expect((await read.json()).content).toBe(NOTE)
-
-  await setMid("installed") // control
-  expect((await files.PUT(json("PUT", "/api/mids/m1/files", { path: "agent/note.txt", content: "changed\n", baseHash: sha256(NOTE) }), ctx)).status).toBe(200)
-  expect(fs.readFileSync(notePath, "utf8")).toBe("changed\n")
 })
 
 it("upload during an active job -> 409 before the body is read", async () => {
@@ -131,12 +137,17 @@ it("upload during an active job -> 409 before the body is read", async () => {
   expect(formData).not.toHaveBeenCalled()
 })
 
-it("start on an installed MID with no job -> allowed; stop during an install job -> 409", async () => {
+it("start on an installed MID with no job -> allowed; stop on a failed install (`error`) -> allowed; stop during an install job -> 409", async () => {
   const { POST } = await import("./actions/route")
   await setMid("installed")
   const ok = await POST(json("POST", "/api/mids/m1/actions", { action: "start" }), ctx)
   expect(ok.status).toBe(200)
   expect(callHelper).toHaveBeenCalledWith({ op: "start", name: "m1" })
+
+  callHelper.mockClear()
+  await setMid("error", { kind: "install", stage: "waitConnected", status: "failed" })
+  expect((await POST(json("POST", "/api/mids/m1/actions", { action: "stop" }), ctx)).status).toBe(200)
+  expect(callHelper).toHaveBeenCalledWith({ op: "stop", name: "m1" })
 
   callHelper.mockClear()
   await setMid("installing", { kind: "install", stage: "start", status: "running" })
@@ -146,8 +157,32 @@ it("start on an installed MID with no job -> allowed; stop during an install job
   expect(callHelper).not.toHaveBeenCalled()
 })
 
-it("an unknown or removed MID is still 404, not 409", async () => {
+it.each(["removed", "uninstalling"])("heap save on a `%s` MID (no active job) -> 409 job_active, no installUnit", async (state) => {
+  const { PUT } = await import("./config/route")
+  await setMid(state)
+  const res = await PUT(heapSave(), ctx)
+  expect(res.status).toBe(409)
+  expect((await res.json()).code).toBe("job_active")
+  expect(callHelper).not.toHaveBeenCalled()
+  expect(fs.readFileSync(wrapPath, "utf8")).toBe(WRAP)
+})
+
+it("heap save on an `error` MID with no active job -> allowed (reaches installUnit)", async () => {
+  const { PUT } = await import("./config/route")
+  await setMid("error")
+  expect((await PUT(heapSave(), ctx)).status).toBe(200)
+  expect(callHelper).toHaveBeenCalledWith({ op: "installUnit", name: "m1", heapMb: 2048 })
+})
+
+it("an `error` MID with an active job is still refused", async () => {
   const { PUT } = await import("./files/route")
-  await setMid("removed")
+  await setMid("error", { kind: "cancel_install", stage: "stop", status: "queued" })
+  expect((await PUT(json("PUT", "/api/mids/m1/files", { path: "agent/note.txt", content: "x", baseHash: sha256(NOTE) }), ctx)).status).toBe(409)
+})
+
+it("an unknown MID is 404", async () => {
+  const { PUT } = await import("./files/route")
+  await prisma.job.deleteMany({})
+  await prisma.midServer.deleteMany({})
   expect((await PUT(json("PUT", "/api/mids/m1/files", { path: "agent/note.txt", content: "x", baseHash: sha256(NOTE) }), ctx)).status).toBe(404)
 })

@@ -2,7 +2,7 @@ import { recordAudit } from "@/lib/audit"
 import { normalizeInstanceUrl } from "@/lib/instances/url"
 import { MidError, validateMidName } from "@/lib/mids/names"
 import { getMid, type MidSummary } from "@/lib/mids/registry"
-import { lifecycleBusy } from "@/lib/mids/lifecycle-gate"
+import { AGENT_READY_STATES, lifecycleBusy } from "@/lib/mids/lifecycle-gate"
 import { isActiveJobStatus } from "@/lib/ui/stages"
 import type { AgentCaller } from "@/lib/agent/auth"
 
@@ -47,8 +47,8 @@ export function evaluateChecks(caller: AgentCaller, mid: MidFacts): Check[] {
       : fail("instance_match", `session นี้ทำงานกับ ${sessionHosts} แต่ MID นี้ต่อ ${host(c)} เลือก MID ที่ต่อ instance ของ session หรือเพิ่ม instance นั้นใน .env`)
   }
 
-  // Same rule as the browser write routes (lib/mids/lifecycle-gate.ts).
-  const busy = lifecycleBusy(mid)
+  // Strict on purpose (spec 5.2): only `installed`, unlike the browser gate which also allows `error`.
+  const busy = lifecycleBusy(mid, AGENT_READY_STATES)
   const ready = busy ? fail("mid_ready", busy) : ok("mid_ready")
 
   return [
