@@ -55,50 +55,59 @@ by a human (it is a write to the instance).
 
 ## Phase 2 verification (2026-11-19)
 
-Run on the production deployment (`/home/bsmmidhub/midhub`, `bsm-midhub` + `bsm-midhub-helper`, Caddy at
+Run on the production deployment (`/home/bsmmidhub/midhub` at `e2fc6d9`; `bsm-midhub` + `bsm-midhub-helper`, Caddy at
 `https://10.4.150.142/midhub`) through the HTTP API as the admin (plan Task 12, Steps 2-6). spike1 was not touched
-and stayed Up throughout.
+(active since 2026-11-18 22:41:51, 0 restarts, Up in the instance throughout).
 
-**Status: BLOCKED (second run, after fixes at `08d3718`).** Extract now passes, but every install/clone stops at
-`fixOwnership` (Bug 4 below). Clone, resume, the AgentHub file/upload checks and uninstall of a running MID are
-still unverified.
+**Result: all steps pass, with two new open bugs (5, 6 below).** Bug 5 means a freshly installed MID ends up
+stopped about 40 s after its job reports success, until someone presses Start once.
 
 ### Deviations
 
 - Instance `mfecplcdemo4` already existed (created by the spike1 import, without credentials). Its MID user/password were
-  set with `PATCH /api/instances/<id>` using the **admin account** of the instance (no `mid_server`-only user exists
-  yet; a human has to create one and replace the credentials in Admin > Instances).
+  set with `PATCH /api/instances/<id>` using the **admin account** of the instance (no `mid_server`-only user exists yet;
+  a human has to create one and replace the credentials in Admin > Instances).
 - Driven through the API (curl, admin cookie), not the browser UI; the admin is allowed to act as a member.
+- To get past Bug 5, each new MID was started once more through the normal `POST /api/mids/<name>/actions {"action":"start"}`.
 
 ### Results
 
-| Step | Result |
-|---|---|
-| Instance credentials | ✅ `PATCH` 200 in 0.9 s; `buildstamp` **readable** with admin creds (`glide.war`) = `australia-02-11-2026__patch7w42-10-08-2026_10-13-2026_1248`. Not tested with a `mid_server`-only user. |
-| 2. Install `p2test` (run 1, `6646724`) | ❌ `fetchPackage` downloaded 488,425,848 B in ~46 s (cache was empty); `extract` failed (Bug 1), shown as `internal` (Bug 2). |
-| 2. Install `p2test` (run 2, `08d3718`) | ❌ package **reused** from cache (`fetchPackage` < 0.1 s); `extract` ✅ 7.6 s (signed zip accepted); `copyFiles`/`configure` ✅; `fixOwnership` failed after 8 s: `fix_ownership_failed`, detail `chmod -R failed (code 127): setpriv: setresuid failed: Operation not permitted` (Bug 4). The failed-job error now carries its real code and detail, so Bug 2 and Bug 3 are fixed. Reviving the name auto-cancelled the previous lifecycle's failed job, as designed. |
-| 3. Clone, 4. Resume | ⛔ not run (need a working install) |
-| 5a/5b. Agent API checklist (run 1) | ✅ on the failed `p2test` record: five checks; `agent_access` toggled by `PATCH /api/mids/p2test`; other session instance -> `instance_match` failed, 403 `agent_check_failed`, `agent.check_failed` audit row without the secret. Wrong secret 401, non-loopback `Host`/`X-Forwarded-For` 403, via Caddy 404. `usable:true` not reachable (`mid_ready`). |
-| 5c-5e. Files, 4 x 50 MiB load, 413, restart | ⛔ not run (need a `mid_ready` MID; the size/busy checks sit behind the checklist) |
-| 6. Uninstall | ✅ (run 1) for a failed `p2test` without dir/unit: wrong `confirmName` 400; job succeeded in 0.6 s, no archive (nothing to archive). Uninstall of a real MID not yet verified. |
-| Instance records | `ecc_agent` (read-only GET): only `midhub-spike1` (Up, validated=false); no `midhub-p2*` records yet. |
+| Step | Result | Timing |
+|---|---|---|
+| Instance credentials | ✅ `buildstamp` **readable** with admin creds (`glide.war`) = `australia-02-11-2026__patch7w42-10-08-2026_10-13-2026_1248` | 0.9 s |
+| 2. Install `p2test` | ✅ The first attempt downloaded the package (488,425,848 B, ~46 s) and later runs **reused** it. The job blocked by Bug 4 was retried after the fix: it resumed at `fixOwnership` and reached `succeeded` (installUnit, start, waitConnected). Unit `midhub-mid-p2test` active and enabled (`User=midsvc`, `MemoryMax=1536M`). `agent0.log.0` has "MID Server is connected to instance host: mfecplcdemo4.service-now.com". All `agent/logs` files are `midsvc:midhub 0664` (dir 2775). Counts: `wrapper.logfile.maxfiles=3`, `MIDLogFileHandler.count=3`, `SecurityLogFileHandler.count=3` (1 line each), until the instance overwrote the MID count with 10 (Bug 5). `midhub-p2test` **Up** in `ecc_agent`. | retry -> succeeded 14 s; fresh install (p2resume) 27 s, extract ~8 s |
+| 3. Clone `p2test` -> `p2clone` | ✅ `succeeded` in 24 s. `agent_keystore` **differs** (sha256 `c0caaa08…` vs `97065bbe…`). `mid_sys_id` is a new one. `config.xml` `name=midhub-p2clone`. The encrypted password was cleared (journal warning) and re-set by configure. A 4 KiB marker jar in `agent/extlib` was **copied** (same sha256). The MID's own `FileSync:ecc_agent_jar` then deleted the jar from both MIDs (see note). | 24 s |
+| 4. Resume | ✅ Install `p2resume`. `systemctl restart bsm-midhub` was issued **0.3 s into `extract`** (package cached, so `fetchPackage` was too fast to catch). The app was back after ~3.5 s. The job re-entered `extract` (attempt 0), its leftover `staging/.extract-<job>` was cleaned, and it reached `succeeded`. | 27 s total |
+| 5a. Agent checklist | ✅ Before: all MIDs `usable:false`, only `agent_access` failing. After `PATCH /api/mids/p2test {agentAccess:true}`: p2test `usable:true` (all 5 checks ok). With session instance `other.service-now.com`: `instance_match` failed, 403 `agent_check_failed`, `agent.check_failed` audit. | |
+| 5c. File ops | ✅ Raw upload 2 KiB (sha matches on disk); PUT new text file; PUT `baseHash:""` again -> 409 `exists`; read back (hash = sha256 of content); list; `logs?file=main&lines=5` -> 5 lines; write to `agent/bin` -> 403 `read_only`; read `config.xml` content -> 403; DELETE both -> 200, extlib empty. | |
+| 5d. Load check | ✅ Two rounds of 4 parallel 52,428,800 B uploads: each round **2 x 200 (~0.8-1.1 s) + 2 x 429 `busy` (~0.1-0.16 s)**, no 5xx. App `MemoryCurrent` 314 MB at baseline, **peak 548 MB** (0.1 s samples from `memory.current`; anon 178 MB, the rest page cache). `MemoryMax=1G`. Cgroup `memory.peak` since app start was 958 MB, from the p2resume extract's page cache. `Content-Length: 4000000000` with a 4-byte body -> **413 `too_large` in 0.04 s**, nothing written. Chunked without Content-Length -> 411 `length_required`. All uploads deleted. App stayed active. | |
+| 5e. Restart | ✅ `POST agent/mids/p2test/restart` -> `{ok:true}`; reconnected after 23 s; stayed up (no further self-restart). Audit `agent.restart`, `agent.file.*` with `via/taskId/sessionInstances`, no secret. | 23 s |
+| 6. Uninstall (admin) | ✅ p2resume, p2clone, p2test: each `stop -> removeUnit -> archive -> deleteDir -> markRemoved` in ~10 s. Archives `p2clone-…tar.gz` 624,297 B, `p2resume-…` 476,685 B, `p2test-…` 289,692 B (conf, extlib, logs, properties, security, config.xml). `/opt/midhub/mids/p2*` gone, units gone, staging empty. **Package deleted by GC** although spike1 runs that build (Bug 6). | ~10 s each |
+| Instance records | `ecc_agent` (read-only GET) at the end: `midhub-p2test`, `midhub-p2clone`, `midhub-p2resume` **Down** (validated=false); `midhub-spike1` Up. Left in place for a human to delete. | |
+| Failed-job errors | ✅ show their real code: `fix_ownership_failed` with command and stderr (Bug 4 run). | |
+
+Note: on start, a MID's `FileSync:ecc_agent_jar` deletes every jar in `agent/extlib` that is not an `ecc_agent_jar` record in
+the instance (log: `Deleting /opt/midhub/mids/<name>/agent/extlib/<file>.jar`). Jars copied by clone, uploaded in the files tab
+or uploaded by AgentHub survive only until the next sync unless they are registered as MID Server JAR files in the instance.
 
 ### Bug history (brief)
 
-1. Fixed in `33971b9`: `checkListing` rejected the signed package (FAT-attribute `META-INF/*` entries print a 7-char mode in `zipinfo`, giving "listing mismatch").
-2. Fixed in `33971b9`/`08d3718`: two `MidError` classes in the production bundle made `failJob` report every stage error as `internal` without its detail.
-3. Fixed in `33971b9`/`08d3718`: helper chown/chmod failures were reported as `systemctl_failed` without detail.
-4. **Open, blocks every install/clone:** the helper unit (`deploy/bsm-midhub-helper.service`) combines `User=root`,
-   `NoNewPrivileges=yes` and `ProtectKernelModules=yes`. Under systemd 255 (255.4-1ubuntu8.18) that combination starts the
-   service **without CAP_SETUID**: live helper `CapEff=000001fffffeff7f` (bit 7 clear), `CapInh=0000000000200100`. So the
-   `setpriv --reuid=midsvc` step of `fixOwnership` fails. Reproduced outside MidHub:
-   `systemd-run --wait --pipe -p User=root -p NoNewPrivileges=yes -p PrivateTmp=yes -p ProtectKernelModules=yes setpriv --reuid=midsvc --regid=midhub --clear-groups id`
-   -> `setpriv: setresuid failed: Operation not permitted`. Dropping `User=root` (or `ProtectKernelModules`, or `NoNewPrivileges`)
-   keeps CAP_SETUID. This is very likely also the cause of the spike1 import's `fixOwnership` failure. The earlier probe passed only
-   because it left out `User=root`.
+1. Fixed (`33971b9`): the signed package was rejected at extract (FAT-attribute `META-INF/*` modes in `zipinfo`, giving "listing mismatch").
+2. Fixed (`33971b9`/`08d3718`): duplicate `MidError` classes in the bundle made every job error `internal` without detail.
+3. Fixed (`33971b9`/`08d3718`): chown/chmod failures were reported as `systemctl_failed` without detail.
+4. Fixed (`e2fc6d9`): the helper unit's `User=root` + `NoNewPrivileges` + `ProtectKernelModules` dropped CAP_SETUID on systemd 255, so
+   `setpriv` in `fixOwnership` failed (also the cause of the spike1 import's fixOwnership failure).
+5. **Open:** a new MID stops itself after the instance's first property sync. About 30-40 s after the first connect the MID logs
+   `Changed properties saved to MID glide.properties file: [com.service_now.mid.logging.MIDLogFileHandler.count=10]` and
+   `Restarting MID Server as MID glide.properties file has been updated with settings from the Instance`. The wrapper then gets
+   TERM, exits 0, and systemd marks the unit inactive (`Restart=on-failure` does not fire). Seen on p2test, p2clone and p2resume
+   (3/3). The job already reported `succeeded` and MidHub then shows "stopped". One manual Start fixes it (no further restart).
+   The trigger is MidHub writing `MIDLogFileHandler.count=3` while the instance enforces 10, so the requested log retention also
+   does not stick for the MID log (`SecurityLogFileHandler.count` stayed 3).
+6. **Open:** imported MIDs get `version = NULL`, so `gcPackages` does not count them. Uninstalling the last MidHub-installed MID of
+   a build deleted that build's package although imported spike1 runs it. Not harmful to spike1; the next install re-downloads ~488 MB.
 
 ### Other observations
 
-- Imported MIDs get `version = NULL`, so `gcPackages` does not keep the package an imported MID runs.
-- A failed install job keeps its buildstamp in the GC keep set until the name is reused (then it is auto-cancelled).
-- The package cache did not survive the deploy (spike zip gone), so the first install downloads ~488 MB.
+- `bsm-midhub` stop logs `status=143` / "Failed with result 'exit-code'" (SIGTERM exit code not declared a success); cosmetic.
+- The package cache did not survive the first deploy (spike zip gone); the first install downloads ~488 MB (~46 s here).
