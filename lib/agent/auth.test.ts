@@ -108,6 +108,24 @@ describe("authenticateAgent", () => {
   it("a spoofed loopback XFF with a public Host is still refused", async () => {
     expect(await fail(req({ "x-forwarded-for": "127.0.0.1", host: "10.4.150.142" }))).toMatchObject({ code: "agent_auth", status: 403 })
   })
+  // AgentHub's Next rewrite (/midhub/:path* -> 127.0.0.1:3100, changeOrigin) makes Host loopback and the XFF
+  // loopback too when the client sent none, so only X-Forwarded-Host tells it apart from AgentHub's own fetch.
+  it("refuses a request forwarded through AgentHub's rewrite (X-Forwarded-Host = browser host) -> 403 agent_auth", async () => {
+    for (const xfh of ["dev-agenthub.mfec.co.th", "evil.com", "127.0.0.1:3000", "localhost:3100", "", "127.0.0.1:3100, dev-agenthub.mfec.co.th"]) {
+      const e = await fail(req({ "x-forwarded-host": xfh, "x-forwarded-for": "::ffff:127.0.0.1" }))
+      expect(e, xfh).toMatchObject({ code: "agent_auth", status: 403 })
+    }
+    // Rewrite shape with the F5's client IP: still 403 (and never reaches the DB).
+    expect(await fail(req({ "x-forwarded-host": "dev-agenthub.mfec.co.th", "x-forwarded-for": "10.20.30.40", "x-forwarded-proto": "http" })))
+      .toMatchObject({ code: "agent_auth", status: 403 })
+    expect(findUnique).not.toHaveBeenCalled()
+  })
+  it("accepts the X-Forwarded-Host Next itself injects on a direct call (a copy of Host)", async () => {
+    // Verified on next dev 16.4.6: a plain curl to 127.0.0.1:<port> reaches the route with
+    // x-forwarded-host = Host and x-forwarded-for = ::ffff:127.0.0.1 (base-server.js `??=`).
+    expect(await fail(req({ "x-forwarded-host": "127.0.0.1:3100", "x-forwarded-for": "::ffff:127.0.0.1" }))).toBeNull()
+    expect(await fail(req({ host: "localhost:3100", "x-forwarded-host": "LOCALHOST:3100" }))).toBeNull()
+  })
   it("no secret value in the serialized body of any error response", async () => {
     const cases = [
       req({ "x-midhub-agent-secret": "bad" }),
@@ -215,6 +233,8 @@ describe("helpers", () => {
   it("cameDirectlyOverLoopback: only a loopback Host and no forwarding headers", () => {
     expect(cameDirectlyOverLoopback(new Headers({ host: "127.0.0.1:3100" }))).toBe(true)
     expect(cameDirectlyOverLoopback(new Headers())).toBe(false)
+    expect(cameDirectlyOverLoopback(new Headers({ host: "127.0.0.1:3100", "x-forwarded-host": "127.0.0.1:3100" }))).toBe(true)
+    expect(cameDirectlyOverLoopback(new Headers({ host: "127.0.0.1:3100", "x-forwarded-host": "dev-agenthub.mfec.co.th" }))).toBe(false)
   })
 })
 

@@ -36,7 +36,7 @@ Every request must carry all of these (missing or invalid = rejected before anyt
 
 Rules:
 
-- Call `http://127.0.0.1:3100/midhub` so `Host` is loopback (`127.x`, `[::1]`, `localhost`, any port). Do not rewrite Host to loopback behind a proxy to get around this check, and do not send `X-Forwarded-For`, `X-Real-IP` or `Forwarded` unless every address is loopback.
+- Call `http://127.0.0.1:3100/midhub` so `Host` is loopback (`127.x`, `[::1]`, `localhost`, any port). Do not rewrite Host to loopback behind a proxy to get around this check, and do not send `X-Forwarded-For`, `X-Real-IP` or `Forwarded` unless every address is loopback. Do not send `X-Forwarded-Host` either: MidHub refuses any request whose `X-Forwarded-Host` differs from `Host` (Next adds a copy of `Host` itself when the header is absent, which passes). AgentHub's `/midhub/:path*` rewrite always sets it to the browser's host, so a browser request that reached `/midhub/api/agent/*` through that rewrite is refused even if AgentHub's 404 rule for it were missing.
 - Content-Type `application/json` for JSON bodies.
 - The secret must never reach `agentEnv()`, a prompt or a log line.
 
@@ -47,7 +47,7 @@ Rules:
 | `MIDHUB_AGENT_SECRET` not set in MidHub (feature off) | 404 | `not_found` |
 | Secret header missing or wrong | 401 | `agent_auth` |
 | Client IP not in the MidHub IP allowlist | 403 | `ip_blocked` (body also has `ip`) |
-| `Host` or forwarding headers not loopback (call came via Caddy/proxy) | 403 | `agent_auth` |
+| `Host` or forwarding headers not loopback, or `X-Forwarded-Host` differs from `Host` (call came via Caddy, AgentHub's `/midhub` rewrite or another proxy) | 403 | `agent_auth` |
 | `X-MidHub-Session-Id` missing/empty/invalid | 400 | `agent_auth` |
 | `X-MidHub-Actor-Role` missing or not exactly `admin` (message: "ต้องเป็น admin ของ AgentHub (บัญชี <email>)"), actor email missing, malformed or longer than 254 characters, or the actor's MidHub account is locked | 403 | `agent_user` |
 

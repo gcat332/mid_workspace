@@ -37,8 +37,8 @@ function isLoopbackHost(raw: string | null): boolean {
 }
 
 /**
- * "The call came straight over loopback, not through Caddy." Defense in depth; the primary guard is
- * Caddy's 404 block for /midhub/api/agent/* (plus the secret).
+ * "The call came straight over loopback, not through Caddy or AgentHub's /midhub rewrite." Defense in depth;
+ * the primary guards are the 404 for /midhub/api/agent/* in Caddy and in AgentHub's rewrite (plus the secret).
  *
  * 1) Forwarding headers. Verified empirically (Next 16.4.6): Next itself injects `x-forwarded-for` from the
  *    socket address when the incoming request has none ("::ffff:127.0.0.1" / "::1") and keeps a
@@ -49,9 +49,19 @@ function isLoopbackHost(raw: string | null): boolean {
  * 2) Host. Caddy passes the client's original Host through (an IP or dev-agenthub.mfec.co.th) and only
  *    routes matching sites, while AgentHub calls http://127.0.0.1:3100/midhub. So Host must be a loopback
  *    authority (127.x / [::1] / localhost, any port).
+ * 3) X-Forwarded-Host. AgentHub's Next rewrite (/midhub/:path* -> http://127.0.0.1:3100/midhub/:path*,
+ *    changeOrigin) makes Host loopback, and XFF loopback too when the client sent none, so Host alone would let
+ *    a browser request through if AgentHub's 404 for /midhub/api/agent/* were missing or bypassed. The rewrite
+ *    always sets X-Forwarded-Host to the browser's host (Caddy sets it too); AgentHub's own fetch never does.
+ *    Mere presence cannot be the test either: verified on next dev 16.4.6, Next injects
+ *    `x-forwarded-host = Host` into every request that has none (base-server.js), so a direct call arrives with
+ *    it. Rule: if present, it must equal Host exactly (case-insensitive), which only that injected copy does.
  */
 export function cameDirectlyOverLoopback(h: Headers): boolean {
-  if (!isLoopbackHost(h.get("host"))) return false
+  const host = h.get("host")
+  if (!isLoopbackHost(host)) return false
+  const xfh = h.get("x-forwarded-host")
+  if (xfh !== null && xfh.trim().toLowerCase() !== host!.trim().toLowerCase()) return false
   const xff = h.get("x-forwarded-for")
   if (xff !== null && !xff.split(",").every(isLoopbackAddr)) return false
   const real = h.get("x-real-ip")

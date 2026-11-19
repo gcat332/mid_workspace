@@ -21,9 +21,14 @@ PORT="${PORT:-3100}"
 SOCKET="${SOCKET:-/run/midhub/helper.sock}"
 HELPER_LIB="${HELPER_LIB:-/usr/local/lib/midhub-helper}"
 ENV_FILE="${ENV_FILE:-$APP_DIR/.env.local}"
-# Caddy sites (from /etc/caddy/Caddyfile): internal-CA HTTPS by IP, and plain HTTP by name.
+# Caddy sites (from /etc/caddy/Caddyfile): internal-CA HTTPS by IP, and plain HTTP by name. Real browser traffic
+# for the domain does NOT use Caddy: the corporate F5 terminates TLS and sends it straight to AgentHub (:3000), whose
+# Next rewrite forwards /midhub/* to MidHub (Gate 14). The Caddy name site is still checked because it still exists.
 HTTPS_SITE="${HTTPS_SITE:-https://10.4.150.142}"
 HTTP_HOST="${HTTP_HOST:-dev-agenthub.mfec.co.th}"
+# Domain path: Host the F5 sends to AgentHub, and AgentHub's port on this host.
+DOMAIN_HOST="${DOMAIN_HOST:-dev-agenthub.mfec.co.th}"
+AH_PORT="${AH_PORT:-3000}"
 NODE_BIN="${NODE_BIN:-/usr/bin/node}"
 
 pass=0; fail=0; manual=0
@@ -150,8 +155,8 @@ hdr "Gate 7 — app answers on loopback"
 c=$(code "http://127.0.0.1:$PORT/midhub/login")
 [ "$c" = "200" ] && ok "http://127.0.0.1:$PORT/midhub/login → 200" || no "/midhub/login → $c (expected 200). Fix: journalctl -u $SERVICE -n 50"
 
-# ── Gate 8: via Caddy, both sites ─────────────────────────────────────────────
-hdr "Gate 8 — via Caddy on both sites (/midhub, /midhub/login = 200; /midhub/api/agent/mids = 404)"
+# ── Gate 8: via Caddy, both Caddy sites ───────────────────────────────────────
+hdr "Gate 8 — via Caddy on both Caddy sites (/midhub, /midhub/login = 200; /midhub/api/agent/mids = 404)"
 # Final status AND final URL after following redirects (signed out: /midhub → /midhub/api/auth/agenthub →
 # /midhub/login?reason=signed_out). A site whose
 # MidHub handler is missing falls through to AgentHub (307 → /login = 200), so the final path must still
@@ -220,7 +225,6 @@ fi
 # ── Gate 13: AgentHub's listener is owned by AGENTHUB_SERVICE_USER ──────────────
 # MidHub refuses to send the AgentHub cookie unless every listener on AgentHub's port belongs to this account
 # (lib/auth/listener-owner.ts). Same data the app reads: LISTEN (0A) rows of /proc/net/tcp{,6} on the port.
-AH_PORT="${AH_PORT:-3000}"
 ah_user=$(envval AGENTHUB_SERVICE_USER); ah_user="${ah_user:-bsmagenthub}"
 hdr "Gate 13 — :$AH_PORT listener uid = $ah_user (AGENTHUB_SERVICE_USER)"
 if [ "$ah_user" = "none" ]; then
@@ -236,9 +240,47 @@ else
   fi
 fi
 
+# ── Gate 14: domain path through AgentHub's /midhub rewrite ───────────────────
+# F5 (TLS) -> AgentHub's Next on :$AH_PORT -> rewrite /midhub/:path* -> 127.0.0.1:$PORT. Probed straight at AgentHub
+# with the Host the F5 sends (no F5 or DNS needed). /midhub/login must be 200 (MidHub's access page, not AgentHub's),
+# and every spelling of the agent API must stay closed at AgentHub (404). --path-as-is keeps curl from normalising
+# the variants. A redirect is accepted only when following it ends in 404: Next itself answers 308 for a doubled
+# slash (//midhub/..., /midhub//...) before any rewrite runs, pointing at the clean path, which must then be 404.
+hdr "Gate 14 — domain path via AgentHub's rewrite (Host: $DOMAIN_HOST -> 127.0.0.1:$AH_PORT)"
+AH_BASE="http://127.0.0.1:$AH_PORT"
+dom_code() { curl -s -o /dev/null --path-as-is --max-time 10 -w '%{http_code}' -H "Host: $DOMAIN_HOST" "$AH_BASE$1" 2>/dev/null || true; }
+dom_final() { curl -s -o /dev/null --path-as-is --max-time 10 -L --max-redirs 3 -w '%{http_code} %{url_effective}' -H "Host: $DOMAIN_HOST" "$AH_BASE$1" 2>/dev/null || true; }
+login_c=$(dom_code /midhub/login)
+agent_bad=0; agent_lines=()
+for p in /midhub/api/agent /midhub/api/agent/mids /midhub/api/%61gent/mids /midhub/api/Agent/mids \
+         //midhub/api/agent/mids /midhub//api/agent/mids /midhub/api/agent%2Fmids; do
+  c=$(dom_code "$p")
+  case "$c" in
+    404) agent_lines+=("PASS|$p → 404") ;;
+    301|302|303|307|308)
+      f=$(dom_final "$p"); fc="${f%% *}"
+      if [ "$fc" = "404" ]; then agent_lines+=("PASS|$p → $c, redirect chain ends in 404 (${f#* })")
+      else agent_lines+=("FAIL|$p → $c, redirect chain ends in $fc (${f#* }); expected 404"); agent_bad=1; fi ;;
+    *) agent_lines+=("FAIL|$p → $c (expected 404). Fix (AgentHub): its 404 rule for /midhub/api/agent* must match this spelling before the rewrite"); agent_bad=1 ;;
+  esac
+done
+if [ "$login_c" = "404" ] && [ "$agent_bad" = "0" ]; then
+  man "AgentHub rewrite not deployed yet: $DOMAIN_HOST/midhub/login via :$AH_PORT → 404 and every agent variant → 404. Re-run after AgentHub ships the /midhub rewrite"
+else
+  case "$login_c" in
+    200) ok "$DOMAIN_HOST/midhub/login via :$AH_PORT → 200 (rewrite reaches MidHub)" ;;
+    404) no "$DOMAIN_HOST/midhub/login via :$AH_PORT → 404 (rewrite missing) while an agent variant is not 404 (below)" ;;
+    *)   no "$DOMAIN_HOST/midhub/login via :$AH_PORT → $login_c (expected 200). AgentHub's proxy.ts must not run on /midhub; the rewrite must target 127.0.0.1:$PORT/midhub/:path*" ;;
+  esac
+  for l in "${agent_lines[@]}"; do
+    if [ "${l%%|*}" = "PASS" ]; then ok "$DOMAIN_HOST ${l#*|}"; else no "$DOMAIN_HOST ${l#*|}"; fi
+  done
+fi
+
 # ── Manual gates ──────────────────────────────────────────────────────────────
 hdr "Manual gates"
-man "an AgentHub admin can open /midhub: sign in to AgentHub (/login) as an admin, open /midhub on both sites (no second login); a non-admin AgentHub account gets 'ไม่ใช่ admin ของ AgentHub'"
+man "an AgentHub admin can open /midhub: sign in to AgentHub (/login) as an admin, open /midhub on https://10.4.150.142 and https://$DOMAIN_HOST (no second login), and save something there (a POST: CSRF check behind the rewrite); a non-admin AgentHub account gets 'ไม่ใช่ admin ของ AgentHub'"
+man "SSE through the domain: on https://$DOMAIN_HOST/midhub a MID's Log tab streams lines as they arrive and stays open past 2 minutes (AgentHub proxyTimeout >= 120 s; MidHub pings every 15 s)"
 man "validate the spike MID in the instance: import/start the spike MID, confirm it shows Up and validated in the ServiceNow instance"
 
 # ── Summary ───────────────────────────────────────────────────────────────────

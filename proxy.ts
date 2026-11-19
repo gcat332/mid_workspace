@@ -44,9 +44,22 @@ const unauthenticated = (): NextResponse =>
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 
 /**
+ * The host the browser addressed: the first X-Forwarded-Host value, else Host. Behind AgentHub's Next rewrite
+ * (changeOrigin) Host is the loopback target 127.0.0.1:3100 and X-Forwarded-Host the browser's host; Caddy sends
+ * both as the browser's host. MidHub listens on loopback only, so only a local proxy can set the header (Caddy
+ * and the rewrite both overwrite a client-sent one, and a browser cannot add it to a cross-origin request
+ * without a CORS preflight that MidHub never grants).
+ */
+function browserHost(req: NextRequest): string {
+  const fwd = req.headers.get("x-forwarded-host")?.split(",")[0].trim()
+  return (fwd || req.headers.get("host") || req.nextUrl.host).toLowerCase()
+}
+
+/**
  * CSRF guard for state-changing API calls (sameSite=lax already keeps the cookie off cross-site POSTs; this
  * also stops same-site-but-other-origin pages). Browsers always send Origin and/or Sec-Fetch-Site on such
- * requests; non-browser clients (curl) send neither and are let through. Scheme is ignored: TLS ends at Caddy.
+ * requests; non-browser clients (curl) send neither and are let through. Scheme is ignored: TLS ends at
+ * Caddy or the F5, before MidHub.
  */
 function crossOrigin(req: NextRequest): boolean {
   const site = req.headers.get("sec-fetch-site")
@@ -59,11 +72,15 @@ function crossOrigin(req: NextRequest): boolean {
   } catch {
     return true // "null" or garbage
   }
-  return originHost !== (req.headers.get("host") ?? req.nextUrl.host)
+  return originHost !== browserHost(req)
 }
 
 // Build a redirect to an in-app path. basePath is added explicitly (and "/" maps to the bare
 // basePath) so the Location never gets a stray trailing slash.
+// The browser always gets a RELATIVE Location (/midhub/...): req.url is the URL Next builds from its own listen
+// address (never from Host), and Next's proxy adapter rewrites a Location on that same origin to path + query.
+// A bare relative Location cannot be returned from here: the adapter parses it with new URL() and throws.
+// Both are pinned by proxy.redirects.test.ts, which runs this proxy through Next's real adapter.
 function redirectTo(req: NextRequest, path: string): NextResponse {
   const base = req.nextUrl.basePath
   return NextResponse.redirect(new URL(path === "/" ? base || "/" : base + path, req.url))

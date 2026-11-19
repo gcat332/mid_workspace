@@ -1,6 +1,7 @@
 # MidHub reverse-proxy block.
-# Paste INSIDE AgentHub's existing site block(s) in /etc/caddy/Caddyfile (both the
-# https://10.4.150.142 and http://dev-agenthub.mfec.co.th sites), BEFORE any catch-all
+# Paste INSIDE AgentHub's existing site block(s) in /etc/caddy/Caddyfile (the https://10.4.150.142 site, and the
+# http://dev-agenthub.mfec.co.th site while it exists; browsers on https://dev-agenthub.mfec.co.th come through the
+# F5 and AgentHub's /midhub rewrite instead, see deploy/README.md section 10), BEFORE any catch-all
 # handle / reverse_proxy to :3000, so /midhub/* is matched first.
 # Body limits (Caddy enforces them BEFORE the app authenticates, so an anonymous client cannot make
 # the app buffer big bodies): only the file-upload endpoint may send up to 51 MiB (50 MiB file +

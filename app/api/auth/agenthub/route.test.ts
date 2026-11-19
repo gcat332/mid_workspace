@@ -135,3 +135,20 @@ it("never echoes the AgentHub cookie value", async () => {
   }
   expect(JSON.stringify(auditDenied.mock.calls) + JSON.stringify(recordAudit.mock.calls)).not.toContain(AH)
 })
+
+it("behind AgentHub's rewrite (Host 127.0.0.1:3100, no X-Forwarded-Proto) every Location is relative", async () => {
+  const rewritten = new NextRequest("http://127.0.0.1:3100/midhub/api/auth/agenthub?next=" + encodeURIComponent("/mids?x=1"), {
+    headers: { cookie: `session=${AH}`, host: "127.0.0.1:3100", "x-forwarded-host": "dev-agenthub.mfec.co.th", "x-forwarded-for": "10.20.30.40" },
+    nextConfig: { basePath: "/midhub" },
+  } as ConstructorParameters<typeof NextRequest>[1])
+  const relative = (res: Response) => {
+    const loc = res.headers.get("location") ?? ""
+    expect(loc).toMatch(/^\/midhub(?:[/?]|$)/)
+    expect(loc).not.toMatch(/^\/\/|:\/\//)
+    return loc
+  }
+  lookupAgentHubAdmin.mockResolvedValue({ ok: true, email: "boss@x.com" })
+  expect(relative(await GET(rewritten))).toBe("/midhub/mids?x=1")
+  lookupAgentHubAdmin.mockResolvedValue({ ok: false, reason: "unreachable" })
+  expect(relative(await GET(rewritten))).toBe("/midhub/login?reason=unreachable")
+})

@@ -104,6 +104,16 @@ describe("IP allowlist", () => {
     expect(res.status).toBe(200)
   })
 
+  // Domain path: F5 (client IP in X-Forwarded-For, no X-Forwarded-Proto) -> AgentHub's Next rewrite -> MidHub.
+  it("rewrite shape (Host 127.0.0.1:3100, X-Forwarded-For: <client>) checks the F5-supplied client IP", async () => {
+    cidrs = ["10.0.0.0/8"]
+    const shape = (client: string) => ({ host: "127.0.0.1:3100", "x-forwarded-host": "dev-agenthub.mfec.co.th", "x-forwarded-for": client })
+    expect((await proxy(req("/", { headers: await withCookie("midhub_session", shape("10.20.30.40")) }))).status).toBe(200)
+    const blocked = await proxy(req("/api/mids", { headers: shape("203.0.113.9") }))
+    expect(blocked.status).toBe(403)
+    expect(await blocked.json()).toMatchObject({ code: "ip_blocked", ip: "203.0.113.9" })
+  })
+
   it("enforces IPv6 entries", async () => {
     cidrs = ["2001:db8::/32"]
     const ok = await proxy(req("/api/x", { headers: { "x-forwarded-for": "2001:db8::1" } }))
@@ -374,6 +384,37 @@ describe("CSRF origin check on unsafe API methods (M1)", () => {
     expect((await unsafe("POST", { "sec-fetch-site": "same-origin" })).status).toBe(200)
     expect((await unsafe("POST", { "sec-fetch-site": "none" })).status).toBe(200)
     expect((await unsafe("POST", {})).status).toBe(200)
+  })
+  // Behind AgentHub's Next rewrite (/midhub/:path* -> http://127.0.0.1:3100/midhub/:path*, changeOrigin) Host is
+  // the loopback target and X-Forwarded-Host carries the browser's host.
+  it("rewrite shape: Origin = X-Forwarded-Host (Host 127.0.0.1:3100) passes", async () => {
+    const res = await unsafe("POST", {
+      host: "127.0.0.1:3100", "x-forwarded-host": "dev-agenthub.mfec.co.th",
+      origin: "https://dev-agenthub.mfec.co.th", "sec-fetch-site": "same-origin",
+    })
+    expect(res.status).toBe(200)
+  })
+  it("rewrite shape with a foreign X-Forwarded-Host -> 403", async () => {
+    const res = await unsafe("POST", { host: "127.0.0.1:3100", "x-forwarded-host": "evil.com", origin: "https://dev-agenthub.mfec.co.th" })
+    expect(res.status).toBe(403)
+    expect((await res.json()).code).toBe("csrf")
+  })
+  it("only the first X-Forwarded-Host value counts", async () => {
+    const h = { host: "127.0.0.1:3100", origin: "https://dev-agenthub.mfec.co.th" }
+    expect((await unsafe("POST", { ...h, "x-forwarded-host": "dev-agenthub.mfec.co.th, 127.0.0.1:3100" })).status).toBe(200)
+    expect((await unsafe("POST", { ...h, "x-forwarded-host": "evil.com, dev-agenthub.mfec.co.th" })).status).toBe(403)
+  })
+  it("Caddy shape (Host = X-Forwarded-Host = 10.4.150.142) passes; a foreign Origin there still 403s", async () => {
+    const caddy = { host: "10.4.150.142", "x-forwarded-host": "10.4.150.142", "x-forwarded-proto": "https" }
+    expect((await unsafe("POST", { ...caddy, origin: "https://10.4.150.142" })).status).toBe(200)
+    expect((await unsafe("POST", { ...caddy, origin: "https://dev-agenthub.mfec.co.th" })).status).toBe(403)
+  })
+  it("the rewrite shape keeps the Sec-Fetch-Site check", async () => {
+    const res = await unsafe("POST", {
+      host: "127.0.0.1:3100", "x-forwarded-host": "dev-agenthub.mfec.co.th",
+      origin: "https://dev-agenthub.mfec.co.th", "sec-fetch-site": "cross-site",
+    })
+    expect(res.status).toBe(403)
   })
   it("also guards the public sign-in route; GET is never blocked", async () => {
     const signIn = await proxy(req("/api/auth/agenthub", { method: "POST", headers: { host: "localhost:3100", origin: "https://evil.example" } }))
