@@ -57,3 +57,9 @@ it("labels user.created (agent call created a MidHub admin) and its email detail
   expect(actionLabel("user.created")).toBe("Create User (AgentHub Admin)")
   expect(detailPairs(JSON.stringify({ via: "agenthub", email: "new@x.com" }))).toEqual([["Via", "agenthub"], ["Email", "new@x.com"]])
 })
+
+it("labels the destination of a move as Moved To, not Renamed To", () => {
+  const d = JSON.stringify({ path: "work/a.txt", to: "work/archive/a.txt" })
+  expect(detailPairs(d, "file.move")).toEqual([["Path", "work/a.txt"], ["Moved To", "work/archive/a.txt"]])
+  expect(detailPairs(JSON.stringify({ path: "work/a.txt", to: "work/b.txt" }), "file.rename")).toEqual([["Path", "work/a.txt"], ["Renamed To", "work/b.txt"]])
+})

@@ -115,15 +115,21 @@ function valueText(key: string, v: unknown): string {
   return typeof v === "string" || typeof v === "number" ? String(v) : JSON.stringify(v)
 }
 
+/** Key labels that depend on the action (a move's `to` is where it went, not a new name). */
+const ACTION_KEY_LABELS: Record<string, Record<string, string>> = {
+  "file.move": { to: "Moved To" },
+}
+
 /** Readable `[label, value]` pairs of an audit detail; null when the detail is not a JSON object. */
-export function detailPairs(detail: string): [string, string][] | null {
+export function detailPairs(detail: string, action?: string): [string, string][] | null {
   let j: unknown
   try { j = JSON.parse(detail) } catch { return null }
   if (typeof j !== "object" || j === null || Array.isArray(j)) return null
   // AgentHub entries lead with who acted through what: via + taskId first.
   const rank = (k: string) => (k === "via" ? 0 : k === "taskId" ? 1 : 2)
   const entries = Object.entries(j).sort(([a], [b]) => rank(a) - rank(b))
-  return entries.map(([k, v]) => [KEY_LABELS[k] ?? k, valueText(k, v)])
+  const own = (action && ACTION_KEY_LABELS[action]) || {}
+  return entries.map(([k, v]) => [own[k] ?? KEY_LABELS[k] ?? k, valueText(k, v)])
 }
 
 /** Compact one-line JSON; falls back to the raw text when detail is not valid JSON. */

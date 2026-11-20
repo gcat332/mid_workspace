@@ -18,9 +18,9 @@ export const formatBangkok = (iso: string): string => bangkok.format(new Date(is
 const input = inputCls.replace("w-full ", "")
 
 /** Readable "label: value" lines; the full JSON stays one click away. */
-function Detail({ detail }: { detail: string }) {
+function Detail({ detail, action }: { detail: string; action: string }) {
   const [open, setOpen] = useState(false)
-  const pairs = detailPairs(detail)
+  const pairs = detailPairs(detail, action)
   if (pairs !== null && pairs.length === 0) return <span className="text-gray-400">-</span>
   return (
     <div className="text-xs text-gray-700">
@@ -119,7 +119,7 @@ export function AuditLog() {
                   {actionLabel(r.action) ?? <span className="font-mono text-xs">{r.action}</span>}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-gray-700">{r.midName ?? <span className="text-gray-400">-</span>}</td>
-                <td className="min-w-64 px-3 py-2"><Detail detail={r.detail} /></td>
+                <td className="min-w-64 px-3 py-2"><Detail detail={r.detail} action={r.action} /></td>
               </tr>
             ))}
             {!loading && !error && items.length === 0 && !next && (
