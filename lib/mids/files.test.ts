@@ -23,7 +23,12 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "midhub-files-"))
   process.env.MIDHUB_ROOT = root
   m = path.join(root, "mids", "m1")
-  for (const d of ["agent/bin", "agent/lib", "agent/jre", "agent/conf", "agent/extlib", "work"]) fs.mkdirSync(path.join(m, d), { recursive: true })
+  for (const d of ["agent/bin", "agent/lib", "agent/jre", "agent/conf", "agent/extlib", "agent/properties", "agent/security", "agent/logs", "work"]) fs.mkdirSync(path.join(m, d), { recursive: true })
+  fs.writeFileSync(path.join(m, "agent/properties/glide.properties"), "a=1\n")
+  fs.writeFileSync(path.join(m, "agent/security/agent_keystore"), "k")
+  fs.writeFileSync(path.join(m, "agent/logs/agent0.log.0"), "log")
+  fs.writeFileSync(path.join(m, "agent/start.sh"), "#!/bin/sh\n")
+  fs.writeFileSync(path.join(m, "agent/conf/wrapper.conf"), "w=1\n")
   fs.writeFileSync(path.join(m, "agent/config.xml"), "<parameters/>")
   fs.writeFileSync(path.join(m, "agent/conf/wrapper-override.conf"), "a=1\n")
   fs.writeFileSync(path.join(m, "agent/bin/mid.sh"), "#!/bin/sh\n")
@@ -330,7 +335,7 @@ describe("other hardening", () => {
     expect(a.find((e) => e.name === "config.xml")).toMatchObject({ locked: true, secret: true })
     expect(a.find((e) => e.name === "bin")?.locked).toBe(true)
     expect(a.find((e) => e.name === "conf")?.locked).toBe(true)
-    expect(a.find((e) => e.name === "extlib")?.locked).toBe(false)
+    expect(a.find((e) => e.name === "extlib")?.locked).toBe(true)
     expect((await listDir("m1", "")).find((e) => e.name === "agent")?.locked).toBe(true)
   })
   it("exactly 50 MB is accepted", async () => {
@@ -462,5 +467,48 @@ describe("uploadStream (raw body, AgentHub)", () => {
     const s = new ReadableStream<Uint8Array>({ start(c) { for (let i = 0; i < 50; i++) c.enqueue(chunk); c.close() } })
     await uploadStream("m1", "work", "big", s, 52428800)
     expect(fs.statSync(path.join(m, "work/big")).size).toBe(52428800)
+  })
+})
+
+describe("protected system/config paths", () => {
+  it("level 1: the folder and everything inside cannot be renamed or deleted", async () => {
+    for (const p of ["agent/properties", "agent/properties/glide.properties", "agent/security/agent_keystore", "agent/conf/wrapper.conf", "agent/start.sh"]) {
+      await rejects(rename("m1", p, "x"), "protected", 403)
+      await rejects(remove("m1", p), "protected", 403)
+    }
+    expect(fs.existsSync(path.join(m, "agent/security/agent_keystore"))).toBe(true)
+  })
+  it("level 2: the folder itself is locked, its files are free", async () => {
+    for (const p of ["agent/logs", "agent/extlib"]) {
+      await rejects(rename("m1", p, "x"), "protected", 403)
+      await rejects(remove("m1", p), "protected", 403)
+    }
+    expect(await rename("m1", "agent/logs/agent0.log.0", "old.log")).toEqual({ to: "agent/logs/old.log" })
+    await remove("m1", "agent/logs/old.log")
+  })
+  it("renaming onto a protected name is refused", async () => {
+    fs.mkdirSync(path.join(m, "agent/tmpdir"))
+    await rejects(rename("m1", "agent/tmpdir", "scripts"), "protected", 403)
+  })
+  it("a symlink inside a level-1 folder cannot be removed either", async () => {
+    fs.symlinkSync(path.join(m, "work/note.txt"), path.join(m, "agent/security/lnk"))
+    await rejects(remove("m1", "agent/security/lnk"), "protected", 403)
+  })
+  it("listDir reports locked for protected entries, not for files in level-2 folders", async () => {
+    const a = await listDir("m1", "agent")
+    for (const n of ["properties", "security", "logs", "extlib", "start.sh"]) expect(a.find((e) => e.name === n)?.locked).toBe(true)
+    expect((await listDir("m1", "agent/properties"))[0]).toMatchObject({ locked: true, readOnly: false })
+    expect((await listDir("m1", "agent/logs"))[0].locked).toBe(false)
+  })
+  it("editing, uploading and creating inside protected folders still work", async () => {
+    const r = await readText("m1", "agent/properties/glide.properties")
+    await writeText("m1", "agent/properties/glide.properties", "x=1\n", r.hash)
+    await upload("m1", "agent/security", "ca.pem", Buffer.from("x"))
+    await mkdir("m1", "agent/logs", "sub")
+  })
+  it("a symlinked agent dir cannot dodge protection", async () => {
+    fs.renameSync(path.join(m, "agent"), path.join(m, "work/realagent"))
+    fs.symlinkSync(path.join(m, "work/realagent"), path.join(m, "agent"))
+    await rejects(remove("m1", "work/realagent/security"), "protected", 403)
   })
 })

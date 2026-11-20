@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto"
 import { sha256 } from "@/lib/hash"
 import type { FileHandle } from "node:fs/promises"
 import path from "node:path"
-import { CONFIG_XML, LOG_FILES, WRAPPER_OVERRIDE } from "./layout"
+import { CONFIG_XML, LOG_FILES, PROTECTED_DIRS, PROTECTED_SCRIPT_DIR, PROTECTED_TREES, WRAPPER_OVERRIDE } from "./layout"
 import { MidError } from "./names"
 import { getMid } from "./registry"
 import { isReadOnlyPath, PROGRAM_DIRS, resolveMidPath } from "./paths"
@@ -16,6 +16,7 @@ const READ_ONLY_MSG = "โฟลเดอร์นี้เป็นโปรแ
 const TOO_BIG_TEXT = "ไฟล์ใหญ่เกิน 2 MB เปิดแก้ในหน้าเว็บไม่ได้ ให้ดาวน์โหลดแทน"
 const roErr = () => new MidError("read_only", 403, READ_ONLY_MSG)
 const cfgErr = () => new MidError("use_config_tab")
+const protErr = (msg?: string) => new MidError("protected", 403, msg)
 
 /** Test seam: runs after paths are resolved and checked, right before the first I/O. */
 export const hooks: { beforeIo?: () => void | Promise<void> } = {}
@@ -37,7 +38,10 @@ export type FileEntry = {
 
 const inside = (dir: string, p: string): boolean => p === dir || p.startsWith(dir + path.sep)
 
-type Ctx = { name: string; root: string; roDirs: string[]; configFiles: string[]; configXml: string[] }
+type Ctx = {
+  name: string; root: string; roDirs: string[]; configFiles: string[]; configXml: string[]
+  protTrees: string[]; protDirs: string[]; scriptDirs: string[]
+}
 
 async function ctxFor(name: string): Promise<Ctx> {
   await getMid(name) // unknown/removed -> 404
@@ -54,7 +58,11 @@ async function ctxFor(name: string): Promise<Ctx> {
     roDirs.add(path.join(root, "agent", d))
     roDirs.add(await resolveMidPath(name, `agent/${d}`))
   }
-  return { name, root, roDirs: [...roDirs], configFiles, configXml }
+  const protTrees = new Set<string>(), protDirs = new Set<string>()
+  for (const t of PROTECTED_TREES) for (const x of await both(t)) protTrees.add(x)
+  for (const t of PROTECTED_DIRS) for (const x of await both(t)) protDirs.add(x)
+  const scriptDirs = await both(PROTECTED_SCRIPT_DIR)
+  return { name, root, roDirs: [...roDirs], configFiles, configXml, protTrees: [...protTrees], protDirs: [...protDirs], scriptDirs }
 }
 
 const isRo = (c: Ctx, abs: string): boolean => isReadOnlyPath(c.name, abs) || c.roDirs.some((d) => inside(d, abs))
@@ -65,7 +73,17 @@ function assertWritable(c: Ctx, abs: string): void {
 }
 /** Entry must not be the root nor contain a program dir / managed config file. */
 function isContainer(c: Ctx, abs: string): boolean {
-  return abs === c.root || c.roDirs.some((d) => inside(abs, d)) || c.configFiles.some((f) => inside(abs, f))
+  return abs === c.root || c.roDirs.some((d) => inside(abs, d)) || c.configFiles.some((f) => inside(abs, f)) ||
+    c.protTrees.some((d) => inside(abs, d)) || c.protDirs.some((d) => inside(abs, d))
+}
+/** True inside a level-1 tree (incl. the folder itself): nothing there can be renamed, deleted or moved. */
+function inProtectedTree(c: Ctx, abs: string): boolean {
+  return c.protTrees.some((d) => inside(d, abs))
+}
+/** System/config entries that must stay where they are (viewing and editing content stay allowed). */
+function isProtected(c: Ctx, abs: string): boolean {
+  return inProtectedTree(c, abs) || c.protDirs.includes(abs) ||
+    (abs.endsWith(".sh") && c.scriptDirs.includes(path.dirname(abs)))
 }
 function assertNotContainer(c: Ctx, abs: string): void {
   if (abs === c.root || c.roDirs.some((d) => inside(abs, d))) throw roErr()
@@ -140,7 +158,7 @@ export function listDir(name: string, rel: string): Promise<FileEntry[]> {
           if (!type) continue
           out.push({
             name: n, type, size: type === "dir" ? 0 : st.size, mtime: st.mtime.toISOString(), readOnly, symlink,
-            locked: !symlink && (readOnly || isContainer(c, abs)),
+            locked: (!symlink && (readOnly || isContainer(c, abs))) || isProtected(c, abs),
             secret: c.configXml.includes(abs),
             config: !symlink && c.configFiles.includes(abs),
           })
@@ -390,6 +408,7 @@ export function rename(name: string, rel: string, newName: string): Promise<{ to
     assertWritable(c, e.abs)
     assertNotContainer(c, e.abs)
     assertWritable(c, path.join(e.parent, newName)) // e.g. renaming onto a program dir name
+    if (isProtected(c, e.abs) || isProtected(c, path.join(e.parent, newName))) throw protErr()
     await beforeIo()
     const d = await openDir(e.parent, writeCheck(c))
     try {
@@ -409,6 +428,7 @@ export function remove(name: string, rel: string): Promise<{ path: string }> {
     const c = await ctxFor(name)
     const e = await entryOf(c, rel)
     assertWritable(c, e.abs)
+    if (isProtected(c, e.abs)) throw protErr()
     const st = await fs.promises.lstat(e.abs).catch(() => null)
     if (!st) throw new MidError("not_found")
     if (!st.isSymbolicLink()) assertNotContainer(c, e.abs)

@@ -27,3 +27,10 @@ export const DEFAULT_LOG_FILES = 3
 export const MIN_LOG_FILES = 1
 export const MAX_LOG_FILES = 10
 export const MIN_FREE_BYTES = 2 * 1024 ** 3
+
+// Protected from rename/delete/move (content stays viewable and editable). Level 1: the entry and everything inside.
+export const PROTECTED_TREES = ["agent/conf", "agent/properties", "agent/security", "agent/etc", "agent/package", "agent/midinstaller"] as const
+// Level 2: only the folder itself is locked; files inside are free.
+export const PROTECTED_DIRS = ["agent/logs", "agent/extlib", "agent/work", "agent/scripts", "agent/tools"] as const
+// Every *.sh directly inside this folder is level 1.
+export const PROTECTED_SCRIPT_DIR = "agent"
