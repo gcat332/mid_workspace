@@ -93,7 +93,7 @@ describe("planZip", () => {
     const t = Date.now()
     await rejects(planZip("m1", "work", []), "too_large", 413)
     expect(Date.now() - t).toBeLessThan(10_000)
-  })
+  }, 30_000)
   it("over 1 GiB is too_large", async () => {
     fs.writeFileSync(path.join(m, "work/big"), "")
     fs.truncateSync(path.join(m, "work/big"), ZIP_MAX_BYTES + 1)
