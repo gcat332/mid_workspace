@@ -511,6 +511,27 @@ describe("FilesTab create and upload", () => {
       expect((await screen.findByRole("alert")).textContent).toContain("new.crt")
       expect(FakeXHR.all).toHaveLength(1)
     })
+
+    it("a failed replacement is shown together with the refused name", async () => {
+      await inSecurity()
+      drop(card(), [file("new.crt"), file("agent_keystore")])
+      fireEvent.click(within(await screen.findByRole("dialog", { name: "Overwrite agent_keystore?" })).getByRole("button", { name: "Overwrite" }))
+      await waitFor(() => expect(FakeXHR.all).toHaveLength(1))
+      FakeXHR.all[0].respond(500, '{"code":"internal","message":"เขียนไฟล์ไม่สำเร็จ"}')
+      await waitFor(() => {
+        const t = screen.getByRole("alert").textContent ?? ""
+        expect(t).toContain("เขียนไฟล์ไม่สำเร็จ")
+        expect(t).toContain("new.crt")
+      })
+    })
+
+    it("the progress counter counts only the files being uploaded", async () => {
+      await inSecurity()
+      drop(card(), [file("new.crt"), file("agent_keystore")])
+      fireEvent.click(within(await screen.findByRole("dialog", { name: "Overwrite agent_keystore?" })).getByRole("button", { name: "Overwrite" }))
+      await waitFor(() => expect(screen.getByRole("progressbar", { name: "Uploading agent_keystore" })).toBeTruthy())
+      expect(screen.queryByText(/\(\d\/\d\)/)).toBeNull()
+    })
   })
 
 })
@@ -1115,6 +1136,15 @@ describe("FilesTab copy path", () => {
     fireEvent.keyDown(document.activeElement!, { key: "c", ctrlKey: true })
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("agent/extlib/a.jar\nagent/extlib/c.jar"))
     expect((await screen.findByRole("status")).textContent).toBe("คัดลอก path แล้ว (2 รายการ)")
+  })
+
+  it("Ctrl+C and Ctrl+A work on a Thai layout (key is the layout character, code is physical)", async () => {
+    const { container } = await inExtlib()
+    rowBtn(container, "agent/extlib/a.jar").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "แ", code: "KeyC", ctrlKey: true })
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("agent/extlib"))
+    fireEvent.keyDown(document.activeElement!, { key: "ฟ", code: "KeyA", ctrlKey: true })
+    expect(await screen.findByText("เลือก 3 รายการ")).toBeTruthy()
   })
 
   it("Cmd+C with no selection copies the focused row", async () => {

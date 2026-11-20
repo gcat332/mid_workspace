@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react"
 import type { ApiError } from "../ErrorNotice"
 
-export const COPY_FAILED: ApiError = { message: "คัดลอกไม่สำเร็จ เบราว์เซอร์ไม่อนุญาตให้เขียน clipboard ลองใหม่ หรือคัดลอกจากชื่อในเมนูแทน" }
+export const COPY_FAILED: ApiError = { message: "คัดลอกไม่สำเร็จ เบราว์เซอร์ไม่อนุญาตให้เขียน clipboard (มักเกิดเมื่อเปิดผ่าน HTTP) รีเฟรชหน้าแล้วลองใหม่ หรืออ่าน path จากแถบ path เหนือรายการไฟล์แล้วพิมพ์เอง" }
 export const FOLDER_NOTE = "วางโฟลเดอร์ไม่ได้ — ลากไฟล์มาวางแทน หรือบีบเป็น .zip แล้ววางไฟล์ .zip"
 
 type Deps = {

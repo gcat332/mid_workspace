@@ -247,19 +247,19 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
     if (busyReason) { setErr({ message: busyReason }); return }
     if (roDirs[dir]) { setErr({ code: "protected", message: `อัปโหลดไม่ได้: ${dir || midName} เป็นโฟลเดอร์โปรแกรมของ MID (อ่านอย่างเดียว) อัปโหลดได้เฉพาะที่ ${EXTLIB}` }); return }
     setErr(null); setNote(note ?? null); setBusy(true)
-    let failed = false
-    const fail = (e: ApiError) => { if (!failed) setErr(e); failed = true }
+    const errs: ApiError[] = []
+    const fail = (e: ApiError) => { errs.push(e) }
     try {
       const listing = Array.isArray(tree.children[dir]) ? (tree.children[dir] as Entry[]) : await load(dir)
       // A level-1 folder takes only replacements of files that already exist there (server: assertCanCreate).
       const refused = uploadBlockReason(dir, files.map((f) => f.name), listing)
       if (refused) fail({ code: "protected", message: refused.message })
       const skip = new Set(refused?.names)
-      for (const [i, f] of files.entries()) {
-        if (skip.has(f.name)) continue
+      const allowed = files.filter((f) => !skip.has(f.name))
+      for (const [i, f] of allowed.entries()) {
         if (f.size > MAX_UPLOAD) { fail(tooLarge(f.name)); continue }
         if (listing?.some((x) => x.name === f.name && x.type === "file") && !(await askOverwrite(f))) continue
-        setUpload({ name: f.name, index: i + 1, count: files.length, percent: 0 })
+        setUpload({ name: f.name, index: i + 1, count: allowed.length, percent: 0 })
         const fd = new FormData()
         fd.set("dir", dir)
         fd.set("file", f)
@@ -269,6 +269,8 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
         } catch { fail(NETWORK); break }
       }
     } finally {
+      // Every problem stays visible: a refused name must not hide a failed replacement.
+      if (errs.length > 0) setErr({ ...errs[0], message: errs.map((e) => e.message).join(" · ") })
       setUpload(null); setBusy(false)
       await load(dir)
     }
@@ -390,11 +392,11 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
     if (e.key === "Enter" && e.target === rowEl.querySelector("[data-row-main]") && entry) {
       e.preventDefault(); onRowClick({ path, depth: 0, entry }, { toggle: false, range: false }); return
     }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "a" || e.code === "KeyA")) {
       e.preventDefault()
       setSelection(selectAll(parentOf(path), siblingsOf(tree, parentOf(path)))); return
     }
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "c") {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key.toLowerCase() === "c" || e.code === "KeyC")) {
       if (window.getSelection()?.toString()) return // let a normal copy of selected text work
       e.preventDefault()
       const parent = selection.paths.length > 0 ? selection.parent : parentOf(path)
