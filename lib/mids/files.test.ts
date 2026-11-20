@@ -11,7 +11,7 @@ vi.mock("@/lib/db/client", () => ({
 }))
 vi.mock("@/lib/mids/status", () => ({ readServiceStatus: async () => ({ state: "inactive", pid: null, memoryBytes: null, since: null }), runSystemctl: async () => ({ code: 0, stdout: "" }) }))
 
-import { dirReadOnly, hooks, listDir, openDownload, mkdir, readText, remove, rename, upload, uploadStream, writeText } from "./files"
+import { dirReadOnly, hooks, listDir, openDownload, mkdir, move, readText, remove, rename, upload, uploadStream, writeText } from "./files"
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex")
 let root: string
@@ -169,6 +169,46 @@ describe("mkdir", () => {
       expect(e.message).toMatch(/ชื่อไฟล์\/โฟลเดอร์/)
     }
     expect(fs.existsSync(path.join(root, "mids", "evil"))).toBe(false)
+  })
+})
+
+describe("move", () => {
+  it("moves a file and a folder into another folder", async () => {
+    fs.mkdirSync(path.join(m, "work/d")); fs.writeFileSync(path.join(m, "work/d/f"), "1")
+    expect(await move("m1", "work/note.txt", "agent/extlib")).toEqual({ to: "agent/extlib/note.txt" })
+    expect(await move("m1", "work/d", "agent/logs")).toEqual({ to: "agent/logs/d" })
+    expect(fs.readFileSync(path.join(m, "agent/logs/d/f"), "utf8")).toBe("1")
+  })
+  it("file over file: exists without overwrite, atomic replace with it", async () => {
+    fs.writeFileSync(path.join(m, "agent/extlib/note.txt"), "old")
+    await rejects(move("m1", "work/note.txt", "agent/extlib"), "exists", 409)
+    expect(fs.existsSync(path.join(m, "work/note.txt"))).toBe(true)
+    await move("m1", "work/note.txt", "agent/extlib", true)
+    expect(fs.readFileSync(path.join(m, "agent/extlib/note.txt"), "utf8")).toBe("hello")
+  })
+  it("a clash involving a folder is conflict even with overwrite; nothing changes", async () => {
+    fs.mkdirSync(path.join(m, "agent/extlib/note.txt"))
+    await rejects(move("m1", "work/note.txt", "agent/extlib", true), "conflict", 409)
+    fs.mkdirSync(path.join(m, "work/x")); fs.writeFileSync(path.join(m, "agent/extlib/x"), "")
+    await rejects(move("m1", "work/x", "agent/extlib", true), "conflict", 409)
+    expect(fs.statSync(path.join(m, "work/x")).isDirectory()).toBe(true)
+  })
+  it("refuses protected sources, level-1 destinations, program dirs, config files", async () => {
+    await rejects(move("m1", "agent/properties/glide.properties", "work"), "protected", 403)
+    await rejects(move("m1", "agent/logs", "work"), "protected", 403)
+    await rejects(move("m1", "work/note.txt", "agent/conf"), "protected", 403)
+    await rejects(move("m1", "work/note.txt", "agent/bin"), "read_only", 403)
+    await rejects(move("m1", "agent/config.xml", "work"), "use_config_tab", 403)
+  })
+  it("refuses same parent, into itself, non-dir destination, symlink source, symlinked destination", async () => {
+    fs.mkdirSync(path.join(m, "work/d/e"), { recursive: true })
+    await rejects(move("m1", "work/note.txt", "work"), "invalid_request", 400)
+    await rejects(move("m1", "work/d", "work/d/e"), "invalid_request", 400)
+    await rejects(move("m1", "work/d", "work/note.txt"), "invalid_request", 400)
+    fs.symlinkSync(path.join(m, "work/note.txt"), path.join(m, "work/lnk"))
+    await rejects(move("m1", "work/lnk", "agent/extlib"), "conflict", 409)
+    fs.symlinkSync(path.join(m, "agent/extlib"), path.join(m, "work/extlink"))
+    await rejects(move("m1", "work/d", "work/extlink"), "invalid_request", 400)
   })
 })
 

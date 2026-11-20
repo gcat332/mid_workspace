@@ -17,6 +17,7 @@ const ACTION_LABELS: Record<string, string> = {
   "file.write": "Edit File",
   "file.upload": "Upload File",
   "file.rename": "Rename File",
+  "file.move": "Move File",
   "file.delete": "Delete File",
   "file.mkdir": "New Folder",
   "auth.login": "Sign In (AgentHub)",

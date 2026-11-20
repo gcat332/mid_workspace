@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { requireUser } from "@/lib/auth/helpers"
 import { recordAudit } from "@/lib/audit"
 import { handleRouteError, readJsonObject } from "@/lib/http/route"
-import { MAX_UPLOAD_BYTES, dirReadOnly, listDir, mkdir, readText, remove, rename, upload, writeText } from "@/lib/mids/files"
+import { MAX_UPLOAD_BYTES, dirReadOnly, listDir, mkdir, move, readText, remove, rename, upload, writeText } from "@/lib/mids/files"
 import { assertSettled } from "@/lib/mids/lifecycle-gate"
 import { MidError } from "@/lib/mids/names"
 
@@ -13,6 +13,7 @@ type Ctx = { params: Promise<{ name: string }> }
 // PUT    { path, content, baseHash }                -> { hash }
 // POST   multipart { dir, file }                    -> { size }      (upload)
 // POST   JSON { op: "mkdir", parent, name } | { op: "rename", path, newName } -> {} | { to }
+//        JSON { op: "move", path, to, overwrite? }  -> { to }   (move into folder `to`; overwrite only replaces a file)
 // DELETE ?path=                                     -> {}
 const bad = () => new MidError("invalid_request")
 const str = (v: unknown): string => {
@@ -94,6 +95,12 @@ export async function POST(req: Request, ctx: Ctx) {
       const path = str(b.path)
       const r = await rename(name, path, str(b.newName))
       await recordAudit(user, "file.rename", name, { path: path.replace(/\/+$/, ""), to: r.to })
+      return NextResponse.json(r)
+    }
+    if (b.op === "move") {
+      const path = str(b.path)
+      const r = await move(name, path, str(b.to), b.overwrite === true)
+      await recordAudit(user, "file.move", name, { path: path.replace(/\/+$/, ""), to: r.to })
       return NextResponse.json(r)
     }
     throw bad()

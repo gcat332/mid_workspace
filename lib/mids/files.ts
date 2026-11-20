@@ -432,6 +432,69 @@ export function rename(name: string, rel: string, newName: string): Promise<{ to
   })
 }
 
+/**
+ * Moves one entry into another folder (same filesystem, atomic rename through the two dir fds). A folder is never
+ * merged or replaced; a file replaces a file only with `overwrite`. Symlinks are never moved or moved through.
+ */
+export function move(name: string, rel: string, toDir: string, overwrite = false): Promise<{ to: string }> {
+  return mapped(async () => {
+    const c = await ctxFor(name)
+    const e = await entryOf(c, rel)
+    assertWritable(c, e.abs)
+    assertNotContainer(c, e.abs)
+    if (isProtected(c, e.abs)) throw protErr()
+    if (typeof toDir !== "string") throw new MidError("invalid_request")
+    const dest = await resolveMidPath(name, toDir)
+    const cleanRel = toDir.replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/")
+    if (dest !== path.join(c.root, cleanRel)) {
+      throw new MidError("invalid_request", 400, "โฟลเดอร์ปลายทางเป็น symlink ย้ายเข้าไม่ได้ เลือกโฟลเดอร์จริงแทน")
+    }
+    await statDirOf(dest)
+    assertWritable(c, dest)
+    if (inProtectedTree(c, dest)) {
+      throw protErr("ย้ายไฟล์เข้าโฟลเดอร์ระบบ/ตั้งค่าของ MID (เช่น agent/conf, agent/security) ไม่ได้")
+    }
+    if (dest === e.parent) throw new MidError("invalid_request", 400, "ไฟล์อยู่ในโฟลเดอร์นี้อยู่แล้ว")
+    if (inside(e.abs, dest)) throw new MidError("invalid_request", 400, "ย้ายโฟลเดอร์เข้าไปในตัวเองไม่ได้")
+    const destAbs = path.join(dest, e.base)
+    assertWritable(c, destAbs)
+    if (isProtected(c, destAbs)) throw protErr()
+    await beforeIo()
+    const wc = writeCheck(c)
+    const srcD = await openDir(e.parent, wc)
+    try {
+      const dstD = await openDir(dest, wc)
+      try {
+        const src = await lstatIn(srcD, e.base)
+        if (!src) throw new MidError("not_found")
+        if (src.isSymbolicLink()) {
+          throw new MidError("conflict", 409, "symlink ย้ายไม่ได้ (ลิงก์จะชี้ผิดที่) ให้สร้างลิงก์ใหม่ที่ปลายทางแทน")
+        }
+        const clash = await lstatIn(dstD, e.base)
+        if (clash) {
+          if (src.isDirectory() || !clash.isFile()) {
+            throw new MidError("conflict", 409, "ปลายทางมีโฟลเดอร์หรือไฟล์ชื่อเดียวกันอยู่แล้ว ระบบไม่รวมโฟลเดอร์ให้ เปลี่ยนชื่อก่อนแล้วลองย้ายใหม่")
+          }
+          if (!overwrite) throw new MidError("exists", 409, "มีไฟล์ชื่อนี้อยู่ในโฟลเดอร์ปลายทางแล้ว เลือกแทนที่หรือข้าม")
+        }
+        try {
+          await fs.promises.rename(fdPath(srcD, e.base), fdPath(dstD, e.base))
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === "EXDEV") {
+            throw new MidError("conflict", 409, "ย้ายข้ามดิสก์ไม่ได้ ให้ดาวน์โหลดแล้วอัปโหลดที่ปลายทางแทน")
+          }
+          throw err
+        }
+      } finally {
+        await dstD.close()
+      }
+    } finally {
+      await srcD.close()
+    }
+    return { to: path.relative(c.root, destAbs) }
+  })
+}
+
 /** Removing a symlink removes the link only; directories are walked fd-by-fd (links inside are unlinked, not followed). */
 export function remove(name: string, rel: string): Promise<{ path: string }> {
   return mapped(async () => {

@@ -4,8 +4,9 @@ vi.mock("@/lib/auth/helpers", () => ({ requireUser: vi.fn(async () => ({ userId:
 const audit = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock("@/lib/audit", () => ({ recordAudit: audit }))
 const upload = vi.hoisted(() => vi.fn())
+const move = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/mids/files", async (orig) => ({
-  ...(await orig<typeof import("@/lib/mids/files")>()), upload,
+  ...(await orig<typeof import("@/lib/mids/files")>()), upload, move,
   listDir: vi.fn(async () => [{ name: "mid.sh" }]), dirReadOnly: vi.fn(async (_n: string, rel: string) => rel === "agent/bin"),
 }))
 vi.mock("@/lib/mids/registry", () => ({ getMid: vi.fn() }))
@@ -25,7 +26,7 @@ function formWith(size: number) {
   f.set("file", new File([new Uint8Array(size)], "a.bin"))
   return f
 }
-beforeEach(() => { upload.mockReset(); audit.mockClear() })
+beforeEach(() => { upload.mockReset(); move.mockReset(); audit.mockClear() })
 
 it("missing Content-Length -> 411", async () => {
   const { POST } = await import("./route")
@@ -74,4 +75,26 @@ it("GET of a directory also says whether it is read-only (Q-I5)", async () => {
   const { GET } = await import("./route")
   const res = await GET(new Request("http://x/api/mids/m1/files?path=agent/bin"), ctx)
   expect(await res.json()).toEqual({ entries: [{ name: "mid.sh" }], readOnly: true })
+})
+
+function json(body: unknown) {
+  return new Request("http://x/api/mids/m1/files", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+}
+it("POST move passes overwrite as a strict boolean and audits file.move", async () => {
+  const { POST } = await import("./route")
+  move.mockResolvedValue({ to: "agent/extlib/a" })
+  const res = await POST(json({ op: "move", path: "work/a/", to: "agent/extlib", overwrite: true }), ctx)
+  expect(res.status).toBe(200)
+  expect(await res.json()).toEqual({ to: "agent/extlib/a" })
+  expect(move).toHaveBeenLastCalledWith("m1", "work/a/", "agent/extlib", true)
+  expect(audit).toHaveBeenCalledWith(expect.anything(), "file.move", "m1", { path: "work/a", to: "agent/extlib/a" })
+  await POST(json({ op: "move", path: "work/a", to: "agent/extlib", overwrite: "true" }), ctx)
+  expect(move).toHaveBeenLastCalledWith("m1", "work/a", "agent/extlib", false)
+  await POST(json({ op: "move", path: "work/a", to: "agent/extlib" }), ctx)
+  expect(move).toHaveBeenLastCalledWith("m1", "work/a", "agent/extlib", false)
+})
+it("POST move with a non-string to -> 400", async () => {
+  const { POST } = await import("./route")
+  expect((await POST(json({ op: "move", path: "work/a", to: 5 }), ctx)).status).toBe(400)
+  expect(move).not.toHaveBeenCalled()
 })
