@@ -1,0 +1,64 @@
+import { NextResponse } from "next/server"
+import { requireUser } from "@/lib/auth/helpers"
+import { contentDisposition } from "@/lib/http/download"
+import { handleRouteError } from "@/lib/http/route"
+import { MidError } from "@/lib/mids/names"
+import { planZip, zipPlanStream } from "@/lib/mids/zip"
+
+type Ctx = { params: Promise<{ name: string }> }
+
+// GET ?dir=&name=a&name=b[&check=1] -> application/zip stream, or { files, bytes } with check=1 (no slot, no bytes)
+const MAX_ZIP_STREAMS = 2
+const BUSY_MSG = "มีการดาวน์โหลด .zip อยู่ 2 รายการแล้ว รอให้เสร็จแล้วลองใหม่"
+const slots = globalThis as unknown as { __midhubZipStreams?: number }
+const active = () => slots.__midhubZipStreams ?? 0
+const assertFree = () => { if (active() >= MAX_ZIP_STREAMS) throw new MidError("busy", 429, BUSY_MSG) }
+
+export async function GET(req: Request, ctx: Ctx) {
+  try {
+    await requireUser()
+    const { name } = await ctx.params
+    const url = new URL(req.url)
+    assertFree()
+    const plan = await planZip(name, url.searchParams.get("dir") ?? "", url.searchParams.getAll("name"))
+    if (url.searchParams.get("check") === "1") return NextResponse.json({ files: plan.files, bytes: plan.bytes })
+
+    assertFree() // re-check: other requests may have taken a slot while this plan was being built
+    slots.__midhubZipStreams = active() + 1
+    let released = false
+    const release = () => { if (!released) { released = true; slots.__midhubZipStreams = active() - 1 } }
+    let reader: ReadableStreamDefaultReader<Uint8Array>
+    try {
+      reader = zipPlanStream(name, plan).getReader()
+    } catch (e) {
+      release()
+      throw e
+    }
+    const body = new ReadableStream<Uint8Array>(
+      {
+        async pull(controller) {
+          try {
+            const r = await reader.read()
+            if (r.done) { release(); controller.close() } else controller.enqueue(r.value)
+          } catch (e) {
+            release()
+            controller.error(e)
+          }
+        },
+        async cancel(reason) {
+          try { await reader.cancel(reason) } finally { release() }
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    return new Response(body, {
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": contentDisposition(plan.filename),
+        "X-Content-Type-Options": "nosniff",
+      },
+    })
+  } catch (e) {
+    return handleRouteError(e)
+  }
+}

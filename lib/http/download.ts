@@ -1,6 +1,9 @@
 import { Readable } from "node:stream"
 import type { FileHandle } from "node:fs/promises"
 
+export const contentDisposition = (filename: string): string =>
+  `attachment; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase())}`
+
 /** Streams exactly `size` bytes from an already verified handle (later growth is not sent); the stream closes the handle. */
 export async function downloadResponse(d: { handle: FileHandle; size: number; filename: string }): Promise<Response> {
   const { handle, size, filename } = d
@@ -11,7 +14,7 @@ export async function downloadResponse(d: { handle: FileHandle; size: number; fi
     headers: {
       "Content-Type": "application/octet-stream",
       "Content-Length": String(size),
-      "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase())}`,
+      "Content-Disposition": contentDisposition(filename),
       "X-Content-Type-Options": "nosniff",
     },
   })

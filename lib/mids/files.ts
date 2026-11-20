@@ -38,12 +38,12 @@ export type FileEntry = {
 
 const inside = (dir: string, p: string): boolean => p === dir || p.startsWith(dir + path.sep)
 
-type Ctx = {
+export type Ctx = {
   name: string; root: string; roDirs: string[]; configFiles: string[]; configXml: string[]
   protTrees: string[]; protDirs: string[]; scriptDirs: string[]
 }
 
-async function ctxFor(name: string): Promise<Ctx> {
+export async function ctxFor(name: string): Promise<Ctx> {
   await getMid(name) // unknown/removed -> 404
   const root = await resolveMidPath(name, "")
   const both = async (rel: string): Promise<string[]> => [
@@ -101,7 +101,7 @@ function assertNotContainer(c: Ctx, abs: string): void {
 }
 
 /** Checks applied to the REAL location of every opened handle. */
-const readCheck = (c: Ctx): Check => (real) => {
+export const readCheck = (c: Ctx): Check => (real) => {
   if (!inside(c.root, real)) throw new MidError("path_outside")
   if (c.configXml.includes(real)) throw cfgErr() // config.xml holds credentials the config tab masks
 }
@@ -110,7 +110,7 @@ const writeCheck = (c: Ctx): Check => (real) => {
   assertWritable(c, real)
 }
 
-function plainName(n: unknown): string {
+export function plainName(n: unknown): string {
   if (typeof n !== "string" || n === "" || n === "." || n === ".." || /[\\/\0]/.test(n) || Buffer.byteLength(n) > 255) {
     throw new MidError("invalid_filename")
   }
@@ -299,7 +299,7 @@ export function upload(name: string, dirRel: string, filename: string, data: Buf
   })
 }
 
-const UPLOAD_TMP_RE = /^\.midhub-upload-[0-9a-f]{16}\.part$/
+export const UPLOAD_TMP_RE = /^\.midhub-upload-[0-9a-f]{16}\.part$/
 const STALE_TMP_MS = 60 * 60 * 1000
 
 /** Best effort: drop upload temp files of crashed/killed uploads (regular files, > 1 h old) in this verified dir. */
