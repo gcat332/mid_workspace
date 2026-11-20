@@ -40,6 +40,6 @@ export function zipFilename(midName: string, dir: string, names: string[]): stri
   return `${segs.length ? segs[segs.length - 1] : midName}.zip`
 }
 
-/** Chrome's DownloadURL drag format. */
+/** Chrome's DownloadURL drag format ("mime:filename:url"); a ":" in the filename would break its parsing, so it becomes "_". */
 export const downloadUrlData = (filename: string, absoluteUrl: string) =>
-  `application/octet-stream:${filename}:${absoluteUrl}`
+  `application/octet-stream:${filename.replaceAll(":", "_")}:${absoluteUrl}`

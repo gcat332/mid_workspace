@@ -14,6 +14,7 @@ vi.mock("@monaco-editor/react", () => ({
 }))
 
 import { FilesTab } from "../FilesTab"
+import { INTERNAL_MIME } from "@/lib/ui/file-drag"
 
 type Flags = Partial<{ readOnly: boolean; locked: boolean; secret: boolean; config: boolean; size: number }>
 const E = (name: string, type: "file" | "dir", f: Flags = {}) =>
@@ -22,6 +23,7 @@ let FS: Record<string, { entries: ReturnType<typeof E>[]; readOnly: boolean }>
 let putReply: () => Response
 let deleteReply: (path: string | null) => Response
 let zipReply: () => Response
+let postReply: (body: Record<string, unknown>) => Response
 const zipUrls: string[] = []
 
 type Call = { method: string; path: string | null; content: boolean; body: unknown }
@@ -40,6 +42,7 @@ beforeEach(() => {
   putReply = () => Response.json({ hash: "h2" })
   deleteReply = () => Response.json({})
   zipReply = () => Response.json({ files: 2, bytes: 20 })
+  postReply = () => Response.json({})
   zipUrls.length = 0
   calls.length = 0
   api.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -54,6 +57,7 @@ beforeEach(() => {
       return d ? Response.json(d) : Response.json({ code: "not_found", message: "ไม่พบ" }, { status: 404 })
     }
     if (method === "PUT") return putReply()
+    if (method === "POST") return postReply(body as Record<string, unknown>)
     if (method === "DELETE") return deleteReply(u.searchParams.get("path"))
     return Response.json({})
   })
@@ -626,5 +630,202 @@ describe("FilesTab multi-select", () => {
     fireEvent.keyDown(input, { key: "Escape" })
     expect(screen.queryByRole("dialog", { name: "Delete 2 Items?" })).toBeNull()
     expect(screen.getByText("เลือก 2 รายการ")).toBeTruthy()
+  })
+})
+
+describe("FilesTab drag to move and drag out", () => {
+  const rowEl = (container: HTMLElement, path: string) => container.querySelector(`[data-row="${path}"]`) as HTMLElement
+  /** A fake DataTransfer that records setData; the same object is reused for the whole drag. */
+  const dt = (files: File[] = [], types: string[] = []) => {
+    const data: Record<string, string> = {}
+    return { data, files, types, effectAllowed: "", dropEffect: "", setData(k: string, v: string) { data[k] = v; if (!types.includes(k)) types.push(k) } }
+  }
+  const moves = () => sent("POST").map((c) => c.body as Record<string, unknown>).filter((b) => b.op === "move")
+  const ZIP = `${window.location.origin}/midhub/api/mids/m1/files/zip`
+  async function inWork() {
+    FS[""].entries = [E("work", "dir"), E("dest", "dir"), E("notes.txt", "file"), E("agent", "dir")]
+    FS.work = { entries: [E("a", "file"), E("b", "file"), E("sub", "dir"), E("lnk", "file", {}), E("sec", "file", { secret: true }), E("lk", "file", { locked: true })], readOnly: false }
+    FS.work.entries.find((e) => e.name === "lnk")!.symlink = true
+    FS.dest = { entries: [], readOnly: false }
+    const r = await setup()
+    fireEvent.click(row("work"))
+    await screen.findByRole("button", { name: "a" })
+    fireEvent.click(row("dest"))
+    fireEvent.click(row("work"), { ctrlKey: false })
+    return r
+  }
+  async function ready() {
+    const r = await inWork()
+    // work was toggled closed by the second click; reopen it and make the folder listings known
+    fireEvent.click(row("work"))
+    await screen.findByRole("button", { name: "a" })
+    fireEvent.click(row("agent"))
+    await screen.findByRole("button", { name: /^x\.xml/ })
+    calls.length = 0
+    return r
+  }
+
+  it("dragging a file sets the move paths and a file DownloadURL", async () => {
+    const { container } = await ready()
+    const d = dt()
+    fireEvent.dragStart(rowEl(container, "work/a"), { dataTransfer: d })
+    expect(JSON.parse(d.data[INTERNAL_MIME])).toEqual(["work/a"])
+    expect(d.data.DownloadURL).toBe(`application/octet-stream:a:${window.location.origin}/midhub/api/mids/m1/files/download?path=work%2Fa`)
+    expect(rowEl(container, "work/a").querySelector("button")!.getAttribute("aria-current")).toBe("true")
+  })
+
+  it("dragging a folder offers its zip; two selected rows offer the selection zip and both paths", async () => {
+    const { container } = await ready()
+    const d = dt()
+    fireEvent.dragStart(rowEl(container, "work/sub"), { dataTransfer: d })
+    expect(d.data.DownloadURL).toBe(`application/octet-stream:sub.zip:${ZIP}?dir=work&name=sub`)
+    fireEvent.click(row("sub"), { ctrlKey: true }) // dragging selected it; drop it from the selection
+    fireEvent.click(row("a"), { ctrlKey: true })
+    fireEvent.click(row("b"), { ctrlKey: true })
+    const d2 = dt()
+    fireEvent.dragStart(rowEl(container, "work/b"), { dataTransfer: d2 })
+    expect(JSON.parse(d2.data[INTERNAL_MIME])).toEqual(["work/a", "work/b"])
+    expect(d2.data.DownloadURL).toBe(`application/octet-stream:work.zip:${ZIP}?dir=work&name=a&name=b`)
+  })
+
+  it("secret rows are not draggable, locked and symlink rows are download-only", async () => {
+    const { container } = await ready()
+    expect(rowEl(container, "work/sec").getAttribute("draggable")).toBe("false")
+    const d = dt()
+    fireEvent.dragStart(rowEl(container, "work/sec"), { dataTransfer: d })
+    expect(d.data).toEqual({})
+    for (const p of ["work/lk", "work/lnk"]) {
+      const x = dt()
+      fireEvent.dragStart(rowEl(container, p), { dataTransfer: x })
+      expect(x.data[INTERNAL_MIME]).toBeUndefined()
+      expect(x.data.DownloadURL).toContain("/files/download?path=")
+    }
+  })
+
+  it("a valid folder highlights under the drag; the current parent and a read-only folder do not", async () => {
+    const { container } = await ready()
+    const d = dt()
+    fireEvent.dragStart(rowEl(container, "work/a"), { dataTransfer: d })
+    fireEvent.dragOver(rowEl(container, "dest"), { dataTransfer: d })
+    expect(d.dropEffect).toBe("move")
+    expect(rowEl(container, "dest").className).toContain("ring-blue-500")
+    const d2 = dt([], d.types.slice()); d2.data = d.data
+    fireEvent.dragOver(rowEl(container, "work"), { dataTransfer: d2 })
+    expect(d2.dropEffect).toBe("none")
+    expect(rowEl(container, "dest").className).not.toContain("ring-blue-500")
+    expect(rowEl(container, "work").className).not.toContain("ring-blue-500")
+    const d3 = dt([], d.types.slice())
+    fireEvent.dragOver(rowEl(container, "agent"), { dataTransfer: d3 })
+    expect(d3.dropEffect).toBe("none")
+  })
+
+  it("dropping on a folder moves each item in order, reloads both folders and clears the selection", async () => {
+    const { container } = await ready()
+    fireEvent.click(row("a"), { ctrlKey: true })
+    fireEvent.click(row("b"), { ctrlKey: true })
+    const d = dt()
+    fireEvent.dragStart(rowEl(container, "work/a"), { dataTransfer: d })
+    fireEvent.drop(rowEl(container, "dest"), { dataTransfer: d })
+    await waitFor(() => expect(listed("dest")).toBe(true))
+    expect(moves()).toEqual([{ op: "move", path: "work/a", to: "dest" }, { op: "move", path: "work/b", to: "dest" }])
+    await waitFor(() => expect(listed("work")).toBe(true))
+    expect(screen.queryByText(/^เลือก \d+ รายการ$/)).toBeNull()
+    expect(container.querySelector('[aria-current="true"]')).toBeNull()
+  })
+
+  it("dropping on a breadcrumb segment moves into that folder", async () => {
+    const { container } = await ready()
+    const d = dt()
+    fireEvent.dragStart(rowEl(container, "work/sub"), { dataTransfer: d })
+    const crumb = screen.getByRole("navigation", { name: "Upload Target" }).querySelectorAll("button")[0]
+    fireEvent.dragOver(crumb, { dataTransfer: d })
+    fireEvent.drop(crumb, { dataTransfer: d })
+    await waitFor(() => expect(moves()).toEqual([{ op: "move", path: "work/sub", to: "" }]))
+  })
+
+  const clash = () => { postReply = (b) => (b.overwrite ? Response.json({}) : Response.json({ code: "exists", message: "มีอยู่แล้ว" }, { status: 409 })) }
+  async function dropTwo() {
+    const r = await ready()
+    fireEvent.click(row("a"), { ctrlKey: true })
+    fireEvent.click(row("b"), { ctrlKey: true })
+    const d = dt()
+    fireEvent.dragStart(rowEl(r.container, "work/a"), { dataTransfer: d })
+    fireEvent.drop(rowEl(r.container, "dest"), { dataTransfer: d })
+    return r
+  }
+
+  it("409 exists asks; Replace resends with overwrite, then asks for the next file", async () => {
+    clash()
+    await dropTwo()
+    const dlg = await screen.findByRole("dialog", { name: "Replace a?" })
+    expect(within(dlg).getByText("ปลายทางมีไฟล์ชื่อนี้อยู่แล้ว ไฟล์เดิมจะถูกแทนที่ กู้คืนไม่ได้")).toBeTruthy()
+    fireEvent.click(within(dlg).getByRole("button", { name: "Replace" }))
+    await screen.findByRole("dialog", { name: "Replace b?" })
+    expect(moves()).toEqual([{ op: "move", path: "work/a", to: "dest" }, { op: "move", path: "work/a", to: "dest", overwrite: true }, { op: "move", path: "work/b", to: "dest" }])
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(moves()).toHaveLength(3)
+  })
+
+  it("Apply to all answers the remaining clashes without asking", async () => {
+    clash()
+    await dropTwo()
+    const dlg = await screen.findByRole("dialog", { name: "Replace a?" })
+    fireEvent.click(within(dlg).getByRole("checkbox", { name: "ใช้กับไฟล์ที่ชื่อซ้ำทั้งหมดในการย้ายครั้งนี้" }))
+    fireEvent.click(within(dlg).getByRole("button", { name: "Replace" }))
+    await waitFor(() => expect(moves().filter((m) => m.overwrite)).toHaveLength(2))
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("Cancel stops the remaining items", async () => {
+    clash()
+    await dropTwo()
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await waitFor(() => expect(listed("dest")).toBe(true))
+    expect(moves()).toEqual([{ op: "move", path: "work/a", to: "dest" }])
+  })
+
+  it("a refused move stops the batch and reports the progress with the server message", async () => {
+    postReply = (b) => (b.path === "work/b" ? Response.json({ code: "protected", message: "ห้ามย้าย" }, { status: 403 }) : Response.json({}))
+    await dropTwo()
+    await screen.findByText("ย้ายแล้ว 1 จาก 2 รายการ — ห้ามย้าย")
+  })
+
+  it("moving the open file closes the editor and shows the note as a status", async () => {
+    const { container } = await ready()
+    fireEvent.click(row("a"))
+    const dlg = await screen.findByRole("dialog", { name: "work/a" })
+    await within(dlg).findByRole("textbox", { name: "editor" })
+    const d = dt()
+    fireEvent.dragStart(rowEl(container, "work/a"), { dataTransfer: d })
+    fireEvent.drop(rowEl(container, "dest"), { dataTransfer: d })
+    const note = await screen.findByText("ไฟล์ที่เปิดอยู่ถูกย้ายไปที่ dest/a")
+    expect(note.getAttribute("role")).toBe("status")
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("a desktop file dropped on a folder still uploads; an internal drag on the card background does nothing", async () => {
+    class X { upload = { onprogress: null }; onload: (() => void) | null = null; onerror = null; onabort = null; ontimeout = null; status = 200; responseText = "{}"; static n = 0
+      open() {} send() { X.n++; setTimeout(() => this.onload?.(), 0) } getResponseHeader() { return "application/json" } }
+    vi.stubGlobal("XMLHttpRequest", X)
+    const { container } = await ready()
+    const f = new File(["abc"], "up.jar")
+    const files = dt([f], ["Files"])
+    fireEvent.dragOver(rowEl(container, "dest"), { dataTransfer: files })
+    fireEvent.drop(rowEl(container, "dest"), { dataTransfer: files })
+    await waitFor(() => expect(X.n).toBe(1))
+    const d = dt()
+    fireEvent.dragStart(rowEl(container, "work/a"), { dataTransfer: d })
+    fireEvent.dragOver(screen.getByTestId("files-card"), { dataTransfer: d })
+    fireEvent.drop(screen.getByTestId("files-card"), { dataTransfer: d })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(moves()).toEqual([])
+    expect(X.n).toBe(1)
+  })
+
+  it("the footer hint describes upload, move and drag-out", async () => {
+    await setup()
+    expect(screen.getByText("ลากไฟล์จากเครื่องมาวางเพื่ออัปโหลด (สูงสุด 50 MB) · ลากไปวางบนโฟลเดอร์เพื่อย้าย · ลากออกไปวางบน Desktop เพื่อดาวน์โหลด (Chrome/Edge)")).toBeTruthy()
   })
 })

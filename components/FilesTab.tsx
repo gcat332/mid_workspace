@@ -8,10 +8,12 @@ import { IconFilePlus, IconFolderPlus, IconRefresh, IconUpload } from "./icons"
 import { FileContextMenu } from "./files/FileContextMenu"
 import { FileEditorModal } from "./files/FileEditorModal"
 import { FileTree } from "./files/FileTree"
+import { MoveConflictDialog } from "./files/MoveConflictDialog"
 import { SelectionBar } from "./files/SelectionBar"
+import { useMoveItems } from "./files/useMoveItems"
 import { API_BASE, apiFetch, apiUpload } from "@/lib/ui/api"
 import { cardCls, ghostBtnCls, inputCls, labelCls } from "@/lib/ui/classes"
-import { zipFilename, zipUrl } from "@/lib/ui/file-drag"
+import { canMoveTo, downloadUrlData, INTERNAL_MIME, zipFilename, zipUrl } from "@/lib/ui/file-drag"
 import { joinPath as join, parentOf, siblingsOf, toggle, type Entry, type TreeRow, type TreeState } from "@/lib/ui/file-tree"
 import { clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, type Selection } from "@/lib/ui/selection"
 
@@ -36,6 +38,10 @@ const busyWait = (reason: string) => `${reason} — รอให้งานเ�
 const RO_REASON = `ลบไม่ได้: โฟลเดอร์นี้เป็นโฟลเดอร์โปรแกรมของ MID (อ่านอย่างเดียว) ลบได้เฉพาะไฟล์ใน ${EXTLIB}`
 const LOCKED_REASON = "ลบไม่ได้: รายการที่เลือกมีไฟล์ระบบหรือไฟล์ตั้งค่าของ MID ที่ถูกล็อกไว้ เอารายการนั้นออกจากที่เลือกแล้วลองใหม่"
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files")
+const hasInternal = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes(INTERNAL_MIME)
+/** Breadcrumb drop targets are highlighted under this prefix so they never collide with a row path. */
+const CRUMB = "\0crumb:"
+const crumbOver = "rounded bg-blue-100 ring-1 ring-blue-500 dark:bg-blue-900/40"
 
 type Props = { midName: string; /** Non-null while a lifecycle job runs: writes are disabled and this is the visible reason. */ busyReason?: string | null; /** Switch the MID panel to the config tab (config.xml / wrapper-override.conf rows). */ onOpenConfig: () => void }
 
@@ -64,6 +70,9 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   const overwriteAnswer = useRef<((ok: boolean) => void) | null>(null)
   const [upload, setUpload] = useState<Upload | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
+  /** Paths of the internal drag in progress (dragover cannot read dataTransfer data). */
+  const dragPaths = useRef<string[]>([])
+  const [note, setNote] = useState<string | null>(null)
   const [nameDraft, setNameDraft] = useState("")
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -194,6 +203,11 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
     await openFile(path, readOnly, config)
   }
   const closeEditor = () => { setOpen(null); setErr(null); setSaved(false); setConfirmClose(null) }
+  const mover = useMoveItems({
+    base, busy, setBusy, setErr, network: NETWORK, load, forget, clearSelection: () => setSelection(EMPTY_SELECTION),
+    openPath: open?.path ?? null,
+    onOpenMoved: (to) => { closeEditor(); setNote(`ไฟล์ที่เปิดอยู่ถูกย้ายไปที่ ${to}`) },
+  })
   /** Leave the editor; with unsaved changes the confirm asks first. `then` runs once it has closed. */
   function leaveEditor(then: "close" | "config") {
     if (open && open.draft !== open.content) { setConfirmClose(then); return }
@@ -237,19 +251,58 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   }
 
   /** Drag handlers for one drop target. `key` is what gets highlighted; `dir` is where files land. */
-  const dropHandlers = (key: string, dir: string) => ({
+  const dropHandlers = (key: string, dir: string, uploads = true) => ({
     onDragOver: (e: DragEvent) => {
-      if (!hasFiles(e)) return
+      if (hasInternal(e)) {
+        e.stopPropagation()
+        if (!canMove(dir)) { e.dataTransfer.dropEffect = "none"; setDragOver(null); return }
+        e.preventDefault(); e.dataTransfer.dropEffect = "move"
+        setDragOver(key)
+        return
+      }
+      if (!uploads || !hasFiles(e)) return
       e.preventDefault(); e.stopPropagation()
       setDragOver(key)
     },
     onDrop: (e: DragEvent) => {
-      if (!hasFiles(e)) return
+      if (hasInternal(e)) {
+        e.preventDefault(); e.stopPropagation()
+        setDragOver(null)
+        if (canMove(dir)) { setNote(null); void mover.move(dragPaths.current, dir) }
+        return
+      }
+      if (!uploads || !hasFiles(e)) return
       e.preventDefault(); e.stopPropagation()
       setDragOver(null)
       void uploadFiles(dir, Array.from(e.dataTransfer.files))
     },
   })
+
+  const canMove = (dir: string) =>
+    canMoveTo(dragPaths.current, dir, { roDirs, entry: entryOf, busy: busy || !!busyReason })
+
+  /** Start dragging a row: its selection (or just it, selecting it first) can move in the tree and download to the desktop. */
+  function onRowDragStart(row: TreeRow, e: DragEvent) {
+    const dragged = picked.has(row.path) ? selection.paths : [row.path]
+    if (!picked.has(row.path)) setSelection(clickSelect(EMPTY_SELECTION, row.path, { toggle: false, range: false }, siblingsOf(tree, parentOf(row.path))))
+    const rows = rowsOf(dragged)
+    const movable = rows.length > 0 && rows.every((r) => !r.entry.locked && !r.entry.symlink && !r.entry.secret)
+    const downloadable = rows.length > 0 && rows.every((r) => !r.entry.secret && !(r.entry.symlink && r.entry.type === "dir"))
+    if (!movable && !downloadable) { e.preventDefault(); return }
+    const dt = e.dataTransfer
+    dt.effectAllowed = movable ? "copyMove" : "copy"
+    dragPaths.current = movable ? dragged : []
+    if (movable) dt.setData(INTERNAL_MIME, JSON.stringify(dragged))
+    if (downloadable) {
+      const dir = parentOf(row.path)
+      const names = dragged.map(baseName)
+      const one = rows.length === 1 ? rows[0] : null
+      const [file, url] = one && one.entry.type === "file"
+        ? [one.entry.name, downloadHref(one.path)]
+        : [zipFilename(midName, dir, names), `${API_BASE}${zipUrl(base, dir, names)}`]
+      dt.setData("DownloadURL", downloadUrlData(file, new URL(url, window.location.href).href))
+    }
+  }
 
   /** Delete one entry or a selection, one request at a time; the first refusal stops the rest. */
   async function deleteRows(rows: TreeRow[]) {
@@ -352,6 +405,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
 
   return (
     <div className="space-y-3">
+      {note && <p role="status" className="text-sm text-gray-700 dark:text-neutral-300">{note}</p>}
       {busyReason && <p role="status" className="text-sm text-amber-700 dark:text-amber-400">{busyReason} — แก้ไขไฟล์ไม่ได้จนกว่างานจะเสร็จ</p>}
       {targetRo && (
         <p id="ro-hint" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
@@ -367,11 +421,11 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
         className={`${cardCls} relative overflow-hidden ${dragOver === CARD ? "ring-2 ring-inset ring-blue-500" : ""}`}>
         <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 dark:border-neutral-700">
           <nav aria-label="Upload Target" className={`flex min-w-0 flex-1 flex-wrap items-center text-xs ${dragOver === CARD ? "text-blue-600 dark:text-blue-300" : "text-gray-500 dark:text-neutral-400"}`}>
-            <button type="button" className="hover:text-blue-600 hover:underline dark:hover:text-blue-300" onClick={() => { setTarget(""); setSelected(null) }}>{midName}</button>
+            <button type="button" {...dropHandlers(`${CRUMB}`, "", false)} className={`hover:text-blue-600 hover:underline dark:hover:text-blue-300 ${dragOver === CRUMB ? crumbOver : ""}`} onClick={() => { setTarget(""); setSelected(null) }}>{midName}</button>
             {crumbs.map((c, i) => (
               <span key={i} className="flex items-center">
                 <span aria-hidden="true">/</span>
-                <button type="button" className="hover:text-blue-600 hover:underline dark:hover:text-blue-300" onClick={() => { const p = crumbs.slice(0, i + 1).join("/"); setTarget(p); setSelected(p) }}>{c}</button>
+                <button type="button" {...dropHandlers(CRUMB + crumbs.slice(0, i + 1).join("/"), crumbs.slice(0, i + 1).join("/"), false)} className={`hover:text-blue-600 hover:underline dark:hover:text-blue-300 ${dragOver === CRUMB + crumbs.slice(0, i + 1).join("/") ? crumbOver : ""}`} onClick={() => { const p = crumbs.slice(0, i + 1).join("/"); setTarget(p); setSelected(p) }}>{c}</button>
               </span>
             ))}
           </nav>
@@ -404,7 +458,8 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
         {!rootErr && (
           <div onKeyDown={onTreeKey}>
             <FileTree state={tree} selected={selected} dragOver={dragOver} selection={picked}
-              onRowClick={onRowClick} onMenu={(row, x, y) => setMenu({ row, x, y })} onOpenConfig={onOpenConfig} dropProps={(dir) => dropHandlers(dir, dir)} />
+              onRowClick={onRowClick} onMenu={(row, x, y) => setMenu({ row, x, y })} onOpenConfig={onOpenConfig} dropProps={(dir) => dropHandlers(dir, dir)}
+              onRowDragStart={onRowDragStart} onRowDragEnd={() => { dragPaths.current = []; setDragOver(null) }} />
           </div>
         )}
         {selRows.length >= 2 && (
@@ -413,7 +468,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
             onDelete={() => setDeleting(selRows)} onClear={() => setSelection(EMPTY_SELECTION)} />
         )}
         <p className="border-t border-gray-100 px-3 py-1.5 text-xs text-gray-400 dark:border-neutral-700 dark:text-neutral-500">
-          ลากไฟล์มาวางบนโฟลเดอร์เพื่ออัปโหลด (สูงสุด 50 MB ต่อไฟล์)
+          ลากไฟล์จากเครื่องมาวางเพื่ออัปโหลด (สูงสุด 50 MB) · ลากไปวางบนโฟลเดอร์เพื่อย้าย · ลากออกไปวางบน Desktop เพื่อดาวน์โหลด (Chrome/Edge)
         </p>
       </div>
 
@@ -460,6 +515,8 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
           </form>
         </Modal>
       )}
+
+      {mover.conflict !== null && <MoveConflictDialog name={mover.conflict} onReplace={mover.replace} onSkip={mover.skip} onCancel={mover.cancel} />}
 
       {overwrite && (
         <ConfirmDialog title={`Overwrite ${overwrite.name}?`} danger confirmLabel="Overwrite" onCancel={() => answerOverwrite(false)} onConfirm={() => answerOverwrite(true)}>

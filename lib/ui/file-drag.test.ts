@@ -55,4 +55,7 @@ describe("zip helpers", () => {
   it("downloadUrlData", () => {
     expect(downloadUrlData("a.zip", "http://h/z")).toBe("application/octet-stream:a.zip:http://h/z")
   })
+  it("downloadUrlData replaces ':' in the filename so Chrome's colon-delimited format still parses", () => {
+    expect(downloadUrlData("a:b.txt", "http://h/z")).toBe("application/octet-stream:a_b.txt:http://h/z")
+  })
 })
