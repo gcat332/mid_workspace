@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type KeyboardEvent } from "react"
 import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { Modal } from "./Modal"
@@ -43,6 +43,16 @@ const hasInternal = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).in
 const CRUMB = "\0crumb:"
 const crumbOver = "rounded bg-blue-100 ring-1 ring-blue-500 dark:bg-blue-900/40"
 
+const FINE = "(pointer: fine)"
+/** Move and drag-out are desktop-only: a touch long-press must not start an HTML5 drag. False on the server and without matchMedia. */
+function useFinePointer() {
+  return useSyncExternalStore(
+    (cb) => { const m = window.matchMedia?.(FINE); m?.addEventListener?.("change", cb); return () => m?.removeEventListener?.("change", cb) },
+    () => window.matchMedia?.(FINE).matches === true,
+    () => false,
+  )
+}
+
 type Props = { midName: string; /** Non-null while a lifecycle job runs: writes are disabled and this is the visible reason. */ busyReason?: string | null; /** Switch the MID panel to the config tab (config.xml / wrapper-override.conf rows). */ onOpenConfig: () => void }
 
 /** Files tab container: tree state, API calls and dialogs. Rendering of the tree, menu and editor is in ./files. */
@@ -72,6 +82,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   const [dragOver, setDragOver] = useState<string | null>(null)
   /** Paths of the internal drag in progress (dragover cannot read dataTransfer data). */
   const dragPaths = useRef<string[]>([])
+  const finePointer = useFinePointer()
   const [note, setNote] = useState<string | null>(null)
   const [nameDraft, setNameDraft] = useState("")
   const fileInput = useRef<HTMLInputElement>(null)
@@ -110,7 +121,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   }, [load])
 
   function refresh() {
-    setErr(null)
+    setErr(null); setNote(null)
     for (const d of ["", ...tree.expanded]) void load(d)
   }
 
@@ -159,7 +170,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   /** `onErr` decides where a failure is shown (the open dialog, or the page) so it never appears twice. */
   async function run(fn: () => Promise<Response>, reloadDir: string, onErr: (e: ApiError) => void = setErr): Promise<boolean> {
     if (busyReason) { onErr({ message: busyReason }); return false }
-    setBusy(true); setErr(null); setModalErr(null)
+    setBusy(true); setErr(null); setNote(null); setModalErr(null)
     try {
       const res = await fn()
       if (!res.ok) { onErr(await readApiError(res)); return false }
@@ -227,7 +238,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   async function uploadFiles(dir: string, files: File[]) {
     if (files.length === 0 || busy) return
     if (busyReason) { setErr({ message: busyReason }); return }
-    setErr(null); setBusy(true)
+    setErr(null); setNote(null); setBusy(true)
     let failed = false
     const fail = (e: ApiError) => { if (!failed) setErr(e); failed = true }
     try {
@@ -251,27 +262,30 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   }
 
   /** Drag handlers for one drop target. `key` is what gets highlighted; `dir` is where files land. */
-  const dropHandlers = (key: string, dir: string, uploads = true) => ({
+  /** `kinds`: what a drop here accepts. The card background is upload-only; breadcrumbs are move-only. */
+  const dropHandlers = (key: string, dir: string, kinds: "both" | "upload" | "move" = "both") => ({
     onDragOver: (e: DragEvent) => {
       if (hasInternal(e)) {
         e.stopPropagation()
-        if (!canMove(dir)) { e.dataTransfer.dropEffect = "none"; setDragOver(null); return }
+        if (kinds === "upload" || !canMove(dir)) { e.dataTransfer.dropEffect = "none"; setDragOver(null); return }
         e.preventDefault(); e.dataTransfer.dropEffect = "move"
         setDragOver(key)
         return
       }
-      if (!uploads || !hasFiles(e)) return
+      if (kinds === "move" || !hasFiles(e)) return
       e.preventDefault(); e.stopPropagation()
       setDragOver(key)
     },
     onDrop: (e: DragEvent) => {
       if (hasInternal(e)) {
-        e.preventDefault(); e.stopPropagation()
+        e.stopPropagation()
+        if (kinds === "upload") return
+        e.preventDefault()
         setDragOver(null)
         if (canMove(dir)) { setNote(null); void mover.move(dragPaths.current, dir) }
         return
       }
-      if (!uploads || !hasFiles(e)) return
+      if (kinds === "move" || !hasFiles(e)) return
       e.preventDefault(); e.stopPropagation()
       setDragOver(null)
       void uploadFiles(dir, Array.from(e.dataTransfer.files))
@@ -286,8 +300,9 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
     const dragged = picked.has(row.path) ? selection.paths : [row.path]
     if (!picked.has(row.path)) setSelection(clickSelect(EMPTY_SELECTION, row.path, { toggle: false, range: false }, siblingsOf(tree, parentOf(row.path))))
     const rows = rowsOf(dragged)
-    const movable = rows.length > 0 && rows.every((r) => !r.entry.locked && !r.entry.symlink && !r.entry.secret)
-    const downloadable = rows.length > 0 && rows.every((r) => !r.entry.secret && !(r.entry.symlink && r.entry.type === "dir"))
+    const known = rows.length === dragged.length
+    const movable = known && rows.length > 0 && rows.every((r) => !r.entry.locked && !r.entry.symlink && !r.entry.secret)
+    const downloadable = known && rows.length > 0 && rows.every((r) => !r.entry.secret && !(r.entry.symlink && r.entry.type === "dir"))
     if (!movable && !downloadable) { e.preventDefault(); return }
     const dt = e.dataTransfer
     dt.effectAllowed = movable ? "copyMove" : "copy"
@@ -296,7 +311,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
     if (downloadable) {
       const dir = parentOf(row.path)
       const names = dragged.map(baseName)
-      const one = rows.length === 1 ? rows[0] : null
+      const one = dragged.length === 1 ? rows[0] : null
       const [file, url] = one && one.entry.type === "file"
         ? [one.entry.name, downloadHref(one.path)]
         : [zipFilename(midName, dir, names), `${API_BASE}${zipUrl(base, dir, names)}`]
@@ -307,7 +322,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   /** Delete one entry or a selection, one request at a time; the first refusal stops the rest. */
   async function deleteRows(rows: TreeRow[]) {
     if (busyReason) { setErr({ message: busyWait(busyReason) }); setDeleting([]); return }
-    setBusy(true); setErr(null)
+    setBusy(true); setErr(null); setNote(null)
     let done = 0
     let failure: ApiError | null = null
     try {
@@ -416,16 +431,16 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
       {target === EXTLIB && <p className="text-sm text-gray-600 dark:text-neutral-400">jar ใน extlib จะถูกลบตอน MID เริ่มทำงาน ถ้าไม่ได้ลงทะเบียนเป็น MID Server JAR File ใน instance</p>}
       {err && !open && !nameDialog && <ErrorNotice error={err} />}
 
-      <div data-testid="files-card" onKeyDown={onCardKey} {...dropHandlers(CARD, target)}
+      <div data-testid="files-card" onKeyDown={onCardKey} {...dropHandlers(CARD, target, "upload")}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(null) }}
         className={`${cardCls} relative overflow-hidden ${dragOver === CARD ? "ring-2 ring-inset ring-blue-500" : ""}`}>
         <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 dark:border-neutral-700">
           <nav aria-label="Upload Target" className={`flex min-w-0 flex-1 flex-wrap items-center text-xs ${dragOver === CARD ? "text-blue-600 dark:text-blue-300" : "text-gray-500 dark:text-neutral-400"}`}>
-            <button type="button" {...dropHandlers(`${CRUMB}`, "", false)} className={`hover:text-blue-600 hover:underline dark:hover:text-blue-300 ${dragOver === CRUMB ? crumbOver : ""}`} onClick={() => { setTarget(""); setSelected(null) }}>{midName}</button>
+            <button type="button" {...dropHandlers(`${CRUMB}`, "", "move")} className={`hover:text-blue-600 hover:underline dark:hover:text-blue-300 ${dragOver === CRUMB ? crumbOver : ""}`} onClick={() => { setTarget(""); setSelected(null) }}>{midName}</button>
             {crumbs.map((c, i) => (
               <span key={i} className="flex items-center">
                 <span aria-hidden="true">/</span>
-                <button type="button" {...dropHandlers(CRUMB + crumbs.slice(0, i + 1).join("/"), crumbs.slice(0, i + 1).join("/"), false)} className={`hover:text-blue-600 hover:underline dark:hover:text-blue-300 ${dragOver === CRUMB + crumbs.slice(0, i + 1).join("/") ? crumbOver : ""}`} onClick={() => { const p = crumbs.slice(0, i + 1).join("/"); setTarget(p); setSelected(p) }}>{c}</button>
+                <button type="button" {...dropHandlers(CRUMB + crumbs.slice(0, i + 1).join("/"), crumbs.slice(0, i + 1).join("/"), "move")} className={`hover:text-blue-600 hover:underline dark:hover:text-blue-300 ${dragOver === CRUMB + crumbs.slice(0, i + 1).join("/") ? crumbOver : ""}`} onClick={() => { const p = crumbs.slice(0, i + 1).join("/"); setTarget(p); setSelected(p) }}>{c}</button>
               </span>
             ))}
           </nav>
@@ -459,7 +474,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
           <div onKeyDown={onTreeKey}>
             <FileTree state={tree} selected={selected} dragOver={dragOver} selection={picked}
               onRowClick={onRowClick} onMenu={(row, x, y) => setMenu({ row, x, y })} onOpenConfig={onOpenConfig} dropProps={(dir) => dropHandlers(dir, dir)}
-              onRowDragStart={onRowDragStart} onRowDragEnd={() => { dragPaths.current = []; setDragOver(null) }} />
+              canDrag={finePointer} onRowDragStart={onRowDragStart} onRowDragEnd={() => { dragPaths.current = []; setDragOver(null) }} />
           </div>
         )}
         {selRows.length >= 2 && (

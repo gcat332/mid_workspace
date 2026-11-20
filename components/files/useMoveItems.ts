@@ -40,9 +40,11 @@ export function useMoveItems(d: Deps) {
     d.setBusy(true); d.setErr(null)
     let done = 0
     let failure: ApiError | null = null
+    let failedName = ""
     let always: Answer | null = null
     try {
       outer: for (const p of paths) {
+        failedName = baseName(p)
         for (let overwrite = false; ;) {
           const res = await apiFetch(d.base, {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -63,11 +65,11 @@ export function useMoveItems(d: Deps) {
           overwrite = true
         }
       }
-    } catch { failure = d.network }
-    d.clearSelection()
-    await Promise.all([...new Set([parentOf(paths[0]), dir])].map((x) => d.load(x)))
-    d.setBusy(false)
-    if (failure) d.setErr({ ...failure, message: `ย้ายแล้ว ${done} จาก ${paths.length} รายการ — ${failure.message}` })
+    } catch { failure = d.network } finally {
+      d.clearSelection()
+      try { await Promise.all([...new Set([parentOf(paths[0]), dir])].map((x) => d.load(x))) } finally { d.setBusy(false) }
+    }
+    if (failure) d.setErr({ ...failure, message: `ย้าย ${failedName} ไม่สำเร็จ — ย้ายแล้ว ${done} จาก ${paths.length} รายการ — ${failure.message}` })
   }
 
   return {

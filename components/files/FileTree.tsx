@@ -26,6 +26,8 @@ type Props = {
   /** Drop handlers for a folder row (upload into that folder). */
   dropProps: (dir: string) => DropHandlers
   /** A row drag started / ended (move within the tree, or drag out to the desktop for download). */
+  /** Rows are draggable only with a fine pointer (desktop). */
+  canDrag: boolean
   onRowDragStart: (row: TreeRow, e: DragEvent) => void
   onRowDragEnd: () => void
 }
@@ -40,7 +42,7 @@ const pad = (depth: number) => 6 + depth * 14
 const muted = "text-xs text-gray-400 dark:text-neutral-500"
 
 /** AgentHub-style explorer rows: chevron + icon + name, metadata on sm+, and a "⋯" menu button per row. */
-export function FileTree({ state, selected, dragOver, selection, onRowClick, onMenu, onOpenConfig, dropProps, onRowDragStart, onRowDragEnd }: Props) {
+export function FileTree({ state, selected, dragOver, selection, onRowClick, onMenu, onOpenConfig, dropProps, canDrag, onRowDragStart, onRowDragEnd }: Props) {
   const rows = visibleRows(state)
   const root = state.children[""]
   if (root === undefined || root === "loading") return <p className={`px-3 py-2 ${muted}`}>Loading…</p>
@@ -63,7 +65,7 @@ export function FileTree({ state, selected, dragOver, selection, onRowClick, onM
             <div data-row={path} style={{ paddingLeft: pad(depth) }}
               onContextMenu={(e) => { e.preventDefault(); onMenu(row, e.clientX, e.clientY) }}
               {...(isDir ? dropProps(path) : {})}
-              draggable={!entry.secret && !(isDir && entry.symlink)}
+              draggable={canDrag && !entry.secret && !(isDir && entry.symlink)}
               onDragStart={(e) => onRowDragStart(row, e)} onDragEnd={onRowDragEnd}
               className={`group flex select-none items-center pr-2 ${highlight}`}>
               <button type="button" data-row-main aria-current={picked ? "true" : undefined} onClick={(e) => onRowClick(row, { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey })} aria-expanded={isDir ? open : undefined}

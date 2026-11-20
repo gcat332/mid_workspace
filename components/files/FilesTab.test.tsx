@@ -640,6 +640,7 @@ describe("FilesTab drag to move and drag out", () => {
     const data: Record<string, string> = {}
     return { data, files, types, effectAllowed: "", dropEffect: "", setData(k: string, v: string) { data[k] = v; if (!types.includes(k)) types.push(k) } }
   }
+  beforeEach(() => { vi.stubGlobal("matchMedia", (q: string) => ({ matches: q === "(pointer: fine)", addEventListener() {}, removeEventListener() {} })) })
   const moves = () => sent("POST").map((c) => c.body as Record<string, unknown>).filter((b) => b.op === "move")
   const ZIP = `${window.location.origin}/midhub/api/mids/m1/files/zip`
   async function inWork() {
@@ -789,7 +790,48 @@ describe("FilesTab drag to move and drag out", () => {
   it("a refused move stops the batch and reports the progress with the server message", async () => {
     postReply = (b) => (b.path === "work/b" ? Response.json({ code: "protected", message: "ห้ามย้าย" }, { status: 403 }) : Response.json({}))
     await dropTwo()
-    await screen.findByText("ย้ายแล้ว 1 จาก 2 รายการ — ห้ามย้าย")
+    await screen.findByText("ย้าย b ไม่สำเร็จ — ย้ายแล้ว 1 จาก 2 รายการ — ห้ามย้าย")
+  })
+
+  it("a 409 conflict stops the batch and names the item, the progress and the server message", async () => {
+    postReply = (b) => (b.path === "work/b" ? Response.json({ code: "conflict", message: "มีโฟลเดอร์ชื่อเดียวกัน" }, { status: 409 }) : Response.json({}))
+    await dropTwo()
+    await screen.findByText("ย้าย b ไม่สำเร็จ — ย้ายแล้ว 1 จาก 2 รายการ — มีโฟลเดอร์ชื่อเดียวกัน")
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(moves()).toHaveLength(2)
+  })
+
+  it("a writable folder inside a level-1 protected tree is not a drop target", async () => {
+    const { container } = await ready()
+    FS.agent.entries.push(E("conf", "dir"))
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(rowEl(container, "agent/conf")).toBeTruthy())
+    const d = dt()
+    fireEvent.dragStart(rowEl(container, "work/a"), { dataTransfer: d })
+    fireEvent.dragOver(rowEl(container, "agent/conf"), { dataTransfer: d })
+    expect(d.dropEffect).toBe("none")
+    expect(rowEl(container, "agent/conf").className).not.toContain("ring-blue-500")
+    fireEvent.drop(rowEl(container, "agent/conf"), { dataTransfer: d })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(moves()).toEqual([])
+  })
+
+  it("rows are not draggable with a coarse pointer", async () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
+    const { container } = await ready()
+    expect(rowEl(container, "work/a").getAttribute("draggable")).toBe("false")
+  })
+
+  it("the moved-open-file note clears on the next action", async () => {
+    const { container } = await ready()
+    fireEvent.click(row("a"))
+    await screen.findByRole("dialog", { name: "work/a" })
+    const d = dt()
+    fireEvent.dragStart(rowEl(container, "work/a"), { dataTransfer: d })
+    fireEvent.drop(rowEl(container, "dest"), { dataTransfer: d })
+    await screen.findByText("ไฟล์ที่เปิดอยู่ถูกย้ายไปที่ dest/a")
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(screen.queryByText(/ไฟล์ที่เปิดอยู่ถูกย้าย/)).toBeNull())
   })
 
   it("moving the open file closes the editor and shows the note as a status", async () => {
@@ -815,10 +857,13 @@ describe("FilesTab drag to move and drag out", () => {
     fireEvent.dragOver(rowEl(container, "dest"), { dataTransfer: files })
     fireEvent.drop(rowEl(container, "dest"), { dataTransfer: files })
     await waitFor(() => expect(X.n).toBe(1))
+    fireEvent.click(row("dest")) // a writable folder that is not the source's parent is now the upload target
     const d = dt()
     fireEvent.dragStart(rowEl(container, "work/a"), { dataTransfer: d })
     fireEvent.dragOver(screen.getByTestId("files-card"), { dataTransfer: d })
+    expect(d.dropEffect).toBe("none")
     fireEvent.drop(screen.getByTestId("files-card"), { dataTransfer: d })
+    fireEvent.drop(rowEl(container, "notes.txt"), { dataTransfer: d })
     await new Promise((r) => setTimeout(r, 20))
     expect(moves()).toEqual([])
     expect(X.n).toBe(1)
