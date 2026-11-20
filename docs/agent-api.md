@@ -95,6 +95,7 @@ curl -s \
 
 Paths under `mids/<name>/files` take MID-relative paths (e.g. `agent/extlib/foo.jar`); a leading `/` is ignored.
 `agent/bin`, `agent/lib`, `agent/jre` are read-only, and `agent/config.xml` / `agent/conf/wrapper-override.conf` are managed by MidHub (use its config tab): writes return 403 `read_only` / `use_config_tab`.
+Protected system/config paths return 403 `protected` for rename, delete and move (content stays readable and editable). Inside `agent/conf|properties|security|etc|package|midinstaller` (and for new `*.sh` directly in `agent/`) **new** files and folders cannot be created either (upload of a new name, `PUT` with `baseHash: ""`, `mkdir`, move in): they could never be removed again. Replacing an existing file (upload) or editing it (`PUT` with its hash) still works.
 
 ### GET mids
 
@@ -130,7 +131,7 @@ curl -s -H "Authorization: Bearer $AGENT_MIDHUB_TOKEN" \
 { "entries": [ { "name": "foo.jar", "type": "file", "size": 1234, "mtime": "2026-11-18T10:00:00.000Z",
   "readOnly": false, "symlink": false, "locked": false, "secret": false, "config": false } ], "readOnly": false }
 ```
-`readOnly`, `symlink`, `locked`, `secret` and `config` are booleans: `locked` = rename/delete always refused; `secret` = contents never
+`readOnly`, `symlink`, `locked`, `secret` and `config` are booleans: `locked` = rename/delete/move always refused (program folders, config files, and protected system/config paths: `agent/conf|properties|security|etc|package|midinstaller` and everything inside them, `agent/*.sh`, and the folders `agent/logs|extlib|work|scripts|tools` themselves); `secret` = contents never
 served (config.xml); `config` = managed config file, edited in the MidHub config tab.
 `readOnly` (top level) says the directory itself cannot be modified.
 
@@ -236,6 +237,7 @@ curl -s -X POST -H "Authorization: Bearer $AGENT_MIDHUB_TOKEN" \
 | `invalid_filename` | 400 | bad file/folder name |
 | `path_outside` | 400 | path escapes the MID folder |
 | `read_only` | 403 | `agent/bin|lib|jre` or other protected path |
+| `protected` | 403 | protected system/config path (`agent/conf`, `agent/security`, `agent/*.sh`, ...): rename, delete and move refused; new files/folders cannot be created inside the level-1 folders (existing files can still be replaced or edited) |
 | `use_config_tab` | 403 | `config.xml` / wrapper override: edited in the MidHub config tab only |
 | `no_permission` | 403 | file permissions wrong on the host (an Admin must run "fix permissions" in MidHub) |
 | `not_text` | 415 | file is not text (cannot be read as content) |

@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from "react"
 import { createPortal } from "react-dom"
+import { ZIP_NOTE } from "@/lib/ui/file-drag"
 import type { Entry } from "@/lib/ui/file-tree"
 
 type Props = {
@@ -80,7 +81,7 @@ export function FileContextMenu({ x, y, entry, downloadHref, writeDisabled, onOp
       className="fixed z-50 min-w-44 rounded-lg border border-gray-200 bg-white py-1 text-sm shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
       {readable && <button type="button" role="menuitem" className={normal} onClick={act(onOpen)}>Open</button>}
       {readable && <a role="menuitem" className={normal} href={downloadHref} onClick={onClose}>Download</a>}
-      {isDir && <button type="button" role="menuitem" className={normal} onClick={act(onZip)}>Download .zip</button>}
+      {isDir && !entry.symlink && <button type="button" role="menuitem" title={ZIP_NOTE} className={normal} onClick={act(onZip)}>Download .zip</button>}
       {entry.config && <button type="button" role="menuitem" className={normal} onClick={act(onOpenConfig)}>Edit in Configuration</button>}
       {!entry.locked && <button type="button" role="menuitem" disabled={writeDisabled} className={normal} onClick={act(onRename)}>Rename</button>}
       {!entry.locked && <button type="button" role="menuitem" disabled={writeDisabled} className={danger} onClick={act(onDelete)}>Delete</button>}

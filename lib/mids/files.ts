@@ -93,6 +93,13 @@ function isProtected(c: Ctx, abs: string): boolean {
   return inProtectedTree(c, abs) || c.protDirs.includes(abs) ||
     (abs.endsWith(".sh") && c.scriptDirs.includes(path.dirname(abs)))
 }
+/** Refuses NEW names inside level-1 trees (and new *.sh in agent/): they could never be renamed or removed again. */
+function assertCanCreate(c: Ctx, abs: string): void {
+  if (inProtectedTree(c, abs) || (abs.endsWith(".sh") && c.scriptDirs.includes(path.dirname(abs)))) {
+    const folder = path.relative(c.root, path.dirname(abs)) || "/"
+    throw protErr(`เพิ่มไฟล์หรือโฟลเดอร์ใหม่ใน ${folder} ไม่ได้ เพราะเป็นโฟลเดอร์ระบบ/ตั้งค่าของ MID ที่ลบหรือย้ายไม่ได้ — ไฟล์ที่มีอยู่แล้วยังอัปโหลดทับหรือแก้ไขได้`)
+  }
+}
 function assertNotContainer(c: Ctx, abs: string): void {
   if (abs === c.root || c.roDirs.some((d) => inside(abs, d))) throw roErr()
   if (c.configFiles.some((f) => inside(abs, f))) throw cfgErr()
@@ -242,6 +249,7 @@ async function createText(c: Ctx, rel: string, data: Buffer): Promise<{ hash: st
   await statDirOf(e.parent)
   assertWritable(c, e.parent)
   assertWritable(c, e.abs)
+  assertCanCreate(c, e.abs)
   await beforeIo()
   const wc = writeCheck(c)
   const d = await openDir(e.parent, wc)
@@ -284,6 +292,7 @@ export function upload(name: string, dirRel: string, filename: string, data: Buf
         const code = (e as NodeJS.ErrnoException).code
         if (code === "ELOOP" || code === "EISDIR") throw new MidError("conflict") // symlink/dir: never write through/over
         if (code !== "ENOENT") throw e
+        assertCanCreate(c, path.join(dir, filename))
         h = await createFileIn(d, dir, filename, wc)
       }
       try {
@@ -353,6 +362,7 @@ export function uploadStream(
         const code = (e as NodeJS.ErrnoException).code
         if (code === "ELOOP" || code === "EISDIR") throw new MidError("conflict")
         if (code !== "ENOENT") throw e
+        assertCanCreate(c, path.join(dir, filename))
       }
       const tmp = `.midhub-upload-${randomBytes(8).toString("hex")}.part` // matches UPLOAD_TMP_RE
       const h = await createFileIn(d, dir, tmp, wc)
@@ -396,6 +406,7 @@ export function mkdir(name: string, parentRel: string, dirName: string): Promise
     await statDirOf(parent)
     assertWritable(c, parent)
     assertWritable(c, path.join(parent, dirName))
+    assertCanCreate(c, path.join(parent, dirName))
     await beforeIo()
     const wc = writeCheck(c)
     const d = await openDir(parent, wc)
@@ -472,7 +483,7 @@ export function move(name: string, rel: string, toDir: string, overwrite = false
         }
         const clash = await lstatIn(dstD, e.base)
         if (clash) {
-          if (src.isDirectory() || !clash.isFile()) {
+          if (src.isDirectory() || !src.isFile() || !clash.isFile()) {
             throw new MidError("conflict", 409, "ปลายทางมีโฟลเดอร์หรือไฟล์ชื่อเดียวกันอยู่แล้ว ระบบไม่รวมโฟลเดอร์ให้ เปลี่ยนชื่อก่อนแล้วลองย้ายใหม่")
           }
           if (!overwrite) throw new MidError("exists", 409, "มีไฟล์ชื่อนี้อยู่ในโฟลเดอร์ปลายทางแล้ว เลือกแทนที่หรือข้าม")

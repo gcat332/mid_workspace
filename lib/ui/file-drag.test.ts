@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { canMoveTo, downloadUrlData, zipFilename, zipUrl } from "./file-drag"
+import { canMoveTo, createBlockReason, downloadUrlData, zipFilename, zipUrl } from "./file-drag"
 import type { Entry } from "./file-tree"
 
 const ent = (o: Partial<Entry> = {}): Entry =>
@@ -26,6 +26,10 @@ describe("canMoveTo", () => {
     expect(canMoveTo(["a"], "agent/conf", mk())).toBe(false)
     expect(canMoveTo(["a"], "agent/conf/sub", mk())).toBe(false)
     expect(canMoveTo(["a"], "agent/confx", mk())).toBe(true)
+  })
+  it("refuses a target whose own listing says read-only (an unloaded subfolder of agent/lib)", () => {
+    expect(canMoveTo(["a"], "agent/lib/x", mk({ "agent/lib/x": { readOnly: true } }))).toBe(false)
+    expect(canMoveTo(["a"], "work/x", mk({ "work/x": { readOnly: false } }))).toBe(true)
   })
   it("refuses locked, symlink and secret sources", () => {
     for (const k of ["locked", "symlink", "secret"] as const)
@@ -57,5 +61,13 @@ describe("zip helpers", () => {
   })
   it("downloadUrlData replaces ':' in the filename so Chrome's colon-delimited format still parses", () => {
     expect(downloadUrlData("a:b.txt", "http://h/z")).toBe("application/octet-stream:a_b.txt:http://h/z")
+  })
+})
+
+describe("createBlockReason", () => {
+  it("names a level-1 protected folder and what is still possible; free folders have none", () => {
+    expect(createBlockReason("agent/conf")).toContain("agent/conf")
+    expect(createBlockReason("agent/security/deep")).toContain("agent/security/deep")
+    for (const d of ["", "work", "agent", "agent/logs", "agent/confx"]) expect(createBlockReason(d)).toBeNull()
   })
 })

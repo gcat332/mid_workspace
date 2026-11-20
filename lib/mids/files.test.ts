@@ -186,6 +186,13 @@ describe("move", () => {
     await move("m1", "work/note.txt", "agent/extlib", true)
     expect(fs.readFileSync(path.join(m, "agent/extlib/note.txt"), "utf8")).toBe("hello")
   })
+  it("a FIFO source never overwrites a file, even with overwrite", async () => {
+    fs.mkdirSync(path.join(m, "work/dst"))
+    fs.writeFileSync(path.join(m, "work/dst/pipe"), "keep")
+    execFileSync("mkfifo", [path.join(m, "work/pipe")])
+    await rejects(move("m1", "work/pipe", "work/dst", true), "conflict", 409)
+    expect(fs.readFileSync(path.join(m, "work/dst/pipe"), "utf8")).toBe("keep")
+  })
   it("a clash involving a folder is conflict even with overwrite; nothing changes", async () => {
     fs.mkdirSync(path.join(m, "agent/extlib/note.txt"))
     await rejects(move("m1", "work/note.txt", "agent/extlib", true), "conflict", 409)
@@ -540,11 +547,28 @@ describe("protected system/config paths", () => {
     expect((await listDir("m1", "agent/properties"))[0]).toMatchObject({ locked: true, readOnly: false })
     expect((await listDir("m1", "agent/logs"))[0].locked).toBe(false)
   })
-  it("editing, uploading and creating inside protected folders still work", async () => {
+  it("editing and replacing existing files inside protected folders still works", async () => {
     const r = await readText("m1", "agent/properties/glide.properties")
     await writeText("m1", "agent/properties/glide.properties", "x=1\n", r.hash)
-    await upload("m1", "agent/security", "ca.pem", Buffer.from("x"))
-    await mkdir("m1", "agent/logs", "sub")
+    await upload("m1", "agent/security", "agent_keystore", Buffer.from("new"))
+    expect(fs.readFileSync(path.join(m, "agent/security/agent_keystore"), "utf8")).toBe("new")
+    await uploadStream("m1", "agent/security", "agent_keystore", new ReadableStream<Uint8Array>({ start(c) { c.enqueue(Buffer.from("s2")); c.close() } }), 2)
+    expect(fs.readFileSync(path.join(m, "agent/security/agent_keystore"), "utf8")).toBe("s2")
+    await mkdir("m1", "agent/logs", "sub") // level 2 folders stay open
+  })
+  it("new names inside level-1 folders and new *.sh in agent are refused (they could never be removed)", async () => {
+    const body = () => new ReadableStream<Uint8Array>({ start(c) { c.enqueue(Buffer.from("x")); c.close() } })
+    await rejects(upload("m1", "agent/security", "ca.pem", Buffer.from("x")), "protected", 403)
+    await rejects(uploadStream("m1", "agent/conf", "n.conf", body(), 1), "protected", 403)
+    await rejects(writeText("m1", "agent/properties/new.properties", "a", ""), "protected", 403)
+    await rejects(mkdir("m1", "agent/security", "sub"), "protected", 403)
+    await rejects(upload("m1", "agent", "new.sh", Buffer.from("x")), "protected", 403)
+    await rejects(writeText("m1", "agent/new.sh", "x", ""), "protected", 403)
+    await expect(upload("m1", "agent/security", "ca.pem", Buffer.from("x"))).rejects.toThrow(/agent\/security/)
+    expect(fs.existsSync(path.join(m, "agent/security/ca.pem"))).toBe(false)
+    expect(fs.existsSync(path.join(m, "agent/security/sub"))).toBe(false)
+    expect(fs.readdirSync(path.join(m, "agent/conf")).filter((n) => n.includes(".part"))).toEqual([])
+    await upload("m1", "agent", "notes.txt", Buffer.from("ok")) // other names directly in agent/ are fine
   })
   it("a symlinked agent dir cannot dodge protection", async () => {
     fs.renameSync(path.join(m, "agent"), path.join(m, "work/realagent"))

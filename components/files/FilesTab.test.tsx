@@ -16,7 +16,7 @@ vi.mock("@monaco-editor/react", () => ({
 import { FilesTab } from "../FilesTab"
 import { INTERNAL_MIME } from "@/lib/ui/file-drag"
 
-type Flags = Partial<{ readOnly: boolean; locked: boolean; secret: boolean; config: boolean; size: number }>
+type Flags = Partial<{ symlink: boolean; readOnly: boolean; locked: boolean; secret: boolean; config: boolean; size: number }>
 const E = (name: string, type: "file" | "dir", f: Flags = {}) =>
   ({ name, type, size: 10, mtime: "2026-11-19T00:00:00Z", readOnly: false, symlink: false, locked: false, secret: false, config: false, ...f })
 let FS: Record<string, { entries: ReturnType<typeof E>[]; readOnly: boolean }>
@@ -580,6 +580,53 @@ describe("FilesTab multi-select", () => {
     click.mockRestore()
   })
 
+  it("Del acts on the selection, not on a focused row that was deselected", async () => {
+    const { container } = await inExtlib()
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("b.jar"), ctrl)
+    fireEvent.click(row("c.jar"), ctrl)
+    fireEvent.click(row("c.jar"), ctrl) // deselect c; it keeps focus
+    rowBtn(container, "agent/extlib/c.jar").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "Delete" })
+    await screen.findByRole("dialog", { name: "Delete 2 Items?" })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    fireEvent.keyDown(document.activeElement!, { key: "Backspace", metaKey: true })
+    await screen.findByRole("dialog", { name: "Delete 2 Items?" })
+  })
+
+  it("Del with no selection acts on the focused row", async () => {
+    const { container } = await inExtlib()
+    fireEvent.click(row("c.jar"), ctrl)
+    fireEvent.click(row("c.jar"), ctrl) // empty selection again
+    rowBtn(container, "agent/extlib/c.jar").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "Delete" })
+    await screen.findByRole("dialog", { name: "Delete c.jar?" })
+  })
+
+  it("a mouse click leaves the row button focused (Safari/Firefox on macOS do not focus on click)", async () => {
+    await setup()
+    fireEvent.click(row("notes.txt"), { ctrlKey: true })
+    expect(document.activeElement).toBe(row("notes.txt"))
+    fireEvent.click(row("agent"))
+    expect(document.activeElement).toBe(row("agent"))
+  })
+
+  it("Download .zip carries a note that config.xml is not included (menu and selection bar)", async () => {
+    await inExtlib()
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("b.jar"), ctrl)
+    expect(screen.getByRole("button", { name: "Download .zip" }).getAttribute("title")).toContain("config.xml")
+    fireEvent.click(screen.getByRole("button", { name: "More Actions: agent" }))
+    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Download .zip" }).getAttribute("title")).toContain("config.xml")
+  })
+
+  it("a symlinked folder row has no Download .zip in its menu", async () => {
+    FS[""].entries.push(E("lnkdir", "dir", { symlink: true, readOnly: true }))
+    await setup()
+    fireEvent.click(screen.getByRole("button", { name: "More Actions: lnkdir" }))
+    expect(within(screen.getByRole("menu")).queryByRole("menuitem", { name: "Download .zip" })).toBeNull()
+  })
+
   it("Del opens the delete confirm for the selection", async () => {
     const { container } = await inExtlib()
     fireEvent.click(row("a.jar"), ctrl)
@@ -687,6 +734,25 @@ describe("FilesTab drag to move and drag out", () => {
     fireEvent.dragStart(rowEl(container, "work/b"), { dataTransfer: d2 })
     expect(JSON.parse(d2.data[INTERNAL_MIME])).toEqual(["work/a", "work/b"])
     expect(d2.data.DownloadURL).toBe(`application/octet-stream:work.zip:${ZIP}?dir=work&name=a&name=b`)
+  })
+
+  it("no DownloadURL for a symlinked folder or a selection the server would refuse; a mixed selection still zips", async () => {
+    const { container } = await ready()
+    FS.work.entries.push(E("ldir", "dir", { symlink: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(rowEl(container, "work/ldir")).toBeTruthy())
+    const one = dt()
+    fireEvent.dragStart(rowEl(container, "work/ldir"), { dataTransfer: one })
+    expect(one.data.DownloadURL).toBeUndefined()
+    fireEvent.click(row("lnk"), { ctrlKey: true })
+    fireEvent.click(row("sec"), { ctrlKey: true })
+    const none = dt()
+    fireEvent.dragStart(rowEl(container, "work/lnk"), { dataTransfer: none })
+    expect(none.data.DownloadURL).toBeUndefined()
+    fireEvent.click(row("a"), { ctrlKey: true })
+    const some = dt()
+    fireEvent.dragStart(rowEl(container, "work/lnk"), { dataTransfer: some })
+    expect(some.data.DownloadURL).toContain("/files/zip?")
   })
 
   it("secret rows are not draggable, locked and symlink rows are download-only", async () => {
@@ -867,6 +933,31 @@ describe("FilesTab drag to move and drag out", () => {
     await new Promise((r) => setTimeout(r, 20))
     expect(moves()).toEqual([])
     expect(X.n).toBe(1)
+  })
+
+  it("Upload, New File and New Folder are off inside a level-1 folder, with the reason; a desktop drop shows it instead of uploading", async () => {
+    class X { upload = { onprogress: null }; onload: (() => void) | null = null; onerror = null; onabort = null; ontimeout = null; status = 200; responseText = "{}"; static n = 0
+      open() {} send() { X.n++; setTimeout(() => this.onload?.(), 0) } getResponseHeader() { return "application/json" } }
+    vi.stubGlobal("XMLHttpRequest", X)
+    FS.agent.entries.push(E("conf", "dir"))
+    FS.agent.readOnly = false
+    FS["agent/conf"] = { entries: [E("wrapper.conf", "file")], readOnly: false }
+    const { container } = await setup()
+    await expandAgent()
+    fireEvent.click(row("conf"))
+    await screen.findByRole("button", { name: "wrapper.conf" })
+    for (const n of ["Upload", "New File", "New Folder"]) expect((screen.getByRole("button", { name: n }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole("button", { name: "Upload" }).getAttribute("aria-describedby")).toBe("prot-hint")
+    expect(document.getElementById("prot-hint")!.textContent).toContain("agent/conf")
+    const files = dt([new File(["abc"], "up.jar")], ["Files"])
+    fireEvent.dragOver(rowEl(container, "agent/conf"), { dataTransfer: files })
+    fireEvent.drop(rowEl(container, "agent/conf"), { dataTransfer: files })
+    expect((await screen.findByRole("alert")).textContent).toContain("agent/conf")
+    await new Promise((r) => setTimeout(r, 20))
+    expect(X.n).toBe(0)
+    fireEvent.click(row("agent"))
+    fireEvent.click(row("agent"))
+    expect((screen.getByRole("button", { name: "Upload" }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it("the footer hint describes upload, move and drag-out", async () => {

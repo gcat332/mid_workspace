@@ -31,6 +31,7 @@ export function planZip(name: string, dir: string, names: string[]): Promise<Zip
     const entries: ZipPlan["entries"] = []
     let files = 0
     let bytes = 0
+    let sawConfig = false
     const push = (e: ZipPlan["entries"][number]) => {
       if (e.dir) {
         if (entries.length >= MAX_ENTRIES) throw new MidError("too_large", 413, TOO_MANY_MSG)
@@ -43,14 +44,16 @@ export function planZip(name: string, dir: string, names: string[]): Promise<Zip
     }
 
     /** Adds one child of an open directory (symlinks, config.xml, upload temp files are skipped). */
-    const addChild = async (d: FileHandle, dReal: string, dRel: string, n: string, zipPrefix: string, strict: boolean): Promise<void> => {
+    const addChild = async (d: FileHandle, dReal: string, dRel: string, n: string, zipPrefix: string, mode: "walk" | "single" | "multi"): Promise<void> => {
+      const strict = mode === "single"
       const abs = path.join(dReal, n)
       const rel = dRel ? `${dRel}/${n}` : n
       const st = await lstatIn(d, n)
       if (!st) {
-        if (strict) throw new MidError("not_found")
+        if (mode !== "walk") throw new MidError("not_found")
         return
       }
+      if (c.configXml.includes(abs)) sawConfig = true
       if (strict && c.configXml.includes(abs)) throw new MidError("use_config_tab")
       if (st.isSymbolicLink() || UPLOAD_TMP_RE.test(n) || c.configXml.includes(abs)) {
         if (strict) throw new MidError("not_found") // an explicitly selected entry must not silently vanish
@@ -69,7 +72,7 @@ export function planZip(name: string, dir: string, names: string[]): Promise<Zip
       }
     }
     const walk = async (d: FileHandle, dReal: string, dRel: string, zipPrefix: string): Promise<void> => {
-      for (const n of (await fs.promises.readdir(fdPath(d))).sort()) await addChild(d, dReal, dRel, n, zipPrefix, false)
+      for (const n of (await fs.promises.readdir(fdPath(d))).sort()) await addChild(d, dReal, dRel, n, zipPrefix, "walk")
     }
 
     const base = dirRel ? path.posix.basename(dirRel) : name
@@ -82,7 +85,9 @@ export function planZip(name: string, dir: string, names: string[]): Promise<Zip
       } else {
         const uniq = [...new Set(names)]
         for (const n of uniq) plainName(n)
-        for (const n of uniq) await addChild(d, dirAbs, dirRel, n, "", true)
+        // One name is an explicit request (its exclusion is an error); among several, excluded ones are skipped like in a folder walk.
+        for (const n of uniq) await addChild(d, dirAbs, dirRel, n, "", uniq.length === 1 ? "single" : "multi")
+        if (entries.length === 0) throw new MidError(sawConfig ? "use_config_tab" : "not_found")
       }
     } finally {
       await d.close()

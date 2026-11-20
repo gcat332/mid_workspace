@@ -13,7 +13,7 @@ import { SelectionBar } from "./files/SelectionBar"
 import { useMoveItems } from "./files/useMoveItems"
 import { API_BASE, apiFetch, apiUpload } from "@/lib/ui/api"
 import { cardCls, ghostBtnCls, inputCls, labelCls } from "@/lib/ui/classes"
-import { canMoveTo, downloadUrlData, INTERNAL_MIME, zipFilename, zipUrl } from "@/lib/ui/file-drag"
+import { canMoveTo, createBlockReason, downloadUrlData, INTERNAL_MIME, zipFilename, zipIncludes, zipUrl } from "@/lib/ui/file-drag"
 import { joinPath as join, parentOf, siblingsOf, toggle, type Entry, type TreeRow, type TreeState } from "@/lib/ui/file-tree"
 import { clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, type Selection } from "@/lib/ui/selection"
 
@@ -238,6 +238,8 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   async function uploadFiles(dir: string, files: File[]) {
     if (files.length === 0 || busy) return
     if (busyReason) { setErr({ message: busyReason }); return }
+    const blocked = createBlockReason(dir)
+    if (blocked) { setErr({ code: "protected", message: blocked }); return }
     setErr(null); setNote(null); setBusy(true)
     let failed = false
     const fail = (e: ApiError) => { if (!failed) setErr(e); failed = true }
@@ -302,7 +304,10 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
     const rows = rowsOf(dragged)
     const known = rows.length === dragged.length
     const movable = known && rows.length > 0 && rows.every((r) => !r.entry.locked && !r.entry.symlink && !r.entry.secret)
-    const downloadable = known && rows.length > 0 && rows.every((r) => !r.entry.secret && !(r.entry.symlink && r.entry.type === "dir"))
+    // Mirrors the server's zip: a single folder must not be a symlink; among several names excluded ones are skipped, but one must remain.
+    const downloadable = known && rows.length > 0 && (rows.length === 1
+      ? !rows[0].entry.secret && !(rows[0].entry.symlink && rows[0].entry.type === "dir")
+      : rows.some((r) => zipIncludes(r.entry)))
     if (!movable && !downloadable) { e.preventDefault(); return }
     const dt = e.dataTransfer
     dt.effectAllowed = movable ? "copyMove" : "copy"
@@ -380,7 +385,8 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
     }
     if (e.key === "Delete" || (e.metaKey && e.key === "Backspace")) {
       e.preventDefault()
-      const rows = rowsOf(picked.has(path) ? selection.paths : [path])
+      // The selection when there is one (the focused row may have been deselected); otherwise the focused row.
+      const rows = rowsOf(selection.paths.length > 0 ? selection.paths : [path])
       if (rows.length === 0 || busy) return
       const why = deleteBlockFor(rows, parentOf(path))
       if (why) setErr({ message: why }); else setDeleting(rows)
@@ -412,7 +418,9 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
 
   const crumbs = target ? target.split("/") : []
   const targetRo = roDirs[target] === true
-  const writeOff = busy || !!busyReason || targetRo
+  const createBlock = createBlockReason(target)
+  const writeOff = busy || !!busyReason || targetRo || createBlock !== null
+  const whyOff = targetRo ? "ro-hint" : createBlock ? "prot-hint" : undefined
   const rootErr = typeof tree.children[""] === "object" && !Array.isArray(tree.children[""])
   const selRows = rowsOf(selection.paths)
   const deleteBlock = deleteBlockFor(selRows, selection.parent)
@@ -428,6 +436,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
           <button type="button" className="font-mono text-blue-600 dark:text-blue-400 hover:underline" onClick={() => reveal(EXTLIB)}>{EXTLIB}</button> แทน
         </p>
       )}
+      {createBlock && !targetRo && <p id="prot-hint" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">🔒 {createBlock}</p>}
       {target === EXTLIB && <p className="text-sm text-gray-600 dark:text-neutral-400">jar ใน extlib จะถูกลบตอน MID เริ่มทำงาน ถ้าไม่ได้ลงทะเบียนเป็น MID Server JAR File ใน instance</p>}
       {err && !open && !nameDialog && <ErrorNotice error={err} />}
 
@@ -447,11 +456,11 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
           <div className="flex shrink-0 items-center gap-1">
             <input ref={fileInput} type="file" multiple hidden aria-label="Choose Files to Upload"
               onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; void uploadFiles(target, fs) }} />
-            <button type="button" title="Upload" aria-label="Upload" disabled={writeOff} aria-describedby={targetRo ? "ro-hint" : undefined}
+            <button type="button" title="Upload" aria-label="Upload" disabled={writeOff} aria-describedby={whyOff}
               onClick={() => fileInput.current?.click()} className={toolBtn}><IconUpload /></button>
-            <button type="button" title="New File" aria-label="New File" disabled={writeOff} aria-describedby={targetRo ? "ro-hint" : undefined}
+            <button type="button" title="New File" aria-label="New File" disabled={writeOff} aria-describedby={whyOff}
               onClick={() => startName({ kind: "newFile" }, "")} className={toolBtn}><IconFilePlus /></button>
-            <button type="button" title="New Folder" aria-label="New Folder" disabled={writeOff} aria-describedby={targetRo ? "ro-hint" : undefined}
+            <button type="button" title="New Folder" aria-label="New Folder" disabled={writeOff} aria-describedby={whyOff}
               onClick={() => startName({ kind: "mkdir" }, "")} className={toolBtn}><IconFolderPlus /></button>
             <button type="button" title="Refresh" aria-label="Refresh" disabled={busy} onClick={refresh} className={toolBtn}><IconRefresh /></button>
           </div>

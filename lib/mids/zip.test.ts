@@ -74,6 +74,20 @@ describe("planZip", () => {
     await rejects(planZip("m1", "work", ["nope"]), "not_found", 404)
     await rejects(planZip("m1", "work", ["../x"]), "invalid_filename", 400)
   })
+  it("several names: config.xml, symlinks and upload temp files are skipped, not an error", async () => {
+    fs.symlinkSync("/etc", path.join(m, "agent/out")); fs.writeFileSync(path.join(m, "agent/.midhub-upload-0123456789abcdef.part"), "")
+    const p = await planZip("m1", "agent", ["config.xml", "out", ".midhub-upload-0123456789abcdef.part", "conf", "extlib"])
+    expect(p.entries.map((e) => e.zipName)).toEqual(["conf/", "conf/wrapper-override.conf", "extlib/"])
+    await rejects(planZip("m1", "agent", ["config.xml", "conf", "nope"]), "not_found", 404) // a missing name is still an error
+  })
+  it("several names with nothing includable fails; a single excluded name keeps its error", async () => {
+    fs.symlinkSync("/etc", path.join(m, "agent/out"))
+    await rejects(planZip("m1", "agent", ["config.xml", "out"]), "use_config_tab", 403)
+    fs.symlinkSync("/etc", path.join(m, "agent/out2"))
+    await rejects(planZip("m1", "agent", ["out", "out2"]), "not_found", 404)
+    await rejects(planZip("m1", "agent", ["config.xml"]), "use_config_tab", 403)
+    await rejects(planZip("m1", "agent", ["out"]), "not_found", 404)
+  })
   it("over 10 000 files is too_large before any byte", async () => {
     for (let i = 0; i <= ZIP_MAX_FILES; i++) fs.writeFileSync(path.join(m, "work", `f${i}`), "")
     const t = Date.now()

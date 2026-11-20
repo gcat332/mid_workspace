@@ -68,7 +68,7 @@ export function FileTree({ state, selected, dragOver, selection, onRowClick, onM
               draggable={canDrag && !entry.secret && !(isDir && entry.symlink)}
               onDragStart={(e) => onRowDragStart(row, e)} onDragEnd={onRowDragEnd}
               className={`group flex select-none items-center pr-2 ${highlight}`}>
-              <button type="button" data-row-main aria-current={picked ? "true" : undefined} onClick={(e) => onRowClick(row, { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey })} aria-expanded={isDir ? open : undefined}
+              <button type="button" data-row-main aria-current={picked ? "true" : undefined} onClick={(e) => { e.currentTarget.focus() /* Safari/Firefox on macOS do not focus a button on click; the row shortcuts need focus in the row */; onRowClick(row, { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey }) }} aria-expanded={isDir ? open : undefined}
                 className={`flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left ${selected === path ? "font-medium text-blue-700 dark:text-blue-300" : "text-gray-700 dark:text-neutral-200"}`}>
                 <span className="w-3 shrink-0 text-xs text-gray-400 dark:text-neutral-500" aria-hidden="true">{isDir ? (open ? "▾" : "▸") : ""}</span>
                 {isDir ? <FolderIcon open={open} /> : <FileIcon name={entry.name} />}
