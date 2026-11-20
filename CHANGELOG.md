@@ -16,6 +16,39 @@ Friendly titles for each major/minor line, shown next to the version on the
 - v0.2.1 — AgentHub Sign-in
 - v0.2.2 — Behind AgentHub Proxy
 - v0.3 — Polish
+- v0.4 — File Explorer
+- v0.4.0 — Explorer-style Files
+- v0.4.1 — RAM Limit
+- v0.4.2 — Copy & Paste
+
+## v0.4.2 — `[feature]`
+
+**Copy paths and paste files to upload.**
+
+- Cmd/Ctrl+C copies the selected files' paths (one per line); the ⋯ menu has Copy Path on every row
+- Cmd/Ctrl+V uploads files copied in Finder or Explorer into the selected folder (folders are skipped with a note)
+- Existing files in MID system folders such as `agent/security` can be replaced by upload again; new names are still refused
+- When some files are refused and an upload also fails, both messages are shown
+- Ctrl+C and Ctrl+A work with the Thai keyboard layout
+
+## v0.4.1 — `[feature]`
+
+**RAM (heap) is capped at 2048 MB.**
+
+- Heap accepts 256–2048 MB in the wizard, the Configuration tab and raw `wrapper.java.maxmemory` edits
+- The note about rewriting the systemd unit under the Heap field is removed
+
+## v0.4.0 — `[feature]`
+
+**The Files tab works like a desktop file explorer.**
+
+- Drag files and folders onto another folder to move them; a name clash asks Replace or Skip
+- Drag a file out onto the desktop to download it (Chrome/Edge)
+- Ctrl/Shift+click to select several files, then delete them or download them as one .zip
+- Download a whole folder as .zip (config.xml is never included)
+- Shortcuts: Del (Cmd+Backspace on Mac), F2, Enter, Ctrl/Cmd+A, Esc
+- MID system and config files (`agent/conf`, `agent/properties`, `agent/security`, scripts, `agent/logs` …) cannot be moved, renamed or deleted, also through the agent API
+- Moves are recorded in the audit log as Move File
 
 ## v0.3.0 — `[style]`
 

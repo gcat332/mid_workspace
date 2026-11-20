@@ -48,7 +48,7 @@ describe("AppChrome footer", () => {
     expect(footer.textContent).toContain("© 2026 BSM MIDHub")
     expect(footer.textContent).toContain("Built by Kasira C.")
     expect(footer.className).not.toContain("max-md:hidden")
-    const link = Array.from(footer.querySelectorAll("a")).find((a) => a.textContent === "v0.3.0")!
+    const link = Array.from(footer.querySelectorAll("a")).find((a) => a.textContent === `v${pkg.appVersion}`)!
     expect(link.getAttribute("href")).toBe("/changelog")
     expect(process.env.NEXT_PUBLIC_APP_VERSION).toBe(pkg.appVersion)
     expect(footer.querySelector("a[href^='mailto:']")).not.toBeNull()
