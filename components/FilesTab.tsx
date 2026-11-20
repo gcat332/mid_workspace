@@ -32,6 +32,9 @@ const CARD = "\0card"
 const EMPTY_TREE: TreeState = { children: {}, expanded: new Set() }
 const toolBtn = "rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-500 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-blue-300"
 const baseName = (p: string) => p.split("/").pop() ?? p
+const busyWait = (reason: string) => `${reason} — รอให้งานเสร็จแล้วลองใหม่`
+const RO_REASON = `ลบไม่ได้: โฟลเดอร์นี้เป็นโฟลเดอร์โปรแกรมของ MID (อ่านอย่างเดียว) ลบได้เฉพาะไฟล์ใน ${EXTLIB}`
+const LOCKED_REASON = "ลบไม่ได้: รายการที่เลือกมีไฟล์ระบบหรือไฟล์ตั้งค่าของ MID ที่ถูกล็อกไว้ เอารายการนั้นออกจากที่เลือกแล้วลองใหม่"
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files")
 
 type Props = { midName: string; /** Non-null while a lifecycle job runs: writes are disabled and this is the visible reason. */ busyReason?: string | null; /** Switch the MID panel to the config tab (config.xml / wrapper-override.conf rows). */ onOpenConfig: () => void }
@@ -74,6 +77,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
       if (!res.ok) {
         const e = await readApiError(res)
         setTree((t) => ({ ...t, children: { ...t.children, [d]: { error: e.message } } }))
+        setSelection((s) => (s.parent === d ? EMPTY_SELECTION : s))
         if (d === "") setErr(e)
         return null
       }
@@ -84,6 +88,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
       return j.entries
     } catch {
       setTree((t) => ({ ...t, children: { ...t.children, [d]: { error: NETWORK.message } } }))
+      setSelection((s) => (s.parent === d ? EMPTY_SELECTION : s))
       if (d === "") setErr(NETWORK)
       return null
     }
@@ -106,6 +111,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
       children: Object.fromEntries(Object.entries(t.children).filter(([k]) => !under(k, path))),
       expanded: new Set([...t.expanded].filter((k) => !under(k, path))),
     }))
+    setSelection((s) => (under(s.parent, path) ? EMPTY_SELECTION : { ...s, paths: s.paths.filter((p) => !under(p, path)) }))
     if (under(target, path)) setTarget(parentOf(path))
     if (selected && under(selected, path)) setSelected(null)
   }
@@ -247,7 +253,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
 
   /** Delete one entry or a selection, one request at a time; the first refusal stops the rest. */
   async function deleteRows(rows: TreeRow[]) {
-    if (busyReason) { setErr({ message: busyReason }); setDeleting([]); return }
+    if (busyReason) { setErr({ message: busyWait(busyReason) }); setDeleting([]); return }
     setBusy(true); setErr(null)
     let done = 0
     let failure: ApiError | null = null
@@ -278,6 +284,18 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   }
 
   /** Keys while focus is on a tree row: Esc, Del, F2, Enter, Ctrl+A. Dialogs and the editor are outside the tree. */
+  /** Why these rows cannot be deleted right now (shown in the bar and for the Del key), or null. */
+  function deleteBlockFor(rows: TreeRow[], parent: string): string | null {
+    if (busyReason) return busyWait(busyReason)
+    if (roDirs[parent]) return RO_REASON
+    return rows.some((r) => r.entry.locked) ? LOCKED_REASON : null
+  }
+
+  /** Esc anywhere in the card (tree or selection bar) clears the selection; dialogs, editor and menu are outside it. */
+  function onCardKey(e: KeyboardEvent) {
+    if (e.key === "Escape" && !open && !nameDialog && deleting.length === 0 && !menu) setSelection(EMPTY_SELECTION)
+  }
+
   function onTreeKey(e: KeyboardEvent) {
     if (open || nameDialog || deleting.length > 0 || menu || e.altKey) return
     const rowEl = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>("[data-row]")
@@ -285,7 +303,6 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
     if (!rowEl || path === undefined || !e.currentTarget.contains(rowEl)) return
     const entry = entryOf(path)
     const writable = !busy && !busyReason
-    if (e.key === "Escape") { setSelection(EMPTY_SELECTION); return }
     if (e.key === "Enter" && e.target === rowEl.querySelector("[data-row-main]") && entry) {
       e.preventDefault(); onRowClick({ path, depth: 0, entry }, { toggle: false, range: false }); return
     }
@@ -293,9 +310,12 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
       e.preventDefault()
       setSelection(selectAll(parentOf(path), siblingsOf(tree, parentOf(path)))); return
     }
-    if (e.key === "Delete") {
+    if (e.key === "Delete" || (e.metaKey && e.key === "Backspace")) {
+      e.preventDefault()
       const rows = rowsOf(picked.has(path) ? selection.paths : [path])
-      if (writable && rows.length > 0 && !rows.some((r) => r.entry.locked)) { e.preventDefault(); setDeleting(rows) }
+      if (rows.length === 0 || busy) return
+      const why = deleteBlockFor(rows, parentOf(path))
+      if (why) setErr({ message: why }); else setDeleting(rows)
     } else if (e.key === "F2" && entry && !entry.locked && writable && selection.paths.length < 2) {
       e.preventDefault(); startName({ kind: "rename", row: { path, depth: 0, entry } }, entry.name)
     }
@@ -327,7 +347,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   const writeOff = busy || !!busyReason || targetRo
   const rootErr = typeof tree.children[""] === "object" && !Array.isArray(tree.children[""])
   const selRows = rowsOf(selection.paths)
-  const deleteBlock = busyReason ?? (roDirs[selection.parent] ? "โฟลเดอร์นี้แก้ไขไม่ได้ ลบไม่ได้" : selRows.some((r) => r.entry.locked) ? "ลบไม่ได้: รายการที่เลือกมีไฟล์ที่ระบบล็อกไว้ เอาออกจากที่เลือกแล้วลองใหม่" : null)
+  const deleteBlock = deleteBlockFor(selRows, selection.parent)
   const nameTitle = nameDialog?.kind === "rename" ? `Rename ${nameDialog.row.entry.name}` : nameDialog?.kind === "mkdir" ? "New Folder" : "New File"
 
   return (
@@ -342,7 +362,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
       {target === EXTLIB && <p className="text-sm text-gray-600 dark:text-neutral-400">jar ใน extlib จะถูกลบตอน MID เริ่มทำงาน ถ้าไม่ได้ลงทะเบียนเป็น MID Server JAR File ใน instance</p>}
       {err && !open && !nameDialog && <ErrorNotice error={err} />}
 
-      <div data-testid="files-card" {...dropHandlers(CARD, target)}
+      <div data-testid="files-card" onKeyDown={onCardKey} {...dropHandlers(CARD, target)}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(null) }}
         className={`${cardCls} relative overflow-hidden ${dragOver === CARD ? "ring-2 ring-inset ring-blue-500" : ""}`}>
         <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 dark:border-neutral-700">
@@ -387,8 +407,8 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
               onRowClick={onRowClick} onMenu={(row, x, y) => setMenu({ row, x, y })} onOpenConfig={onOpenConfig} dropProps={(dir) => dropHandlers(dir, dir)} />
           </div>
         )}
-        {selection.paths.length >= 2 && (
-          <SelectionBar count={selection.paths.length} deleteDisabledReason={deleteBlock} busy={busy}
+        {selRows.length >= 2 && (
+          <SelectionBar count={selRows.length} deleteDisabledReason={deleteBlock} busy={busy}
             onZip={() => void downloadZip(selection.parent, selection.paths.map(baseName))}
             onDelete={() => setDeleting(selRows)} onClear={() => setSelection(EMPTY_SELECTION)} />
         )}

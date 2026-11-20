@@ -413,14 +413,14 @@ describe("FilesTab multi-select", () => {
     expect(bar()).toBeNull()
     fireEvent.click(row("c.jar"), ctrl)
     expect(screen.getByText("เลือก 2 รายการ")).toBeTruthy()
-    expect(rowEl(container, "agent/extlib/a.jar").getAttribute("aria-selected")).toBe("true")
-    expect(rowEl(container, "agent/extlib/b.jar").getAttribute("aria-selected")).toBe("false")
+    expect(rowBtn(container, "agent/extlib/a.jar").getAttribute("aria-current")).toBe("true")
+    expect(rowBtn(container, "agent/extlib/b.jar").getAttribute("aria-current")).toBeNull()
     expect(screen.queryByRole("dialog")).toBeNull()
     expect(calls.some((c) => c.content)).toBe(false)
     rowBtn(container, "agent/extlib/c.jar").focus()
     fireEvent.keyDown(document.activeElement!, { key: "Escape" })
     expect(bar()).toBeNull()
-    expect(rowEl(container, "agent/extlib/a.jar").getAttribute("aria-selected")).toBe("false")
+    expect(rowBtn(container, "agent/extlib/a.jar").getAttribute("aria-current")).toBeNull()
   })
 
   it("Shift+click selects the range in display order; Ctrl+click in another folder starts over", async () => {
@@ -464,14 +464,24 @@ describe("FilesTab multi-select", () => {
     expect(sent("DELETE").map((c) => c.path)).toEqual(["agent/extlib/a.jar", "agent/extlib/b.jar"])
   })
 
-  it("bar Delete is disabled with a reason for a locked entry or while a job runs", async () => {
+  it("bar Delete is disabled with a reason for a locked entry, a read-only folder or a running job", async () => {
+    FS["agent/extlib"].entries = [E("a.jar", "file"), E("sys.cfg", "file", { locked: true })]
     await setup()
     await expandAgent()
-    fireEvent.click(row(/^x\.xml/), { ...ctrl })
-    fireEvent.click(row(/^config\.xml/), ctrl)
-    const del = screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement
-    expect(del.disabled).toBe(true)
-    expect(screen.getByText(/ลบไม่ได้/)).toBeTruthy()
+    fireEvent.click(row("extlib"))
+    await screen.findByRole("button", { name: "a.jar" })
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("sys.cfg"), ctrl)
+    expect((screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/^ลบไม่ได้: รายการที่เลือกมีไฟล์ระบบหรือไฟล์ตั้งค่าของ MID ที่ถูกล็อกไว้ เอารายการนั้นออกจากที่เลือกแล้วลองใหม่$/)).toBeTruthy()
+    cleanup()
+
+    await setup()
+    await expandAgent()
+    fireEvent.click(row(/^x\.xml/), ctrl)
+    fireEvent.click(row(/^secret\.key/), ctrl)
+    expect((screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/โฟลเดอร์โปรแกรมของ MID \(อ่านอย่างเดียว\) ลบได้เฉพาะไฟล์ใน agent\/extlib/)).toBeTruthy()
     cleanup()
 
     FS["agent/extlib"].entries = [E("a.jar", "file"), E("b.jar", "file")]
@@ -482,7 +492,49 @@ describe("FilesTab multi-select", () => {
     fireEvent.click(row("a.jar"), ctrl)
     fireEvent.click(row("b.jar"), ctrl)
     expect((screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getAllByText(/กำลังรีสตาร์ต MID/).length).toBeGreaterThan(1)
+    expect(screen.getByText("กำลังรีสตาร์ต MID — รอให้งานเสร็จแล้วลองใหม่")).toBeTruthy()
+  })
+
+  it("Del and Cmd+Backspace on a blocked selection show the reason; Cmd+Backspace deletes otherwise", async () => {
+    FS["agent/extlib"].entries = [E("a.jar", "file"), E("sys.cfg", "file", { locked: true }), E("c.jar", "file")]
+    const { container } = await setup()
+    await expandAgent()
+    fireEvent.click(row("extlib"))
+    await screen.findByRole("button", { name: "a.jar" })
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("sys.cfg"), ctrl)
+    rowBtn(container, "agent/extlib/a.jar").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "Delete" })
+    expect((await screen.findByRole("alert")).textContent).toContain("ลบไม่ได้: รายการที่เลือกมีไฟล์ระบบ")
+    expect(screen.queryByRole("dialog")).toBeNull()
+    fireEvent.click(row("c.jar"), ctrl)
+    fireEvent.click(row("sys.cfg"), ctrl)
+    fireEvent.keyDown(document.activeElement!, { key: "Backspace", metaKey: true })
+    await screen.findByRole("dialog", { name: "Delete 2 Items?" })
+  })
+
+  it("renaming an ancestor clears the selection and its bar", async () => {
+    await inExtlib()
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("b.jar"), ctrl)
+    expect(screen.getByText("เลือก 2 รายการ")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "More Actions: extlib" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }))
+    const dlg = await screen.findByRole("dialog", { name: "Rename extlib" })
+    fireEvent.change(within(dlg).getByRole("textbox", { name: "Name" }), { target: { value: "lib2" } })
+    fireEvent.click(within(dlg).getByRole("button", { name: "Confirm" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(bar()).toBeNull()
+  })
+
+  it("Esc clears the selection while focus is in the selection bar", async () => {
+    await inExtlib()
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("b.jar"), ctrl)
+    const clear = screen.getByRole("button", { name: "Clear" })
+    clear.focus()
+    fireEvent.keyDown(clear, { key: "Escape" })
+    expect(bar()).toBeNull()
   })
 
   it("Download .zip checks first; a 413 shows the message and does not navigate", async () => {

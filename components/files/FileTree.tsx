@@ -45,7 +45,7 @@ export function FileTree({ state, selected, dragOver, selection, onRowClick, onM
   if (rows.length === 0) return <p className={`px-3 py-2 ${muted}`}>โฟลเดอร์ว่าง</p>
 
   return (
-    <div role="tree" aria-multiselectable="true" aria-label="Files" className="py-1 text-sm">
+    <div className="py-1 text-sm">
       {rows.map((row) => {
         const { entry, path, depth } = row
         const isDir = entry.type === "dir"
@@ -56,12 +56,12 @@ export function FileTree({ state, selected, dragOver, selection, onRowClick, onM
           ? "bg-blue-100 dark:bg-blue-900/40 ring-1 ring-inset ring-blue-500"
           : picked ? "bg-blue-100 dark:bg-blue-900/50" : selected === path ? "bg-blue-50 dark:bg-blue-950/40" : "hover:bg-gray-100 dark:hover:bg-neutral-700"
         return (
-          <div key={path} role="none">
-            <div data-row={path} role="treeitem" aria-selected={picked} aria-level={depth + 1} style={{ paddingLeft: pad(depth) }}
+          <div key={path}>
+            <div data-row={path} style={{ paddingLeft: pad(depth) }}
               onContextMenu={(e) => { e.preventDefault(); onMenu(row, e.clientX, e.clientY) }}
               {...(isDir ? dropProps(path) : {})}
               className={`group flex select-none items-center pr-2 ${highlight}`}>
-              <button type="button" data-row-main onClick={(e) => onRowClick(row, { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey })} aria-expanded={isDir ? open : undefined}
+              <button type="button" data-row-main aria-current={picked ? "true" : undefined} onClick={(e) => onRowClick(row, { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey })} aria-expanded={isDir ? open : undefined}
                 className={`flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left ${selected === path ? "font-medium text-blue-700 dark:text-blue-300" : "text-gray-700 dark:text-neutral-200"}`}>
                 <span className="w-3 shrink-0 text-xs text-gray-400 dark:text-neutral-500" aria-hidden="true">{isDir ? (open ? "▾" : "▸") : ""}</span>
                 {isDir ? <FolderIcon open={open} /> : <FileIcon name={entry.name} />}
