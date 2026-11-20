@@ -23,25 +23,25 @@ export async function GET(req: Request, ctx: Ctx) {
     const plan = await planZip(name, url.searchParams.get("dir") ?? "", url.searchParams.getAll("name"))
     if (url.searchParams.get("check") === "1") return NextResponse.json({ files: plan.files, bytes: plan.bytes })
 
-    assertFree() // re-check: other requests may have taken a slot while this plan was being built
-    slots.__midhubZipStreams = active() + 1
-    let released = false
-    const release = () => { if (!released) { released = true; slots.__midhubZipStreams = active() - 1 } }
-    let reader: ReadableStreamDefaultReader<Uint8Array>
-    try {
-      reader = zipPlanStream(name, plan).getReader()
-    } catch (e) {
-      release()
-      throw e
-    }
+    // The slot is taken lazily on the first pull and released exactly once (done, error or cancel), so a Response
+    // that is never read (HEAD, aborted request) can't leak it.
+    let held = false
+    const release = () => { if (held) { held = false; slots.__midhubZipStreams = active() - 1 } }
+    const reader = zipPlanStream(name, plan).getReader()
     const body = new ReadableStream<Uint8Array>(
       {
         async pull(controller) {
           try {
+            if (!held) {
+              assertFree()
+              held = true
+              slots.__midhubZipStreams = active() + 1
+            }
             const r = await reader.read()
             if (r.done) { release(); controller.close() } else controller.enqueue(r.value)
           } catch (e) {
             release()
+            await reader.cancel().catch(() => {})
             controller.error(e)
           }
         },
@@ -61,4 +61,9 @@ export async function GET(req: Request, ctx: Ctx) {
   } catch (e) {
     return handleRouteError(e)
   }
+}
+
+/** Next maps HEAD to GET and never reads the body; answer without planning or taking a slot. */
+export async function HEAD(): Promise<Response> {
+  return new Response(null, { status: 405, headers: { Allow: "GET" } })
 }

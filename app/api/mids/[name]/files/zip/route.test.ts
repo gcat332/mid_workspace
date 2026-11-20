@@ -10,7 +10,7 @@ vi.mock("@/lib/db/client", () => ({
 }))
 vi.mock("@/lib/mids/status", () => ({ readServiceStatus: async () => ({ state: "inactive", pid: null, memoryBytes: null, since: null }), runSystemctl: async () => ({ code: 0, stdout: "" }) }))
 
-import { GET } from "./route"
+import { GET, HEAD } from "./route"
 
 const ctx = { params: Promise.resolve({ name: "m1" }) }
 const get = (q: string) => GET(new Request(`http://x/api/mids/m1/files/zip?${q}`), ctx)
@@ -51,17 +51,54 @@ it("streams application/zip with an encoded Thai filename", async () => {
 it("a third concurrent stream gets 429; slots are freed on cancel and on finish", async () => {
   const a = await get("dir=work&name=big.bin")
   const b = await get("dir=work&name=big.bin")
+  const ra = a.body!.getReader()
+  const rb = b.body!.getReader()
+  await ra.read(); await rb.read() // slots are taken on first read
   expect(slotCount()).toBe(2)
   const c = await get("dir=work&name=big.bin")
   expect(c.status).toBe(429)
   expect((await c.json()).code).toBe("busy")
   expect((await get("dir=work&name=big.bin&check=1")).status).toBe(429)
-  await a.body!.cancel()
+  await ra.cancel()
   expect(slotCount()).toBe(1)
-  await b.arrayBuffer()
+  while (!(await rb.read()).done);
   expect(slotCount()).toBe(0)
   expect((await get("dir=work&name=big.bin")).status).toBe(200)
-  await (await get("dir=work&name=big.bin")).body!.cancel()
+})
+
+it("HEAD and a never-read GET Response leave no slot taken", async () => {
+  for (let i = 0; i < 3; i++) {
+    expect((await HEAD()).status).toBe(405)
+    await get("dir=work&name=big.bin") // dropped unread
+  }
+  expect(slotCount()).toBe(0)
+  expect((await get("dir=work&name=big.bin")).status).toBe(200)
+})
+
+it.skipIf(process.getuid?.() === 0)("the slot is released after an error inside pull", async () => {
+  const f = path.join(root, "mids/m1/work/sec.bin")
+  fs.writeFileSync(f, "x")
+  fs.chmodSync(f, 0o000) // unreadable: must error the stream, not vanish from the archive
+  const res = await get("dir=work&name=big.bin&name=sec.bin")
+  const reader = res.body!.getReader()
+  await reader.read()
+  expect(slotCount()).toBe(1)
+  await expect((async () => { for (;;) { const r = await reader.read(); if (r.done) return } })()).rejects.toBeDefined()
+  expect(slotCount()).toBe(0)
+})
+
+it("selected config.xml, symlink or temp file is an error, not an empty zip; duplicates and dir=. are tolerated", async () => {
+  const m = path.join(root, "mids/m1/work")
+  fs.writeFileSync(path.join(m, "config.xml"), "x")
+  fs.mkdirSync(path.join(root, "mids/m1/agent"))
+  fs.writeFileSync(path.join(root, "mids/m1/agent/config.xml"), "x")
+  fs.symlinkSync("/etc", path.join(m, "lnk"))
+  fs.writeFileSync(path.join(m, ".midhub-upload-0123456789abcdef.part"), "")
+  expect((await get("dir=agent&name=config.xml")).status).toBe(403)
+  expect((await get("dir=work&name=lnk")).status).toBe(404)
+  expect((await get("dir=work&name=.midhub-upload-0123456789abcdef.part")).status).toBe(404)
+  expect(await (await get("dir=work&name=big.bin&name=big.bin&check=1")).json()).toEqual({ files: 1, bytes: 8 * 1024 * 1024 })
+  expect((await (await get("dir=.&check=1")).json()).files).toBe(3)
 })
 
 it("errors: too_large message, not_found, invalid_filename; no slot leaked", async () => {

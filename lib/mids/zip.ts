@@ -19,12 +19,13 @@ export type ZipPlan = {
   entries: { rel: string; zipName: string; dir: boolean; size: number; mtime: Date }[]
 }
 
+const TOO_MANY_MSG = "โฟลเดอร์ที่เลือกมีไฟล์และโฟลเดอร์ย่อยมากเกินไป (เกิน 20,000 รายการ) เลือกโฟลเดอร์ย่อยหรือไฟล์น้อยลงแล้วลองใหม่"
 const tooLarge = () => new MidError("too_large", 413, TOO_LARGE_MSG)
 
 export function planZip(name: string, dir: string, names: string[]): Promise<ZipPlan> {
   return mapFsErrors(async () => {
     const c = await ctxFor(name)
-    const dirRel = dir.replace(/\\/g, "/").split("/").filter(Boolean).join("/")
+    const dirRel = dir.replace(/\\/g, "/").split("/").filter((x) => x !== "" && x !== ".").join("/")
     const dirAbs = await resolveMidPath(name, dirRel)
     const check = readCheck(c)
     const entries: ZipPlan["entries"] = []
@@ -32,7 +33,7 @@ export function planZip(name: string, dir: string, names: string[]): Promise<Zip
     let bytes = 0
     const push = (e: ZipPlan["entries"][number]) => {
       if (e.dir) {
-        if (entries.length >= MAX_ENTRIES) throw tooLarge()
+        if (entries.length >= MAX_ENTRIES) throw new MidError("too_large", 413, TOO_MANY_MSG)
       } else {
         files++
         bytes += e.size
@@ -50,7 +51,11 @@ export function planZip(name: string, dir: string, names: string[]): Promise<Zip
         if (strict) throw new MidError("not_found")
         return
       }
-      if (st.isSymbolicLink() || UPLOAD_TMP_RE.test(n) || c.configXml.includes(abs)) return
+      if (strict && c.configXml.includes(abs)) throw new MidError("use_config_tab")
+      if (st.isSymbolicLink() || UPLOAD_TMP_RE.test(n) || c.configXml.includes(abs)) {
+        if (strict) throw new MidError("not_found") // an explicitly selected entry must not silently vanish
+        return
+      }
       if (st.isDirectory()) {
         push({ rel, zipName: `${zipPrefix}${n}/`, dir: true, size: 0, mtime: st.mtime })
         const sub = await openDirIn(d, n)
@@ -75,19 +80,22 @@ export function planZip(name: string, dir: string, names: string[]): Promise<Zip
         push({ rel: dirRel, zipName: `${base}/`, dir: true, size: 0, mtime: st.mtime })
         await walk(d, dirAbs, dirRel, `${base}/`)
       } else {
-        for (const n of names) plainName(n)
-        for (const n of names) await addChild(d, dirAbs, dirRel, n, "", true)
+        const uniq = [...new Set(names)]
+        for (const n of uniq) plainName(n)
+        for (const n of uniq) await addChild(d, dirAbs, dirRel, n, "", true)
       }
     } finally {
       await d.close()
     }
-    const filename = names.length === 1 ? `${names[0]}.zip` : `${base}.zip`
+    const filename = uniqNames(names).length === 1 ? `${uniqNames(names)[0]}.zip` : `${base}.zip`
     return { files, bytes, filename, entries }
   })
 }
 
+const uniqNames = (names: string[]): string[] => [...new Set(names)]
+
 const SKIP_CODES = new Set(["not_found", "path_outside", "invalid_request", "use_config_tab"])
-const SKIP_ERRNO = new Set(["ENOENT", "ENOTDIR", "ELOOP", "ENXIO", "EACCES"])
+const SKIP_ERRNO = new Set(["ENOENT", "ENOTDIR", "ELOOP", "ENXIO"])
 
 /** Streams the planned entries: each file is re-opened without following links and cut at its planned size. */
 export function zipPlanStream(name: string, plan: ZipPlan): ReadableStream<Uint8Array> {
@@ -99,9 +107,9 @@ export function zipPlanStream(name: string, plan: ZipPlan): ReadableStream<Uint8
       yield {
         name: e.zipName, mtime: e.mtime,
         open: async () => {
+          const c = await ctx // a failed MID lookup errors the stream instead of skipping every file
           let h: FileHandle
           try {
-            const c = await ctx
             // Resolve the parent only: the last component is opened O_NOFOLLOW, so a swapped-in symlink fails (ELOOP).
             const parentRel = path.posix.dirname(e.rel)
             const parent = await resolveMidPath(name, parentRel === "." ? "" : parentRel)
