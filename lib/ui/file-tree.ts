@@ -18,6 +18,8 @@ export type TreeRow = { path: string; depth: number; entry: Entry }
 
 export const joinPath = (dir: string, name: string) => (dir ? `${dir}/${name}` : name)
 
+export const parentOf = (p: string) => p.split("/").slice(0, -1).join("/")
+
 const byDirThenName = (a: Entry, b: Entry) =>
   a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : 1
 
@@ -42,4 +44,10 @@ export function toggle(state: TreeState, path: string): TreeState {
   if (expanded.has(path)) expanded.delete(path)
   else expanded.add(path)
   return { ...state, expanded }
+}
+
+/** Paths of the loaded children of `parent`, in display order (directories first, then name); [] while not loaded. */
+export function siblingsOf(state: TreeState, parent: string): string[] {
+  const list = state.children[parent]
+  return Array.isArray(list) ? [...list].sort(byDirThenName).map((e) => joinPath(parent, e.name)) : []
 }

@@ -10,7 +10,7 @@ import { FileEditorModal } from "./files/FileEditorModal"
 import { FileTree } from "./files/FileTree"
 import { API_BASE, apiFetch, apiUpload } from "@/lib/ui/api"
 import { cardCls, ghostBtnCls, inputCls, labelCls } from "@/lib/ui/classes"
-import { joinPath as join, toggle, type Entry, type TreeRow, type TreeState } from "@/lib/ui/file-tree"
+import { joinPath as join, parentOf, toggle, type Entry, type TreeRow, type TreeState } from "@/lib/ui/file-tree"
 
 type Open = { path: string; content: string; hash: string; draft: string; readOnly: boolean; config: boolean }
 type NameDialog = { kind: "rename"; row: TreeRow } | { kind: "mkdir" } | { kind: "newFile" }
@@ -23,7 +23,6 @@ const EXTLIB = "agent/extlib"
 const BAD_NAME: ApiError = { code: "invalid_filename", message: "ชื่อไฟล์/โฟลเดอร์ใช้ / \\ . .. หรือว่างไม่ได้ (ยาวไม่เกิน 255 ไบต์) แก้ชื่อแล้วลองใหม่" }
 /** Same rule as the server (lib/mids/files.ts plainName), checked before sending. */
 const validName = (n: string) => n !== "" && n !== "." && n !== ".." && !/[\\/\0]/.test(n) && new TextEncoder().encode(n).length <= 255
-const parentOf = (p: string) => p.split("/").slice(0, -1).join("/")
 const under = (p: string, dir: string) => p === dir || p.startsWith(`${dir}/`)
 /** dragOver value for "anywhere in the card": the drop goes to the upload target. */
 const CARD = "\0card"

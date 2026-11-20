@@ -32,3 +32,18 @@ describe("file tree", () => {
     expect(toggle(t, "a").expanded.has("a")).toBe(true)
   })
 })
+
+describe("parentOf / siblingsOf", () => {
+  it("parentOf", async () => {
+    const { parentOf } = await import("./file-tree")
+    expect(parentOf("a/b/c")).toBe("a/b")
+    expect(parentOf("a")).toBe("")
+  })
+  it("siblingsOf lists display order, [] when not loaded", async () => {
+    const { siblingsOf } = await import("./file-tree")
+    const s: TreeState = { children: { "": [e("z", "file"), e("b", "dir"), e("a", "file")], l: "loading" }, expanded: new Set() }
+    expect(siblingsOf(s, "")).toEqual(["b", "a", "z"])
+    expect(siblingsOf(s, "l")).toEqual([])
+    expect(siblingsOf(s, "nope")).toEqual([])
+  })
+})
