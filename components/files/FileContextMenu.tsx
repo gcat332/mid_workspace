@@ -17,6 +17,8 @@ type Props = {
   onDelete: () => void
   /** Zip this folder (offered on folder rows only). */
   onZip: () => void
+  /** Copy this row's MID-relative path (offered on every row). */
+  onCopyPath: () => void
   onOpenConfig: () => void
   onClose: () => void
 }
@@ -30,7 +32,7 @@ const danger = `${item} text-red-600 hover:bg-red-50 focus:bg-red-50 dark:text-r
  * opened or downloaded, `locked` entries cannot be renamed or deleted, `config` files link to the Configuration tab.
  * Closes on Esc, an outside press, scroll or resize.
  */
-export function FileContextMenu({ x, y, entry, downloadHref, writeDisabled, onOpen, onRename, onDelete, onZip, onOpenConfig, onClose }: Props) {
+export function FileContextMenu({ x, y, entry, downloadHref, writeDisabled, onOpen, onRename, onDelete, onZip, onCopyPath, onOpenConfig, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const closeRef = useRef(onClose)
   useEffect(() => { closeRef.current = onClose })
@@ -83,9 +85,9 @@ export function FileContextMenu({ x, y, entry, downloadHref, writeDisabled, onOp
       {readable && <a role="menuitem" className={normal} href={downloadHref} onClick={onClose}>Download</a>}
       {isDir && !entry.symlink && <button type="button" role="menuitem" title={ZIP_NOTE} className={normal} onClick={act(onZip)}>Download .zip</button>}
       {entry.config && <button type="button" role="menuitem" className={normal} onClick={act(onOpenConfig)}>Edit in Configuration</button>}
+      <button type="button" role="menuitem" className={normal} onClick={act(onCopyPath)}>Copy Path</button>
       {!entry.locked && <button type="button" role="menuitem" disabled={writeDisabled} className={normal} onClick={act(onRename)}>Rename</button>}
       {!entry.locked && <button type="button" role="menuitem" disabled={writeDisabled} className={danger} onClick={act(onDelete)}>Delete</button>}
-      {!readable && !isDir && !entry.config && entry.locked && <p className="px-3 py-1.5 text-xs text-gray-400 dark:text-neutral-500">ไม่มีคำสั่งสำหรับรายการนี้</p>}
     </div>,
     document.body,
   )

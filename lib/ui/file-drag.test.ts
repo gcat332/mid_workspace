@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { canMoveTo, createBlockReason, downloadUrlData, zipFilename, zipUrl } from "./file-drag"
+import { canMoveTo, createBlockReason, downloadUrlData, uploadBlockReason, zipFilename, zipUrl } from "./file-drag"
 import type { Entry } from "./file-tree"
 
 const ent = (o: Partial<Entry> = {}): Entry =>
@@ -69,5 +69,21 @@ describe("createBlockReason", () => {
     expect(createBlockReason("agent/conf")).toContain("agent/conf")
     expect(createBlockReason("agent/security/deep")).toContain("agent/security/deep")
     for (const d of ["", "work", "agent", "agent/logs", "agent/confx"]) expect(createBlockReason(d)).toBeNull()
+  })
+})
+
+describe("uploadBlockReason", () => {
+  const f = (name: string, type: "file" | "dir" = "file") => ({ name, type, size: 1, mtime: "", readOnly: false, symlink: false, locked: false, secret: false, config: false }) as never
+  it("allows anything outside level-1 folders", () => {
+    expect(uploadBlockReason("work", ["new.txt"], [])).toBeNull()
+  })
+  it("refuses only names that are not an existing file in a level-1 folder", () => {
+    const r = uploadBlockReason("agent/security", ["agent_keystore", "new.crt", "sub"], [f("agent_keystore"), f("sub", "dir")])
+    expect(r?.names).toEqual(["new.crt", "sub"])
+    expect(r?.message).toContain("new.crt")
+    expect(uploadBlockReason("agent/security", ["agent_keystore"], [f("agent_keystore")])).toBeNull()
+  })
+  it("refuses everything when the listing is unknown", () => {
+    expect(uploadBlockReason("agent/conf", ["a"], null)?.names).toEqual(["a"])
   })
 })

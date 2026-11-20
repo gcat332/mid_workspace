@@ -245,12 +245,12 @@ describe("FilesTab row menu", () => {
     const { container, onOpenConfig } = await setup()
     await expandAgent()
     fireEvent.contextMenu(container.querySelector('[data-row="agent/secret.key"]')!)
-    expect(menuItems()).toEqual(["Rename", "Delete"])
+    expect(menuItems()).toEqual(["Copy Path", "Rename", "Delete"])
     fireEvent.keyDown(document, { key: "Escape" })
     expect(screen.queryByRole("menu")).toBeNull()
 
     fireEvent.contextMenu(container.querySelector('[data-row="agent/config.xml"]')!)
-    expect(menuItems()).toEqual(["Open", "Download", "Edit in Configuration"])
+    expect(menuItems()).toEqual(["Open", "Download", "Edit in Configuration", "Copy Path"])
     fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Edit in Configuration" }))
     expect(onOpenConfig).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole("menu")).toBeNull()
@@ -264,7 +264,7 @@ describe("FilesTab row menu", () => {
   it("the ⋯ button opens the same menu; an outside press closes it", async () => {
     await setup()
     fireEvent.click(screen.getByRole("button", { name: "More Actions: notes.txt" }))
-    expect(menuItems()).toEqual(["Open", "Download", "Rename", "Delete"])
+    expect(menuItems()).toEqual(["Open", "Download", "Copy Path", "Rename", "Delete"])
     expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Download" }).getAttribute("href"))
       .toBe("/midhub/api/mids/m1/files/download?path=notes.txt")
     fireEvent.mouseDown(document.body)
@@ -393,6 +393,126 @@ describe("FilesTab create and upload", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("กำลังอัปเกรด MID")
     expect(FakeXHR.all).toHaveLength(0)
   })
+
+  describe("paste to upload", () => {
+    const paste = (el: Element, data: Record<string, unknown>) => fireEvent.paste(el, { clipboardData: data })
+    const entryItem = (f: File, isDirectory: boolean) => ({ kind: "file", getAsFile: () => f, webkitGetAsEntry: () => ({ isDirectory }) })
+
+    it("pasted files upload to the current target (body or a row has focus)", async () => {
+      await setup()
+      await expandAgent()
+      fireEvent.click(row("extlib"))
+      await screen.findByRole("button", { name: "a.jar" })
+      paste(document.body, { files: [file("p1.jar")], types: ["Files"] })
+      await waitFor(() => expect(FakeXHR.all).toHaveLength(1))
+      expect(FakeXHR.all[0].body?.get("dir")).toBe("agent/extlib")
+      expect((FakeXHR.all[0].body?.get("file") as File).name).toBe("p1.jar")
+      FakeXHR.all[0].respond(200, "{}")
+      await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull())
+      paste(row("a.jar"), { files: [file("p2.jar")], types: ["Files"] })
+      await waitFor(() => expect(FakeXHR.all).toHaveLength(2))
+    })
+
+    it("a pasted file asks before overwriting and a text-only paste does nothing", async () => {
+      await setup()
+      paste(document.body, { files: [], types: ["text/plain"], getData: () => "hi" })
+      await new Promise((r) => setTimeout(r, 20))
+      expect(FakeXHR.all).toHaveLength(0)
+      expect(screen.queryByRole("alert")).toBeNull()
+      paste(document.body, { files: [file("notes.txt")], types: ["Files"] })
+      await screen.findByRole("dialog", { name: "Overwrite notes.txt?" })
+    })
+
+    it("pasting while the editor, the name dialog or an input has focus uploads nothing", async () => {
+      await setup()
+      fireEvent.click(screen.getByRole("button", { name: "New File" }))
+      const dlg = await screen.findByRole("dialog", { name: "New File" })
+      paste(within(dlg).getByRole("textbox", { name: "Name" }), { files: [file("x.jar")], types: ["Files"] })
+      paste(document.body, { files: [file("x.jar")], types: ["Files"] })
+      fireEvent.click(within(dlg).getByRole("button", { name: "Cancel" }))
+      const { editor } = await openNotes()
+      paste(editor, { files: [file("x.jar")], types: ["Files"] })
+      await new Promise((r) => setTimeout(r, 20))
+      expect(FakeXHR.all).toHaveLength(0)
+      expect(screen.queryByRole("dialog", { name: /Overwrite/ })).toBeNull()
+    })
+
+    it("a pasted folder is skipped with a note; files beside it still upload", async () => {
+      await setup()
+      const dir = file("somefolder")
+      const ok = file("a.txt2")
+      paste(document.body, { files: [dir, ok], items: [entryItem(dir, true), entryItem(ok, false)], types: ["Files"] })
+      await waitFor(() => expect(FakeXHR.all).toHaveLength(1))
+      expect((FakeXHR.all[0].body?.get("file") as File).name).toBe("a.txt2")
+      expect(screen.getByRole("status").textContent).toContain("โฟลเดอร์")
+    })
+
+    it("only a folder pasted: note, nothing sent", async () => {
+      await setup()
+      const dir = file("somefolder")
+      paste(document.body, { files: [dir], items: [entryItem(dir, true)], types: ["Files"] })
+      expect((await screen.findByRole("status")).textContent).toContain("โฟลเดอร์")
+      expect(FakeXHR.all).toHaveLength(0)
+    })
+
+    it("paste is refused while a lifecycle job runs", async () => {
+      await setup({ busyReason: "กำลังอัปเกรด MID" })
+      paste(document.body, { files: [file("x.jar")], types: ["Files"] })
+      expect((await screen.findByRole("alert")).textContent).toContain("กำลังอัปเกรด MID")
+      expect(FakeXHR.all).toHaveLength(0)
+    })
+  })
+
+  describe("upload inside a level-1 folder", () => {
+    async function inSecurity() {
+      FS.agent.readOnly = false
+      FS.agent.entries.push(E("security", "dir"))
+      FS["agent/security"] = { entries: [E("agent_keystore", "file"), E("sub", "dir")], readOnly: false }
+      await setup()
+      await expandAgent()
+      fireEvent.click(row("security"))
+      await screen.findByRole("button", { name: "agent_keystore" })
+    }
+
+    it("Upload is enabled, New File and New Folder are not", async () => {
+      await inSecurity()
+      expect((screen.getByRole("button", { name: "Upload" }) as HTMLButtonElement).disabled).toBe(false)
+      expect((screen.getByRole("button", { name: "New File" }) as HTMLButtonElement).disabled).toBe(true)
+      expect((screen.getByRole("button", { name: "New Folder" }) as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it("an existing name asks to overwrite and uploads", async () => {
+      await inSecurity()
+      drop(card(), [file("agent_keystore")])
+      const confirm = await screen.findByRole("dialog", { name: "Overwrite agent_keystore?" })
+      fireEvent.click(within(confirm).getByRole("button", { name: "Overwrite" }))
+      await waitFor(() => expect(FakeXHR.all).toHaveLength(1))
+      expect(FakeXHR.all[0].body?.get("dir")).toBe("agent/security")
+    })
+
+    it("a new name is refused with the reason and not sent; a folder name is not a file to replace", async () => {
+      await inSecurity()
+      drop(card(), [file("new.crt"), file("sub")])
+      const alert = await screen.findByRole("alert")
+      expect(alert.textContent).toContain("new.crt")
+      expect(alert.textContent).toContain("sub")
+      await new Promise((r) => setTimeout(r, 20))
+      expect(FakeXHR.all).toHaveLength(0)
+    })
+
+    it("a mixed batch uploads the existing name and reports the refused one", async () => {
+      await inSecurity()
+      drop(card(), [file("new.crt"), file("agent_keystore")])
+      const confirm = await screen.findByRole("dialog", { name: "Overwrite agent_keystore?" })
+      fireEvent.click(within(confirm).getByRole("button", { name: "Overwrite" }))
+      await waitFor(() => expect(FakeXHR.all).toHaveLength(1))
+      expect((FakeXHR.all[0].body?.get("file") as File).name).toBe("agent_keystore")
+      FakeXHR.all[0].respond(200, "{}")
+      expect((await screen.findByRole("alert")).textContent).toContain("new.crt")
+      expect(FakeXHR.all).toHaveLength(1)
+    })
+  })
+
 })
 
 describe("FilesTab multi-select", () => {
@@ -935,7 +1055,7 @@ describe("FilesTab drag to move and drag out", () => {
     expect(X.n).toBe(1)
   })
 
-  it("Upload, New File and New Folder are off inside a level-1 folder, with the reason; a desktop drop shows it instead of uploading", async () => {
+  it("New File and New Folder are off inside a level-1 folder (Upload stays on), with the reason; a drop of a new name shows it instead of uploading", async () => {
     class X { upload = { onprogress: null }; onload: (() => void) | null = null; onerror = null; onabort = null; ontimeout = null; status = 200; responseText = "{}"; static n = 0
       open() {} send() { X.n++; setTimeout(() => this.onload?.(), 0) } getResponseHeader() { return "application/json" } }
     vi.stubGlobal("XMLHttpRequest", X)
@@ -946,9 +1066,11 @@ describe("FilesTab drag to move and drag out", () => {
     await expandAgent()
     fireEvent.click(row("conf"))
     await screen.findByRole("button", { name: "wrapper.conf" })
-    for (const n of ["Upload", "New File", "New Folder"]) expect((screen.getByRole("button", { name: n }) as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByRole("button", { name: "Upload" }).getAttribute("aria-describedby")).toBe("prot-hint")
+    for (const n of ["New File", "New Folder"]) expect((screen.getByRole("button", { name: n }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole("button", { name: "Upload" }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByRole("button", { name: "New File" }).getAttribute("aria-describedby")).toBe("prot-hint")
     expect(document.getElementById("prot-hint")!.textContent).toContain("agent/conf")
+    expect(document.getElementById("prot-hint")!.textContent).toContain("อัปโหลด")
     const files = dt([new File(["abc"], "up.jar")], ["Files"])
     fireEvent.dragOver(rowEl(container, "agent/conf"), { dataTransfer: files })
     fireEvent.drop(rowEl(container, "agent/conf"), { dataTransfer: files })
@@ -962,6 +1084,103 @@ describe("FilesTab drag to move and drag out", () => {
 
   it("the footer hint describes upload, move and drag-out", async () => {
     await setup()
-    expect(screen.getByText("ลากไฟล์จากเครื่องมาวางเพื่ออัปโหลด (สูงสุด 50 MB) · ลากไปวางบนโฟลเดอร์เพื่อย้าย · ลากออกไปวางบน Desktop เพื่อดาวน์โหลด (Chrome/Edge)")).toBeTruthy()
+    expect(screen.getByText("ลากไฟล์จากเครื่องมาวางเพื่ออัปโหลด (สูงสุด 50 MB) · ลากไปวางบนโฟลเดอร์เพื่อย้าย · ลากออกไปวางบน Desktop เพื่อดาวน์โหลด (Chrome/Edge) · Cmd/Ctrl+V เพื่ออัปโหลดไฟล์ที่คัดลอกจากเครื่อง")).toBeTruthy()
+  })
+})
+
+describe("FilesTab copy path", () => {
+  const ctrl = { ctrlKey: true }
+  const rowEl = (container: HTMLElement, path: string) => container.querySelector(`[data-row="${path}"]`) as HTMLElement
+  const rowBtn = (container: HTMLElement, path: string) => rowEl(container, path).querySelector("button") as HTMLButtonElement
+  const writeText = vi.fn()
+  beforeEach(() => {
+    writeText.mockReset().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+  })
+  afterEach(() => { delete (navigator as unknown as Record<string, unknown>).clipboard; vi.restoreAllMocks() })
+  async function inExtlib() {
+    FS["agent/extlib"].entries = ["a.jar", "b.jar", "c.jar"].map((n) => E(n, "file"))
+    const r = await setup()
+    await expandAgent()
+    fireEvent.click(row("extlib"))
+    await screen.findByRole("button", { name: "a.jar" })
+    return r
+  }
+
+  it("Ctrl+C copies the selected paths in display order, one per line, and says so", async () => {
+    const { container } = await inExtlib()
+    fireEvent.click(row("c.jar"), ctrl)
+    fireEvent.click(row("a.jar"), ctrl)
+    rowBtn(container, "agent/extlib/a.jar").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "c", ctrlKey: true })
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("agent/extlib/a.jar\nagent/extlib/c.jar"))
+    expect((await screen.findByRole("status")).textContent).toBe("คัดลอก path แล้ว (2 รายการ)")
+  })
+
+  it("Cmd+C with no selection copies the focused row", async () => {
+    const { container } = await inExtlib()
+    fireEvent.click(row("b.jar"), ctrl)
+    fireEvent.click(row("b.jar"), ctrl)
+    rowBtn(container, "agent/extlib/b.jar").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "c", metaKey: true })
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("agent/extlib/b.jar"))
+  })
+
+  it("leaves normal copy alone while text is selected in the page", async () => {
+    const { container } = await inExtlib()
+    vi.spyOn(window, "getSelection").mockReturnValue({ toString: () => "some text" } as Selection)
+    rowBtn(container, "agent/extlib/a.jar").focus()
+    const ev = new KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true, cancelable: true })
+    document.activeElement!.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(false)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(writeText).not.toHaveBeenCalled()
+  })
+
+  it("does nothing while the name dialog is open", async () => {
+    const { container } = await inExtlib()
+    rowBtn(container, "agent/extlib/a.jar").focus()
+    fireEvent.click(screen.getByRole("button", { name: "New File" }))
+    await screen.findByRole("dialog", { name: "New File" })
+    fireEvent.keyDown(rowBtn(container, "agent/extlib/a.jar"), { key: "c", ctrlKey: true })
+    expect(writeText).not.toHaveBeenCalled()
+  })
+
+  it("shows a Thai error when the clipboard refuses or is missing", async () => {
+    const { container } = await inExtlib()
+    writeText.mockRejectedValue(new Error("denied"))
+    rowBtn(container, "agent/extlib/a.jar").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "c", ctrlKey: true })
+    expect((await screen.findByRole("alert")).textContent).toContain("คัดลอกไม่สำเร็จ")
+    delete (navigator as unknown as Record<string, unknown>).clipboard
+    fireEvent.keyDown(document.activeElement!, { key: "c", ctrlKey: true })
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("คัดลอกไม่สำเร็จ"))
+    expect(screen.queryByRole("status")).toBeNull()
+  })
+
+  it("every row menu has Copy Path, even a secret locked row, copying that row only", async () => {
+    const { container } = await setup()
+    await expandAgent()
+    fireEvent.contextMenu(container.querySelector('[data-row="agent/secret.key"]')!)
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Copy Path" }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("agent/secret.key"))
+    expect((await screen.findByRole("status")).textContent).toBe("คัดลอก path แล้ว (1 รายการ)")
+    fireEvent.click(screen.getByRole("button", { name: "More Actions: config.xml" }))
+    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Copy Path" })).toBeTruthy()
+  })
+})
+
+describe("FilesTab delete block uses the rows' own folder", () => {
+  it("Del on a selection in a writable folder works while the focused row sits in a read-only folder", async () => {
+    FS["agent/extlib"].entries = ["a.jar", "b.jar"].map((n) => E(n, "file"))
+    const { container } = await setup()
+    await expandAgent()
+    fireEvent.click(row("extlib"))
+    await screen.findByRole("button", { name: "a.jar" })
+    fireEvent.click(row("a.jar"), { ctrlKey: true })
+    fireEvent.click(row("b.jar"), { ctrlKey: true })
+    ;(container.querySelector('[data-row="agent/x.xml"] button') as HTMLButtonElement).focus()
+    fireEvent.keyDown(document.activeElement!, { key: "Delete" })
+    await screen.findByRole("dialog", { name: "Delete 2 Items?" })
   })
 })

@@ -10,10 +10,11 @@ import { FileEditorModal } from "./files/FileEditorModal"
 import { FileTree } from "./files/FileTree"
 import { MoveConflictDialog } from "./files/MoveConflictDialog"
 import { SelectionBar } from "./files/SelectionBar"
+import { useClipboard } from "./files/useClipboard"
 import { useMoveItems } from "./files/useMoveItems"
 import { API_BASE, apiFetch, apiUpload } from "@/lib/ui/api"
 import { cardCls, ghostBtnCls, inputCls, labelCls } from "@/lib/ui/classes"
-import { canMoveTo, createBlockReason, downloadUrlData, INTERNAL_MIME, zipFilename, zipIncludes, zipUrl } from "@/lib/ui/file-drag"
+import { canMoveTo, createBlockReason, uploadBlockReason, downloadUrlData, INTERNAL_MIME, zipFilename, zipIncludes, zipUrl } from "@/lib/ui/file-drag"
 import { joinPath as join, parentOf, siblingsOf, toggle, type Entry, type TreeRow, type TreeState } from "@/lib/ui/file-tree"
 import { clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, type Selection } from "@/lib/ui/selection"
 
@@ -86,6 +87,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   const [note, setNote] = useState<string | null>(null)
   const [nameDraft, setNameDraft] = useState("")
   const fileInput = useRef<HTMLInputElement>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
 
   const setChildren = (dir: string, v: TreeState["children"][string]) =>
     setTree((t) => ({ ...t, children: { ...t.children, [dir]: v } }))
@@ -219,6 +221,11 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
     openPath: open?.path ?? null,
     onOpenMoved: (to) => { closeEditor(); setNote(`ไฟล์ที่เปิดอยู่ถูกย้ายไปที่ ${to}`) },
   })
+  const clip = useClipboard({
+    cardRef, setNote, setErr,
+    canPaste: () => !open && !nameDialog && deleting.length === 0 && !menu && !confirmClose && !overwrite && mover.conflict === null,
+    upload: (fs, note) => void uploadFiles(target, fs, note),
+  })
   /** Leave the editor; with unsaved changes the confirm asks first. `then` runs once it has closed. */
   function leaveEditor(then: "close" | "config") {
     if (open && open.draft !== open.content) { setConfirmClose(then); return }
@@ -235,17 +242,21 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   }
 
   /** Upload one file at a time (the server takes one), each after the size check and overwrite confirm. */
-  async function uploadFiles(dir: string, files: File[]) {
+  async function uploadFiles(dir: string, files: File[], note?: string) {
     if (files.length === 0 || busy) return
     if (busyReason) { setErr({ message: busyReason }); return }
-    const blocked = createBlockReason(dir)
-    if (blocked) { setErr({ code: "protected", message: blocked }); return }
-    setErr(null); setNote(null); setBusy(true)
+    if (roDirs[dir]) { setErr({ code: "protected", message: `อัปโหลดไม่ได้: ${dir || midName} เป็นโฟลเดอร์โปรแกรมของ MID (อ่านอย่างเดียว) อัปโหลดได้เฉพาะที่ ${EXTLIB}` }); return }
+    setErr(null); setNote(note ?? null); setBusy(true)
     let failed = false
     const fail = (e: ApiError) => { if (!failed) setErr(e); failed = true }
     try {
       const listing = Array.isArray(tree.children[dir]) ? (tree.children[dir] as Entry[]) : await load(dir)
+      // A level-1 folder takes only replacements of files that already exist there (server: assertCanCreate).
+      const refused = uploadBlockReason(dir, files.map((f) => f.name), listing)
+      if (refused) fail({ code: "protected", message: refused.message })
+      const skip = new Set(refused?.names)
       for (const [i, f] of files.entries()) {
+        if (skip.has(f.name)) continue
         if (f.size > MAX_UPLOAD) { fail(tooLarge(f.name)); continue }
         if (listing?.some((x) => x.name === f.name && x.type === "file") && !(await askOverwrite(f))) continue
         setUpload({ name: f.name, index: i + 1, count: files.length, percent: 0 })
@@ -383,12 +394,20 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
       e.preventDefault()
       setSelection(selectAll(parentOf(path), siblingsOf(tree, parentOf(path)))); return
     }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "c") {
+      if (window.getSelection()?.toString()) return // let a normal copy of selected text work
+      e.preventDefault()
+      const parent = selection.paths.length > 0 ? selection.parent : parentOf(path)
+      const order = siblingsOf(tree, parent)
+      const paths = selection.paths.length > 0 ? [...selection.paths].sort((a, b) => order.indexOf(a) - order.indexOf(b)) : [path]
+      void clip.copyPaths(paths); return
+    }
     if (e.key === "Delete" || (e.metaKey && e.key === "Backspace")) {
       e.preventDefault()
       // The selection when there is one (the focused row may have been deselected); otherwise the focused row.
       const rows = rowsOf(selection.paths.length > 0 ? selection.paths : [path])
       if (rows.length === 0 || busy) return
-      const why = deleteBlockFor(rows, parentOf(path))
+      const why = deleteBlockFor(rows, parentOf(rows[0].path))
       if (why) setErr({ message: why }); else setDeleting(rows)
     } else if (e.key === "F2" && entry && !entry.locked && writable && selection.paths.length < 2) {
       e.preventDefault(); startName({ kind: "rename", row: { path, depth: 0, entry } }, entry.name)
@@ -419,7 +438,9 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   const crumbs = target ? target.split("/") : []
   const targetRo = roDirs[target] === true
   const createBlock = createBlockReason(target)
-  const writeOff = busy || !!busyReason || targetRo || createBlock !== null
+  /** Upload stays on in a level-1 folder (it can replace existing files); New File/New Folder cannot add names there. */
+  const uploadOff = busy || !!busyReason || targetRo
+  const writeOff = uploadOff || createBlock !== null
   const whyOff = targetRo ? "ro-hint" : createBlock ? "prot-hint" : undefined
   const rootErr = typeof tree.children[""] === "object" && !Array.isArray(tree.children[""])
   const selRows = rowsOf(selection.paths)
@@ -436,11 +457,11 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
           <button type="button" className="font-mono text-blue-600 dark:text-blue-400 hover:underline" onClick={() => reveal(EXTLIB)}>{EXTLIB}</button> แทน
         </p>
       )}
-      {createBlock && !targetRo && <p id="prot-hint" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">🔒 {createBlock}</p>}
+      {createBlock && !targetRo && <p id="prot-hint" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">🔒 {target} เป็นโฟลเดอร์ระบบ/ตั้งค่าของ MID — ไฟล์ที่มีอยู่แทนที่ได้ด้วยการอัปโหลดหรือเปิดแก้ไข แต่เพิ่มไฟล์หรือโฟลเดอร์ใหม่ไม่ได้</p>}
       {target === EXTLIB && <p className="text-sm text-gray-600 dark:text-neutral-400">jar ใน extlib จะถูกลบตอน MID เริ่มทำงาน ถ้าไม่ได้ลงทะเบียนเป็น MID Server JAR File ใน instance</p>}
       {err && !open && !nameDialog && <ErrorNotice error={err} />}
 
-      <div data-testid="files-card" onKeyDown={onCardKey} {...dropHandlers(CARD, target, "upload")}
+      <div data-testid="files-card" ref={cardRef} onKeyDown={onCardKey} {...dropHandlers(CARD, target, "upload")}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(null) }}
         className={`${cardCls} relative overflow-hidden ${dragOver === CARD ? "ring-2 ring-inset ring-blue-500" : ""}`}>
         <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 dark:border-neutral-700">
@@ -456,7 +477,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
           <div className="flex shrink-0 items-center gap-1">
             <input ref={fileInput} type="file" multiple hidden aria-label="Choose Files to Upload"
               onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; void uploadFiles(target, fs) }} />
-            <button type="button" title="Upload" aria-label="Upload" disabled={writeOff} aria-describedby={whyOff}
+            <button type="button" title="Upload" aria-label="Upload" disabled={uploadOff} aria-describedby={targetRo ? "ro-hint" : undefined}
               onClick={() => fileInput.current?.click()} className={toolBtn}><IconUpload /></button>
             <button type="button" title="New File" aria-label="New File" disabled={writeOff} aria-describedby={whyOff}
               onClick={() => startName({ kind: "newFile" }, "")} className={toolBtn}><IconFilePlus /></button>
@@ -492,7 +513,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
             onDelete={() => setDeleting(selRows)} onClear={() => setSelection(EMPTY_SELECTION)} />
         )}
         <p className="border-t border-gray-100 px-3 py-1.5 text-xs text-gray-400 dark:border-neutral-700 dark:text-neutral-500">
-          ลากไฟล์จากเครื่องมาวางเพื่ออัปโหลด (สูงสุด 50 MB) · ลากไปวางบนโฟลเดอร์เพื่อย้าย · ลากออกไปวางบน Desktop เพื่อดาวน์โหลด (Chrome/Edge)
+          ลากไฟล์จากเครื่องมาวางเพื่ออัปโหลด (สูงสุด 50 MB) · ลากไปวางบนโฟลเดอร์เพื่อย้าย · ลากออกไปวางบน Desktop เพื่อดาวน์โหลด (Chrome/Edge) · Cmd/Ctrl+V เพื่ออัปโหลดไฟล์ที่คัดลอกจากเครื่อง
         </p>
       </div>
 
@@ -503,6 +524,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
           onRename={() => startName({ kind: "rename", row: menu.row }, menu.row.entry.name)}
           onDelete={() => setDeleting([menu.row])}
           onZip={() => void downloadZip(parentOf(menu.row.path), [menu.row.entry.name])}
+          onCopyPath={() => void clip.copyPaths([menu.row.path])}
           onOpenConfig={onOpenConfig} />
       )}
 

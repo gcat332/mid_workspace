@@ -58,3 +58,17 @@ export function zipFilename(midName: string, dir: string, names: string[]): stri
 /** Chrome's DownloadURL drag format ("mime:filename:url"); a ":" in the filename would break its parsing, so it becomes "_". */
 export const downloadUrlData = (filename: string, absoluteUrl: string) =>
   `application/octet-stream:${filename.replaceAll(":", "_")}:${absoluteUrl}`
+
+/**
+ * Upload into a level-1 folder may only replace files that already exist there (server: assertCanCreate).
+ * Returns the names to refuse and the Thai reason, or null when nothing is refused. `listing` null = unknown, so all are refused.
+ */
+export function uploadBlockReason(dir: string, names: string[], listing: Entry[] | null): { names: string[]; message: string } | null {
+  if (!PROTECTED_TREES.some((t) => under(dir, t))) return null
+  const refused = names.filter((n) => !listing?.some((e) => e.name === n && e.type === "file"))
+  if (refused.length === 0) return null
+  return {
+    names: refused,
+    message: `อัปโหลดไม่ได้: ${refused.join(", ")} เป็นชื่อใหม่ใน ${dir} ซึ่งเป็นโฟลเดอร์ระบบ/ตั้งค่าของ MID — อัปโหลดได้เฉพาะไฟล์ที่ชื่อตรงกับไฟล์เดิมเพื่อแทนที่`,
+  }
+}
