@@ -2,6 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { execFileSync } from "node:child_process"
+import { randomBytes } from "node:crypto"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -75,29 +76,67 @@ describe("zipStream", () => {
     expect(closed).toBe(true)
   })
 
-  it("memory stays flat for a 100 MB source streamed in 64 KiB chunks", async () => {
-    const chunk = Buffer.alloc(64 * 1024, "x")
+  it("close failure does not mask the source error", async () => {
+    const bad: ZipSource = {
+      name: "bad.txt",
+      mtime: new Date(),
+      open: async () => ({
+        stream: (async function* () {
+          yield Buffer.from("partial")
+          throw new Error("boom")
+        })(),
+        close: async () => { throw new Error("close failed") },
+      }),
+    }
+    await expect(toFile(zipStream([bad]))).rejects.toThrow(/boom/)
+  })
+
+  it("cancelling mid-entry closes the source exactly once", async () => {
+    let closed = 0
+    const chunk = randomBytes(64 * 1024)
+    const open = async () => ({
+      stream: (async function* () {
+        for (;;) yield chunk
+      })(),
+      close: async () => { closed++ },
+    })
+    const reader = zipStream([{ name: "inf.bin", mtime: new Date(), open }]).getReader()
+    for (let i = 0; i < 5; i++) await reader.read()
+    await reader.cancel()
+    expect(closed).toBe(1)
+  })
+
+  it("memory stays flat for a 100 MB incompressible source streamed in 64 KiB chunks", async () => {
+    const pool = randomBytes(64 * 1024)
     const total = 100 * 1024 * 1024
     const open = async () => ({
       stream: (async function* () {
-        for (let n = 0; n < total; n += chunk.length) yield chunk
+        let i = 0
+        for (let n = 0; n < total; n += pool.length) {
+          pool.writeUInt32LE(i++, 0) // vary content
+          yield Buffer.from(pool)
+        }
       })(),
       close: async () => {},
     })
+    const used = () => { const m = process.memoryUsage(); return m.heapUsed + m.arrayBuffers + m.external }
     global.gc?.()
-    const before = process.memoryUsage().heapUsed
+    const before = used()
     let peak = 0
+    let bytes = 0
     const file = path.join(tmp, "big.zip")
     const out = fs.createWriteStream(file)
     const rs = zipStream([{ name: "big.bin", mtime: new Date(), open }]).getReader()
     for (;;) {
       const { done, value } = await rs.read()
       if (done) break
+      bytes += value.length
       if (!out.write(value)) await new Promise<void>((r) => out.once("drain", () => r()))
-      peak = Math.max(peak, process.memoryUsage().heapUsed)
+      peak = Math.max(peak, used())
     }
     await new Promise<void>((r) => out.end(() => r()))
-    expect(peak - before).toBeLessThan(64 * 1024 * 1024)
+    expect(bytes).toBeGreaterThan(90 * 1024 * 1024) // really incompressible
+    expect(peak - before).toBeLessThan(75 * 1024 * 1024) // GC lag on garbage chunks; a buffering impl exceeds 100 MB
     expect(execFileSync("unzip", ["-t", file], { maxBuffer: 1 << 20 }).toString()).toMatch(/No errors detected/)
   }, 60_000)
 })

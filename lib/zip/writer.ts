@@ -40,6 +40,7 @@ async function* build(sources: AsyncIterable<ZipSource> | Iterable<ZipSource>): 
       handle = await (s as Extract<ZipSource, { open: unknown }>).open()
       if (!handle) continue
     }
+    let failed = true
     try {
       check(offset)
       const entryOffset = offset
@@ -71,8 +72,13 @@ async function* build(sources: AsyncIterable<ZipSource> | Iterable<ZipSource>): 
         yield emit(Buffer.concat([u32(0x08074b50), u32(0), u32(0), u32(0)]))
       }
       done.push({ name, time, date, crc, csize, size, offset: entryOffset, dir: isDir })
+      failed = false
     } finally {
-      if (handle) await handle.close()
+      // a close failure must never replace an in-flight error
+      if (handle) {
+        if (failed) await handle.close().catch(() => {})
+        else await handle.close()
+      }
     }
   }
 
