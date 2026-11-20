@@ -110,7 +110,6 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
 
   const setF = <K extends keyof Form>(k: K, v: Form[K]) => { setSaved(false); setForm({ ...form, [k]: v }) }
   const heapOk = Number.isInteger(form.heapMb) && form.heapMb >= MIN_HEAP_MB && form.heapMb <= MAX_HEAP_MB
-  const heapChanged = form.heapMb !== data.form.heapMb
   const stale = err?.code === "stale"
 
   async function pickBackup(id: string) {
@@ -166,13 +165,10 @@ export function ConfigTab({ midName, busyReason = null, canRestart, onRestart }:
             <div>
               <label className={`${fieldCls} block`}>Heap (MB)
                 <input className={input} type="number" min={MIN_HEAP_MB} max={MAX_HEAP_MB} step={64} value={Number.isNaN(form.heapMb) ? "" : form.heapMb}
-                  onChange={(e) => setF("heapMb", e.target.valueAsNumber)} aria-invalid={!heapOk} aria-describedby="heap-range heap-note" /></label>
+                  onChange={(e) => setF("heapMb", e.target.valueAsNumber)} aria-invalid={!heapOk} aria-describedby="heap-range" /></label>
               <p id="heap-range" className="mt-1 text-xs text-gray-500">{MIN_HEAP_MB}–{MAX_HEAP_MB} MB</p>
             </div>
             {!heapOk && <p className="text-xs text-red-700 lg:col-span-2">RAM ต้องเป็นจำนวนเต็ม {MIN_HEAP_MB}-{MAX_HEAP_MB} MB</p>}
-            <p id="heap-note" className={`text-xs lg:col-span-2 ${heapChanged ? "text-amber-700" : "text-gray-500"}`}>
-              เปลี่ยน RAM แล้ว ระบบจะเขียน systemd unit ของ MID นี้ใหม่จากแม่แบบของ MidHub (unit ที่แก้เองบนเครื่องจะถูกทับ)
-            </p>
           </fieldset>
 
           <fieldset className={sectionCls}>

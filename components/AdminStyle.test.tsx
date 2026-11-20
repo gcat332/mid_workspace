@@ -82,6 +82,8 @@ describe("Configuration form", () => {
     expect(fieldsOf(2)).toEqual(["Use Proxy", "Proxy Host", "Proxy Port", "Proxy Username", "Proxy Password"])
     // Instance URL spans the full row; the heap range is helper text, not part of the label.
     expect(screen.getByText("Instance URL").closest("label")!.className).toContain("lg:col-span-2")
-    expect(screen.getByText(/256–8192 MB/)).toBeTruthy()
+    expect(screen.getByText(/256–2048 MB/)).toBeTruthy()
+    // No unit-rewrite warning under the heap field (removed on request 2026-11-20).
+    expect(screen.queryByText(/systemd unit/)).toBeNull()
   })
 })

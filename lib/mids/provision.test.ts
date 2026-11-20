@@ -79,7 +79,7 @@ describe("configureMid", () => {
     await expect(configureMid("new1", { ...INPUT, logFiles: 11 })).rejects.toMatchObject({ code: "invalid_request" })
     await expect(configureMid("new1", { ...INPUT, logFiles: 0 })).rejects.toMatchObject({ code: "invalid_request" })
     await expect(configureMid("new1", { ...INPUT, heapMb: 100 })).rejects.toMatchObject({ code: "invalid_request" })
-    await expect(configureMid("new1", { ...INPUT, heapMb: 9000 })).rejects.toMatchObject({ code: "invalid_request" })
+    await expect(configureMid("new1", { ...INPUT, heapMb: 2049 })).rejects.toMatchObject({ code: "invalid_request" })
     expect(rd("new1", "agent/config.xml")).toBe(TEMPLATE)
   })
 

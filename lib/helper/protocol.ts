@@ -10,7 +10,7 @@ export type HelperResponse = { ok: true } | { ok: false; code: HelperErrorCode; 
 
 export const HELPER_OPS = ["start", "stop", "restart", "installUnit", "removeUnit", "fixOwnership"] as const
 export const MIN_HEAP_MB = 256
-export const MAX_HEAP_MB = 8192
+export const MAX_HEAP_MB = 2048
 export const MAX_REQUEST_BYTES = 4096
 export const HELPER_ERROR_CODES: readonly HelperErrorCode[] = ["invalid_name", "invalid_request", "quota_full", "not_found", "systemctl_failed", "fix_ownership_failed", "busy", "internal"]
 export const READ_DEADLINE_MS = 10_000

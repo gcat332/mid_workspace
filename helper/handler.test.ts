@@ -76,8 +76,8 @@ describe("validation", () => {
   it("rejects bad names", async () => {
     for (const name of ["../x", "A", "a", "-ab", "a b"]) expect(await handleRequest({ op: "start", name }, deps())).toMatchObject({ ok: false, code: "invalid_name" })
   })
-  it("rejects heapMb outside 256-8192 or non-integer", async () => {
-    for (const heapMb of [100, 70000, 1024.5, "1024", null]) {
+  it("rejects heapMb outside 256-2048 or non-integer", async () => {
+    for (const heapMb of [100, 2049, 4096, 70000, 1024.5, "1024", null]) {
       expect(await handleRequest({ op: "installUnit", name: "abc", heapMb }, deps())).toMatchObject({ ok: false, code: "invalid_request" })
     }
     expect(fs.readdirSync(path.join(tmp, "systemd"))).toEqual([])

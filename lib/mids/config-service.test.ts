@@ -223,7 +223,7 @@ describe("saveForm", () => {
     expect(db.backups).toHaveLength(0)
   })
   it("stale baseHash -> 409 and nothing written", async () => {
-    const form = { url: "https://n/", username: "svc", midName: "x", useProxy: false, proxyHost: "", proxyPort: "", proxyUser: "", heapMb: 4096 }
+    const form = { url: "https://n/", username: "svc", midName: "x", useProxy: false, proxyHost: "", proxyPort: "", proxyUser: "", heapMb: 2048 }
     await expect(saveForm("m1", form, "nope", sha(WRAP), user)).rejects.toMatchObject({ code: "stale" })
     expect(rd(xmlPath)).toBe(XML)
     expect(rd(wrapPath)).toBe(WRAP)
