@@ -93,7 +93,7 @@ describe("zipStream", () => {
     for (;;) {
       const { done, value } = await rs.read()
       if (done) break
-      if (!out.write(value)) await new Promise((r) => out.once("drain", r))
+      if (!out.write(value)) await new Promise<void>((r) => out.once("drain", () => r()))
       peak = Math.max(peak, process.memoryUsage().heapUsed)
     }
     await new Promise<void>((r) => out.end(() => r()))
