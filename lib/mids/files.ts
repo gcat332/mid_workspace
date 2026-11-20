@@ -28,7 +28,7 @@ export type FileEntry = {
   readOnly: boolean
   /** The entry is a symlink (rename/delete act on the link itself). */
   symlink: boolean
-  /** Server always refuses rename/delete (program dir, config file, or a folder containing one). */
+  /** Server always refuses rename/delete (program dir, config file, protected system/config path, or a folder containing one). */
   locked: boolean
   /** Contents are never served here (config.xml: use the config tab). */
   secret: boolean
@@ -59,9 +59,17 @@ async function ctxFor(name: string): Promise<Ctx> {
     roDirs.add(await resolveMidPath(name, `agent/${d}`))
   }
   const protTrees = new Set<string>(), protDirs = new Set<string>()
-  for (const t of PROTECTED_TREES) for (const x of await both(t)) protTrees.add(x)
-  for (const t of PROTECTED_DIRS) for (const x of await both(t)) protDirs.add(x)
-  const scriptDirs = await both(PROTECTED_SCRIPT_DIR)
+  // A symlinked-outside or dangling entry makes resolveMidPath throw; keep whichever variants still resolve
+  // (an entry relocated outside the MID is unreachable through the sandbox anyway).
+  const bothSafe = async (rel: string): Promise<string[]> => {
+    const out: string[] = []
+    try { out.push(await resolveMidPath(name, rel)) } catch { /* unresolvable */ }
+    try { out.push(path.join(await resolveMidPath(name, path.posix.dirname(rel)), path.posix.basename(rel))) } catch { /* unresolvable */ }
+    return out
+  }
+  for (const t of PROTECTED_TREES) for (const x of await bothSafe(t)) protTrees.add(x)
+  for (const t of PROTECTED_DIRS) for (const x of await bothSafe(t)) protDirs.add(x)
+  const scriptDirs = await bothSafe(PROTECTED_SCRIPT_DIR)
   return { name, root, roDirs: [...roDirs], configFiles, configXml, protTrees: [...protTrees], protDirs: [...protDirs], scriptDirs }
 }
 
@@ -88,6 +96,8 @@ function isProtected(c: Ctx, abs: string): boolean {
 function assertNotContainer(c: Ctx, abs: string): void {
   if (abs === c.root || c.roDirs.some((d) => inside(abs, d))) throw roErr()
   if (c.configFiles.some((f) => inside(abs, f))) throw cfgErr()
+  // Strict containers only: the protected entries themselves are handled by isProtected (after the target's read_only check).
+  if ([...c.protTrees, ...c.protDirs].some((d) => d !== abs && inside(abs, d))) throw protErr()
 }
 
 /** Checks applied to the REAL location of every opened handle. */

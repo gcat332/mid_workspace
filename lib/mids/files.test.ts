@@ -511,4 +511,25 @@ describe("protected system/config paths", () => {
     fs.symlinkSync(path.join(m, "work/realagent"), path.join(m, "agent"))
     await rejects(remove("m1", "work/realagent/security"), "protected", 403)
   })
+  it("a protected dir symlinked outside the MID (and a dangling one) does not break listing/reading", async () => {
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "midhub-out-"))
+    try {
+      fs.rmSync(path.join(m, "agent/logs"), { recursive: true })
+      fs.symlinkSync(out, path.join(m, "agent/logs"))
+      fs.symlinkSync("/nonexistent-zzz", path.join(m, "agent/work"))
+      await listDir("m1", "agent")
+      expect((await readText("m1", "work/note.txt")).content).toBe("hello")
+    } finally {
+      fs.rmSync(out, { recursive: true, force: true })
+    }
+  })
+  it("a folder containing a relocated protected dir is locked and refused", async () => {
+    fs.mkdirSync(path.join(m, "data"))
+    fs.renameSync(path.join(m, "agent/security"), path.join(m, "data/sec"))
+    fs.symlinkSync(path.join(m, "data/sec"), path.join(m, "agent/security"))
+    expect((await listDir("m1", "")).find((e) => e.name === "data")?.locked).toBe(true)
+    await rejects(remove("m1", "data"), "protected", 403)
+    await rejects(rename("m1", "data", "d2"), "protected", 403)
+    expect(fs.existsSync(path.join(m, "data/sec/agent_keystore"))).toBe(true)
+  })
 })
