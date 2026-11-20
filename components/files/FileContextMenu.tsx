@@ -14,6 +14,8 @@ type Props = {
   onOpen: () => void
   onRename: () => void
   onDelete: () => void
+  /** Zip this folder (offered on folder rows only). */
+  onZip: () => void
   onOpenConfig: () => void
   onClose: () => void
 }
@@ -27,11 +29,12 @@ const danger = `${item} text-red-600 hover:bg-red-50 focus:bg-red-50 dark:text-r
  * opened or downloaded, `locked` entries cannot be renamed or deleted, `config` files link to the Configuration tab.
  * Closes on Esc, an outside press, scroll or resize.
  */
-export function FileContextMenu({ x, y, entry, downloadHref, writeDisabled, onOpen, onRename, onDelete, onOpenConfig, onClose }: Props) {
+export function FileContextMenu({ x, y, entry, downloadHref, writeDisabled, onOpen, onRename, onDelete, onZip, onOpenConfig, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const closeRef = useRef(onClose)
   useEffect(() => { closeRef.current = onClose })
   const readable = entry.type === "file" && !entry.secret
+  const isDir = entry.type === "dir"
 
   // Keep the menu inside the viewport.
   useLayoutEffect(() => {
@@ -77,10 +80,11 @@ export function FileContextMenu({ x, y, entry, downloadHref, writeDisabled, onOp
       className="fixed z-50 min-w-44 rounded-lg border border-gray-200 bg-white py-1 text-sm shadow-xl dark:border-neutral-700 dark:bg-neutral-800">
       {readable && <button type="button" role="menuitem" className={normal} onClick={act(onOpen)}>Open</button>}
       {readable && <a role="menuitem" className={normal} href={downloadHref} onClick={onClose}>Download</a>}
+      {isDir && <button type="button" role="menuitem" className={normal} onClick={act(onZip)}>Download .zip</button>}
       {entry.config && <button type="button" role="menuitem" className={normal} onClick={act(onOpenConfig)}>Edit in Configuration</button>}
       {!entry.locked && <button type="button" role="menuitem" disabled={writeDisabled} className={normal} onClick={act(onRename)}>Rename</button>}
       {!entry.locked && <button type="button" role="menuitem" disabled={writeDisabled} className={danger} onClick={act(onDelete)}>Delete</button>}
-      {!readable && !entry.config && entry.locked && <p className="px-3 py-1.5 text-xs text-gray-400 dark:text-neutral-500">ไม่มีคำสั่งสำหรับรายการนี้</p>}
+      {!readable && !isDir && !entry.config && entry.locked && <p className="px-3 py-1.5 text-xs text-gray-400 dark:text-neutral-500">ไม่มีคำสั่งสำหรับรายการนี้</p>}
     </div>,
     document.body,
   )

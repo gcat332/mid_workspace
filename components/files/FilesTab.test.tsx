@@ -20,6 +20,9 @@ const E = (name: string, type: "file" | "dir", f: Flags = {}) =>
   ({ name, type, size: 10, mtime: "2026-11-19T00:00:00Z", readOnly: false, symlink: false, locked: false, secret: false, config: false, ...f })
 let FS: Record<string, { entries: ReturnType<typeof E>[]; readOnly: boolean }>
 let putReply: () => Response
+let deleteReply: (path: string | null) => Response
+let zipReply: () => Response
+const zipUrls: string[] = []
 
 type Call = { method: string; path: string | null; content: boolean; body: unknown }
 const calls: Call[] = []
@@ -35,10 +38,14 @@ beforeEach(() => {
     "agent/extlib": { entries: [E("a.jar", "file")], readOnly: false },
   }
   putReply = () => Response.json({ hash: "h2" })
+  deleteReply = () => Response.json({})
+  zipReply = () => Response.json({ files: 2, bytes: 20 })
+  zipUrls.length = 0
   calls.length = 0
   api.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
     const u = new URL(url, "http://x")
     const method = init?.method ?? "GET"
+    if (u.pathname.endsWith("/files/zip")) { zipUrls.push(url); return zipReply() }
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : init?.body
     calls.push({ method, path: u.searchParams.get("path"), content: u.searchParams.get("content") === "1", body })
     if (method === "GET" && u.searchParams.get("content") === "1") return Response.json({ content: "hello", hash: "h1" })
@@ -47,6 +54,7 @@ beforeEach(() => {
       return d ? Response.json(d) : Response.json({ code: "not_found", message: "ไม่พบ" }, { status: 404 })
     }
     if (method === "PUT") return putReply()
+    if (method === "DELETE") return deleteReply(u.searchParams.get("path"))
     return Response.json({})
   })
 })
@@ -380,5 +388,191 @@ describe("FilesTab create and upload", () => {
     drop(card(), [file("one.jar")])
     expect((await screen.findByRole("alert")).textContent).toContain("กำลังอัปเกรด MID")
     expect(FakeXHR.all).toHaveLength(0)
+  })
+})
+
+describe("FilesTab multi-select", () => {
+  const ctrl = { ctrlKey: true }
+  const rowEl = (container: HTMLElement, path: string) => container.querySelector(`[data-row="${path}"]`) as HTMLElement
+  const rowBtn = (container: HTMLElement, path: string) => rowEl(container, path).querySelector("button") as HTMLButtonElement
+  /** Expand agent/extlib with four jars; the focus is on a.jar. */
+  async function inExtlib() {
+    FS["agent/extlib"].entries = ["a.jar", "b.jar", "c.jar", "d.jar"].map((n) => E(n, "file"))
+    const r = await setup()
+    await expandAgent()
+    fireEvent.click(row("extlib"))
+    await screen.findByRole("button", { name: "a.jar" })
+    calls.length = 0
+    return r
+  }
+  const bar = () => screen.queryByText(/^เลือก \d+ รายการ$/)
+
+  it("Ctrl+click toggles rows without opening an editor; the bar shows from 2 rows; Esc clears", async () => {
+    const { container } = await inExtlib()
+    fireEvent.click(row("a.jar"), ctrl)
+    expect(bar()).toBeNull()
+    fireEvent.click(row("c.jar"), ctrl)
+    expect(screen.getByText("เลือก 2 รายการ")).toBeTruthy()
+    expect(rowEl(container, "agent/extlib/a.jar").getAttribute("aria-selected")).toBe("true")
+    expect(rowEl(container, "agent/extlib/b.jar").getAttribute("aria-selected")).toBe("false")
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(calls.some((c) => c.content)).toBe(false)
+    rowBtn(container, "agent/extlib/c.jar").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" })
+    expect(bar()).toBeNull()
+    expect(rowEl(container, "agent/extlib/a.jar").getAttribute("aria-selected")).toBe("false")
+  })
+
+  it("Shift+click selects the range in display order; Ctrl+click in another folder starts over", async () => {
+    await inExtlib()
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("c.jar"), { shiftKey: true })
+    expect(screen.getByText("เลือก 3 รายการ")).toBeTruthy()
+    fireEvent.click(row("notes.txt"), ctrl)
+    expect(bar()).toBeNull()
+  })
+
+  it("a plain click still opens the file", async () => {
+    await inExtlib()
+    fireEvent.click(row("a.jar"))
+    await screen.findByRole("dialog", { name: "agent/extlib/a.jar" })
+  })
+
+  it("Delete in the bar confirms, deletes in order and reloads the folder", async () => {
+    await inExtlib()
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("b.jar"), ctrl)
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+    const dlg = await screen.findByRole("dialog", { name: "Delete 2 Items?" })
+    fireEvent.click(within(dlg).getByRole("button", { name: "Delete" }))
+    await waitFor(() => expect(listed("agent/extlib")).toBe(true))
+    expect(sent("DELETE").map((c) => c.path)).toEqual(["agent/extlib/a.jar", "agent/extlib/b.jar"])
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("a refused delete stops the batch and reports the progress with the server message", async () => {
+    await inExtlib()
+    deleteReply = (p) => p === "agent/extlib/b.jar" ? Response.json({ code: "protected", message: "ลบไม่ได้: ไฟล์ถูกป้องกัน" }, { status: 403 }) : Response.json({})
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("c.jar"), { shiftKey: true })
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+    const dlg = await screen.findByRole("dialog", { name: "Delete 3 Items?" })
+    fireEvent.click(within(dlg).getByRole("button", { name: "Delete" }))
+    const alert = await screen.findByRole("alert")
+    expect(alert.textContent).toContain("ลบแล้ว 1 จาก 3 รายการ")
+    expect(alert.textContent).toContain("ลบไม่ได้: ไฟล์ถูกป้องกัน")
+    expect(sent("DELETE").map((c) => c.path)).toEqual(["agent/extlib/a.jar", "agent/extlib/b.jar"])
+  })
+
+  it("bar Delete is disabled with a reason for a locked entry or while a job runs", async () => {
+    await setup()
+    await expandAgent()
+    fireEvent.click(row(/^x\.xml/), { ...ctrl })
+    fireEvent.click(row(/^config\.xml/), ctrl)
+    const del = screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement
+    expect(del.disabled).toBe(true)
+    expect(screen.getByText(/ลบไม่ได้/)).toBeTruthy()
+    cleanup()
+
+    FS["agent/extlib"].entries = [E("a.jar", "file"), E("b.jar", "file")]
+    await setup({ busyReason: "กำลังรีสตาร์ต MID" })
+    await expandAgent()
+    fireEvent.click(row("extlib"))
+    await screen.findByRole("button", { name: "a.jar" })
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("b.jar"), ctrl)
+    expect((screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getAllByText(/กำลังรีสตาร์ต MID/).length).toBeGreaterThan(1)
+  })
+
+  it("Download .zip checks first; a 413 shows the message and does not navigate", async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    await inExtlib()
+    zipReply = () => Response.json({ code: "too_large", message: "ใหญ่เกิน 1 GB" }, { status: 413 })
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("b.jar"), ctrl)
+    fireEvent.click(screen.getByRole("button", { name: "Download .zip" }))
+    expect((await screen.findByRole("alert")).textContent).toContain("ใหญ่เกิน 1 GB")
+    expect(zipUrls).toEqual(["/mids/m1/files/zip?dir=agent%2Fextlib&name=a.jar&name=b.jar&check=1"])
+    expect(click).not.toHaveBeenCalled()
+    click.mockRestore()
+  })
+
+  it("Download .zip navigates to the zip URL after a successful check", async () => {
+    const hrefs: string[] = []
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { hrefs.push(`${this.getAttribute("href")}|${this.download}`) })
+    await inExtlib()
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("b.jar"), ctrl)
+    fireEvent.click(screen.getByRole("button", { name: "Download .zip" }))
+    await waitFor(() => expect(hrefs).toHaveLength(1))
+    expect(hrefs[0]).toBe("/midhub/api/mids/m1/files/zip?dir=agent%2Fextlib&name=a.jar&name=b.jar|extlib.zip")
+    click.mockRestore()
+  })
+
+  it("only folder rows offer Download .zip in the menu, and it zips that folder", async () => {
+    const hrefs: string[] = []
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { hrefs.push(`${this.getAttribute("href")}|${this.download}`) })
+    await setup()
+    fireEvent.click(screen.getByRole("button", { name: "More Actions: notes.txt" }))
+    expect(within(screen.getByRole("menu")).queryByRole("menuitem", { name: "Download .zip" })).toBeNull()
+    fireEvent.keyDown(document, { key: "Escape" })
+    fireEvent.click(screen.getByRole("button", { name: "More Actions: agent" }))
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Download .zip" }))
+    await waitFor(() => expect(hrefs).toHaveLength(1))
+    expect(hrefs[0]).toBe("/midhub/api/mids/m1/files/zip?dir=&name=agent|agent.zip")
+    click.mockRestore()
+  })
+
+  it("Del opens the delete confirm for the selection", async () => {
+    const { container } = await inExtlib()
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("b.jar"), ctrl)
+    rowBtn(container, "agent/extlib/b.jar").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "Delete" })
+    await screen.findByRole("dialog", { name: "Delete 2 Items?" })
+  })
+
+  it("F2 renames one unlocked row; nothing for a locked row or two selected", async () => {
+    const { container } = await inExtlib()
+    rowBtn(container, "agent/extlib/b.jar").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "F2" })
+    await screen.findByRole("dialog", { name: "Rename b.jar" })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("b.jar"), ctrl)
+    rowBtn(container, "agent/extlib/b.jar").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "F2" })
+    expect(screen.queryByRole("dialog")).toBeNull()
+
+    rowBtn(container, "agent/config.xml").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "F2" })
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("Enter on a focused row is a plain click; Ctrl+A selects the focused row's siblings", async () => {
+    const { container } = await inExtlib()
+    rowBtn(container, "agent/extlib/b.jar").focus()
+    fireEvent.keyDown(document.activeElement!, { key: "a", ctrlKey: true })
+    expect(screen.getByText("เลือก 4 รายการ")).toBeTruthy()
+    fireEvent.keyDown(document.activeElement!, { key: "Enter" })
+    await screen.findByRole("dialog", { name: "agent/extlib/b.jar" })
+    expect(bar()).toBeNull()
+  })
+
+  it("keys typed in the name dialog do nothing to the tree", async () => {
+    const { container } = await inExtlib()
+    fireEvent.click(row("a.jar"), ctrl)
+    fireEvent.click(row("b.jar"), ctrl)
+    rowBtn(container, "agent/extlib/b.jar").focus()
+    fireEvent.click(screen.getByRole("button", { name: "New File" }))
+    const dlg = await screen.findByRole("dialog", { name: "New File" })
+    const input = within(dlg).getByRole("textbox", { name: "Name" })
+    fireEvent.keyDown(input, { key: "Delete" })
+    fireEvent.keyDown(input, { key: "Escape" })
+    expect(screen.queryByRole("dialog", { name: "Delete 2 Items?" })).toBeNull()
+    expect(screen.getByText("เลือก 2 รายการ")).toBeTruthy()
   })
 })

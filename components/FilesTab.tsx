@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, type DragEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react"
 import { ConfirmDialog } from "./ConfirmDialog"
 import { ErrorNotice, readApiError, type ApiError } from "./ErrorNotice"
 import { Modal } from "./Modal"
@@ -8,9 +8,12 @@ import { IconFilePlus, IconFolderPlus, IconRefresh, IconUpload } from "./icons"
 import { FileContextMenu } from "./files/FileContextMenu"
 import { FileEditorModal } from "./files/FileEditorModal"
 import { FileTree } from "./files/FileTree"
+import { SelectionBar } from "./files/SelectionBar"
 import { API_BASE, apiFetch, apiUpload } from "@/lib/ui/api"
 import { cardCls, ghostBtnCls, inputCls, labelCls } from "@/lib/ui/classes"
-import { joinPath as join, parentOf, toggle, type Entry, type TreeRow, type TreeState } from "@/lib/ui/file-tree"
+import { zipFilename, zipUrl } from "@/lib/ui/file-drag"
+import { joinPath as join, parentOf, siblingsOf, toggle, type Entry, type TreeRow, type TreeState } from "@/lib/ui/file-tree"
+import { clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, type Selection } from "@/lib/ui/selection"
 
 type Open = { path: string; content: string; hash: string; draft: string; readOnly: boolean; config: boolean }
 type NameDialog = { kind: "rename"; row: TreeRow } | { kind: "mkdir" } | { kind: "newFile" }
@@ -28,6 +31,7 @@ const under = (p: string, dir: string) => p === dir || p.startsWith(`${dir}/`)
 const CARD = "\0card"
 const EMPTY_TREE: TreeState = { children: {}, expanded: new Set() }
 const toolBtn = "rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-500 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-blue-300"
+const baseName = (p: string) => p.split("/").pop() ?? p
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files")
 
 type Props = { midName: string; /** Non-null while a lifecycle job runs: writes are disabled and this is the visible reason. */ busyReason?: string | null; /** Switch the MID panel to the config tab (config.xml / wrapper-override.conf rows). */ onOpenConfig: () => void }
@@ -50,7 +54,9 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   const [open, setOpen] = useState<Open | null>(null)
   const [menu, setMenu] = useState<{ row: TreeRow; x: number; y: number } | null>(null)
   const [nameDialog, setNameDialog] = useState<NameDialog | null>(null)
-  const [deleting, setDeleting] = useState<TreeRow | null>(null)
+  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION)
+  const picked = useMemo(() => new Set(selection.paths), [selection])
+  const [deleting, setDeleting] = useState<TreeRow[]>([])
   const [overwrite, setOverwrite] = useState<File | null>(null)
   const overwriteAnswer = useRef<((ok: boolean) => void) | null>(null)
   const [upload, setUpload] = useState<Upload | null>(null)
@@ -74,6 +80,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
       const j = (await res.json()) as { entries: Entry[]; readOnly?: boolean }
       setTree((t) => ({ ...t, children: { ...t.children, [d]: j.entries } }))
       setRoDirs((r) => ({ ...r, [d]: j.readOnly === true }))
+      setSelection((s) => (s.parent === d ? pruneSelection(s, j.entries.map((e) => join(d, e.name))) : s))
       return j.entries
     } catch {
       setTree((t) => ({ ...t, children: { ...t.children, [d]: { error: NETWORK.message } } }))
@@ -84,7 +91,7 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setTree(EMPTY_TREE); setRoDirs({}); setTarget(""); setSelected(null)
+    setTree(EMPTY_TREE); setRoDirs({}); setTarget(""); setSelected(null); setSelection(EMPTY_SELECTION)
     void load("")
   }, [load])
 
@@ -111,7 +118,17 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
     setTarget(path); setSelected(path)
   }
 
-  function onRowClick(row: TreeRow) {
+  const entryOf = (path: string): Entry | undefined => {
+    const list = tree.children[parentOf(path)]
+    return Array.isArray(list) ? list.find((e) => e.name === baseName(path)) : undefined
+  }
+  const rowsOf = (paths: string[]): TreeRow[] =>
+    paths.flatMap((path) => { const entry = entryOf(path); return entry ? [{ path, depth: 0, entry }] : [] })
+
+  function onRowClick(row: TreeRow, mods: { toggle: boolean; range: boolean }) {
+    const siblings = siblingsOf(tree, parentOf(row.path))
+    if (mods.toggle || mods.range) { setSelection((s) => clickSelect(s, row.path, mods, siblings)); return }
+    setSelection(clickSelect(EMPTY_SELECTION, row.path, mods, siblings))
     setSelected(row.path)
     if (row.entry.type === "dir") {
       setTarget(row.path)
@@ -228,6 +245,62 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
     },
   })
 
+  /** Delete one entry or a selection, one request at a time; the first refusal stops the rest. */
+  async function deleteRows(rows: TreeRow[]) {
+    if (busyReason) { setErr({ message: busyReason }); setDeleting([]); return }
+    setBusy(true); setErr(null)
+    let done = 0
+    let failure: ApiError | null = null
+    try {
+      for (const r of rows) {
+        const res = await apiFetch(`${base}?path=${encodeURIComponent(r.path)}`, { method: "DELETE" })
+        if (!res.ok) { failure = await readApiError(res); break }
+        forget(r.path); done++
+      }
+    } catch { failure = NETWORK }
+    if (done > 0) await load(parentOf(rows[0].path))
+    setBusy(false); setDeleting([])
+    if (failure) setErr(rows.length > 1 ? { ...failure, message: `ลบแล้ว ${done} จาก ${rows.length} รายการ — ${failure.message}` } : failure)
+  }
+
+  /** Ask the server to check the size, then let the browser download the zip (the stream is never held in memory). */
+  async function downloadZip(dir: string, names: string[]) {
+    if (busy) return
+    setBusy(true); setErr(null)
+    try {
+      const res = await apiFetch(zipUrl(base, dir, names, true))
+      if (!res.ok) { setErr(await readApiError(res)); return }
+      const a = document.createElement("a")
+      a.href = `${API_BASE}${zipUrl(base, dir, names)}`
+      a.download = zipFilename(midName, dir, names)
+      document.body.appendChild(a); a.click(); a.remove()
+    } catch { setErr(NETWORK) } finally { setBusy(false) }
+  }
+
+  /** Keys while focus is on a tree row: Esc, Del, F2, Enter, Ctrl+A. Dialogs and the editor are outside the tree. */
+  function onTreeKey(e: KeyboardEvent) {
+    if (open || nameDialog || deleting.length > 0 || menu || e.altKey) return
+    const rowEl = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>("[data-row]")
+    const path = rowEl?.dataset.row
+    if (!rowEl || path === undefined || !e.currentTarget.contains(rowEl)) return
+    const entry = entryOf(path)
+    const writable = !busy && !busyReason
+    if (e.key === "Escape") { setSelection(EMPTY_SELECTION); return }
+    if (e.key === "Enter" && e.target === rowEl.querySelector("[data-row-main]") && entry) {
+      e.preventDefault(); onRowClick({ path, depth: 0, entry }, { toggle: false, range: false }); return
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+      e.preventDefault()
+      setSelection(selectAll(parentOf(path), siblingsOf(tree, parentOf(path)))); return
+    }
+    if (e.key === "Delete") {
+      const rows = rowsOf(picked.has(path) ? selection.paths : [path])
+      if (writable && rows.length > 0 && !rows.some((r) => r.entry.locked)) { e.preventDefault(); setDeleting(rows) }
+    } else if (e.key === "F2" && entry && !entry.locked && writable && selection.paths.length < 2) {
+      e.preventDefault(); startName({ kind: "rename", row: { path, depth: 0, entry } }, entry.name)
+    }
+  }
+
   function submitName() {
     const n = nameDraft.trim()
     if (!validName(n)) { setModalErr(BAD_NAME); return }
@@ -253,6 +326,8 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
   const targetRo = roDirs[target] === true
   const writeOff = busy || !!busyReason || targetRo
   const rootErr = typeof tree.children[""] === "object" && !Array.isArray(tree.children[""])
+  const selRows = rowsOf(selection.paths)
+  const deleteBlock = busyReason ?? (roDirs[selection.parent] ? "โฟลเดอร์นี้แก้ไขไม่ได้ ลบไม่ได้" : selRows.some((r) => r.entry.locked) ? "ลบไม่ได้: รายการที่เลือกมีไฟล์ที่ระบบล็อกไว้ เอาออกจากที่เลือกแล้วลองใหม่" : null)
   const nameTitle = nameDialog?.kind === "rename" ? `Rename ${nameDialog.row.entry.name}` : nameDialog?.kind === "mkdir" ? "New Folder" : "New File"
 
   return (
@@ -307,8 +382,15 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
         )}
 
         {!rootErr && (
-          <FileTree state={tree} selected={selected} dragOver={dragOver}
-            onRowClick={onRowClick} onMenu={(row, x, y) => setMenu({ row, x, y })} onOpenConfig={onOpenConfig} dropProps={(dir) => dropHandlers(dir, dir)} />
+          <div onKeyDown={onTreeKey}>
+            <FileTree state={tree} selected={selected} dragOver={dragOver} selection={picked}
+              onRowClick={onRowClick} onMenu={(row, x, y) => setMenu({ row, x, y })} onOpenConfig={onOpenConfig} dropProps={(dir) => dropHandlers(dir, dir)} />
+          </div>
+        )}
+        {selection.paths.length >= 2 && (
+          <SelectionBar count={selection.paths.length} deleteDisabledReason={deleteBlock} busy={busy}
+            onZip={() => void downloadZip(selection.parent, selection.paths.map(baseName))}
+            onDelete={() => setDeleting(selRows)} onClear={() => setSelection(EMPTY_SELECTION)} />
         )}
         <p className="border-t border-gray-100 px-3 py-1.5 text-xs text-gray-400 dark:border-neutral-700 dark:text-neutral-500">
           ลากไฟล์มาวางบนโฟลเดอร์เพื่ออัปโหลด (สูงสุด 50 MB ต่อไฟล์)
@@ -320,7 +402,8 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
           writeDisabled={busy || !!busyReason} onClose={() => setMenu(null)}
           onOpen={() => void openFile(menu.row.path, menu.row.entry.readOnly, menu.row.entry.config)}
           onRename={() => startName({ kind: "rename", row: menu.row }, menu.row.entry.name)}
-          onDelete={() => setDeleting(menu.row)}
+          onDelete={() => setDeleting([menu.row])}
+          onZip={() => void downloadZip(parentOf(menu.row.path), [menu.row.entry.name])}
           onOpenConfig={onOpenConfig} />
       )}
 
@@ -364,14 +447,11 @@ export function FilesTab({ midName, busyReason = null, onOpenConfig }: Props) {
         </ConfirmDialog>
       )}
 
-      {deleting && (
-        <ConfirmDialog title={`Delete ${deleting.entry.name}?`} danger busy={busy} confirmLabel="Delete" onCancel={() => setDeleting(null)}
-          onConfirm={() => {
-            const row = deleting
-            void run(() => apiFetch(`${base}?path=${encodeURIComponent(row.path)}`, { method: "DELETE" }), parentOf(row.path))
-              .then((ok) => { if (ok) forget(row.path); setDeleting(null) })
-          }}>
-          {deleting.entry.type === "dir" ? "โฟลเดอร์นี้และไฟล์ทั้งหมดข้างในจะถูกลบ กู้คืนไม่ได้" : "ไฟล์นี้จะถูกลบถาวร กู้คืนไม่ได้"}
+      {deleting.length > 0 && (
+        <ConfirmDialog title={deleting.length > 1 ? `Delete ${deleting.length} Items?` : `Delete ${deleting[0].entry.name}?`} danger busy={busy} confirmLabel="Delete" onCancel={() => setDeleting([])}
+          onConfirm={() => void deleteRows(deleting)}>
+          {deleting.length > 1 ? "รายการที่เลือกทั้งหมดจะถูกลบถาวร โฟลเดอร์จะถูกลบพร้อมไฟล์ข้างใน กู้คืนไม่ได้"
+            : deleting[0].entry.type === "dir" ? "โฟลเดอร์นี้และไฟล์ทั้งหมดข้างในจะถูกลบ กู้คืนไม่ได้" : "ไฟล์นี้จะถูกลบถาวร กู้คืนไม่ได้"}
         </ConfirmDialog>
       )}
     </div>
